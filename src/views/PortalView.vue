@@ -11,13 +11,13 @@ const store = usePrototypeStore()
 const registeredApps = computed(() => store.state.applications)
 
 const milestoneTasks = [
-  { code: 'M0-03', name: '单 PostgreSQL 集群逻辑隔离', owner: '平台研发', status: '已完成' },
-  { code: 'M0-04', name: '基础接入与标准事件部署档位', owner: '平台运维', status: '已完成' },
-  { code: 'M0-05', name: '参考应用可选事件迁移', owner: '接入工具', status: '已完成' },
-  { code: 'M0-06', name: '平台核心与投影权限边界', owner: '平台研发', status: '已完成' },
-  { code: 'M0-07', name: '配置与密钥占位校验', owner: '平台研发', status: '已完成' },
-  { code: 'M0-08', name: '生产组件锁与升级策略', owner: '平台运维', status: '已完成' },
-  { code: 'M0-09', name: '基础 CI 与公开契约门禁', owner: '平台研发', status: '已完成' },
+  { code: 'M1-01/02', name: 'authentik、Traefik 与可重复 OIDC 配置', owner: '平台运维', status: '已完成' },
+  { code: 'M1-03', name: 'Discovery、JWKS 缓存与本地验签', owner: '平台研发', status: '已完成' },
+  { code: 'M1-04/05', name: '应用登记、身份映射与权限 API', owner: '平台研发', status: '已完成' },
+  { code: 'M1-06/07', name: '版本化授权缓存与服务身份', owner: '接入工具', status: '已完成' },
+  { code: 'M1-08', name: '请求上下文、结构化日志与审计', owner: '平台研发', status: '已完成' },
+  { code: 'M1-09', name: '测试通知与可观察送达', owner: '平台研发', status: '已完成' },
+  { code: 'M1-10', name: '独立应用端到端接入认证', owner: '接入工具', status: '已完成' },
 ]
 
 const platformEntries = [
@@ -31,7 +31,7 @@ const platformEntries = [
 <template>
   <div class="page-shell portal-page">
     <PageHeader
-      eyebrow="PLATFORM IMPLEMENTATION · M1"
+      eyebrow="PLATFORM IMPLEMENTATION · M2"
       title="AI Hub 平台控制台"
       description="当前只建设平台公共能力。真实业务应用通过公开 API 和事件独立接入，不进入平台源码、数据库或发布制品。"
     >
@@ -44,23 +44,23 @@ const platformEntries = [
     <section class="attention-strip" aria-label="当前实施提醒">
       <span class="attention-strip__mark"><el-icon><CircleCheck /></el-icon></span>
       <div>
-        <strong>M0 已完成：本地门禁与远端 Required gate 均已通过</strong>
-        <small>公开仓库的 main 已启用分支保护；下一步从 M1-01 开始身份与 API 纵向链路。</small>
+        <strong>M1 已完成：身份与 API 运行时门禁已从全新环境通过</strong>
+        <small>OIDC、权限、服务身份、通知、审计和故障边界已验证；下一步进入 M2 可靠事件链路。</small>
       </div>
       <el-button text type="primary" @click="router.push('/platform/operations')">查看运行基线<el-icon><ArrowRight /></el-icon></el-button>
     </section>
 
     <div class="metric-grid page-section">
-      <MetricCard label="当前里程碑" value="M1" hint="身份与 API 纵向链路" icon="Flag" tone="blue" />
+      <MetricCard label="当前里程碑" value="M2" hint="可靠事件纵向链路" icon="Flag" tone="blue" />
       <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="均为中性认证配置" icon="Grid" tone="blue" />
       <MetricCard label="公开契约骨架" value="2" unit="份" hint="OpenAPI · AsyncAPI" icon="Document" tone="green" />
-      <MetricCard label="基线检查" value="9" unit="项" hint="远端 CI 已通过" icon="CircleCheck" tone="green" />
+      <MetricCard label="M1 任务" value="10" unit="项" hint="运行时验收通过" icon="CircleCheck" tone="green" />
     </div>
 
     <div class="work-grid page-section">
       <section class="surface-panel milestone-panel">
         <header class="panel-header">
-          <div><h2>M0 实施门禁</h2><p>按依赖顺序推进，不提前进入 M1 身份链路</p></div>
+          <div><h2>M1 实施门禁</h2><p>正式身份、API 与独立应用故障边界均已验证</p></div>
           <el-button text @click="router.push('/platform')">能力路线<el-icon><ArrowRight /></el-icon></el-button>
         </header>
         <div class="milestone-list">

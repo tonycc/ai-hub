@@ -17,7 +17,6 @@ COPY pyproject.toml uv.lock ./
 COPY backend/pyproject.toml backend/README.md ./backend/
 COPY sdk/python/pyproject.toml sdk/python/README.md ./sdk/python/
 COPY examples/standalone-app/pyproject.toml examples/standalone-app/README.md ./examples/standalone-app/
-COPY backend/src ./backend/src
 COPY sdk/python/src ./sdk/python/src
 COPY examples/standalone-app/src ./examples/standalone-app/src
 

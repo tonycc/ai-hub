@@ -1,0 +1,68 @@
+http:
+  middlewares:
+    common-security:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer
+    request-limit:
+      buffering:
+        maxRequestBodyBytes: 10485760
+
+  routers:
+    authentik:
+      entryPoints: [web]
+      rule: Host(`auth.localhost`)
+      service: authentik
+      middlewares: [common-security, request-limit]
+    platform-api:
+      entryPoints: [web]
+      rule: Host(`platform.localhost`) && (PathPrefix(`/platform-api/`) || PathPrefix(`/health/`))
+      priority: 100
+      service: platform-api
+      middlewares: [common-security, request-limit]
+    platform-portal:
+      entryPoints: [web]
+      rule: Host(`platform.localhost`)
+      priority: 10
+      service: platform-portal
+      middlewares: [common-security, request-limit]
+    standalone-app:
+      entryPoints: [web]
+      rule: Host(`app.localhost`)
+      service: standalone-app
+      middlewares: [common-security, request-limit]
+
+  services:
+    authentik:
+      loadBalancer:
+        healthCheck:
+          path: /-/health/ready/
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://authentik-server:9000
+    platform-api:
+      loadBalancer:
+        healthCheck:
+          path: /health/ready
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://platform-api:8000
+    platform-portal:
+      loadBalancer:
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://portal:8080
+    standalone-app:
+      loadBalancer:
+        healthCheck:
+          path: /health/live
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://standalone-app:8100

@@ -37,7 +37,7 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     contract = load_yaml_mapping(OPENAPI_PATH)
 
     assert contract["openapi"] == "3.1.0"
-    assert contract["info"]["version"] == "0.1.0"
+    assert contract["info"]["version"] == "0.2.0"
     assert contract["paths"]
 
     operation_ids: list[str] = []
@@ -58,6 +58,70 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
 
     assert operation_ids
     assert len(operation_ids) == len(set(operation_ids))
+
+
+def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
+    contract = load_yaml_mapping(OPENAPI_PATH)
+    expected_paths = {
+        "/health/live",
+        "/health/ready",
+        "/platform-api/v1/me",
+        "/platform-api/v1/me/permissions",
+        "/platform-api/v1/authorization/decisions",
+        "/platform-api/v1/applications/{application_id}",
+        "/platform-api/v1/applications/{application_id}/environments/{environment}/health-check",
+        "/platform-api/v1/notifications",
+        "/platform-api/v1/notifications/{notification_id}",
+    }
+    assert set(contract["paths"]) == expected_paths
+    security_scheme = contract["components"]["securitySchemes"]["oidcAuth"]
+    assert security_scheme["type"] == "openIdConnect"
+    assert security_scheme["openIdConnectUrl"].endswith(
+        "/application/o/ai-hub/.well-known/openid-configuration"
+    )
+
+    expected_scopes = {
+        "/platform-api/v1/me": ["ai_hub.identity", "platform.me.read"],
+        "/platform-api/v1/me/permissions": [
+            "ai_hub.identity",
+            "platform.me.read",
+        ],
+        "/platform-api/v1/authorization/decisions": [
+            "ai_hub.identity",
+            "platform.authorization.decide",
+        ],
+        "/platform-api/v1/applications/{application_id}": [
+            "ai_hub.identity",
+            "platform.application.read",
+        ],
+        "/platform-api/v1/applications/{application_id}/environments/{environment}/health-check": [
+            "ai_hub.identity",
+            "platform.application.health.write",
+        ],
+        "/platform-api/v1/notifications": [
+            "ai_hub.identity",
+            "platform.notification.request",
+        ],
+        "/platform-api/v1/notifications/{notification_id}": [
+            "ai_hub.identity",
+            "platform.notification.request",
+        ],
+    }
+
+    for path, path_item in contract["paths"].items():
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            operation_mapping = cast(dict[str, Any], operation)
+            if path.startswith("/platform-api/"):
+                assert operation_mapping.get("security", contract.get("security")) == [
+                    {"oidcAuth": expected_scopes[path]}
+                ]
+                responses = operation_mapping["responses"]
+                assert isinstance(responses, dict)
+                response_codes = set(cast(dict[str, Any], responses))
+                assert "401" in response_codes
+                assert "403" in response_codes
 
 
 def test_asyncapi_payload_reference_resolves_to_valid_cloud_event_schema() -> None:

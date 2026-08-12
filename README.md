@@ -25,11 +25,11 @@ cp .env.example .env
 bash scripts/ci/all.sh
 ~~~
 
-基础 CI 定义在 `.github/workflows/ci.yml`，本地与流水线共同调用 `scripts/ci/` 下的 Python、前端和部署门禁，避免维护两套命令。外部 Action 固定完整提交 SHA，`Required gate` 是分支保护使用的稳定汇总检查。代码已推送到公开仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)，[远端 Actions 验证](https://github.com/tonycc/ai-hub/actions/runs/31557248062)中的三个并行作业和 `Required gate` 均已通过；`main` 已启用分支保护并要求该检查成功。
+基础 CI 定义在 `.github/workflows/ci.yml`，本地与流水线共同调用 `scripts/ci/` 下的 Python、前端、部署和 M1 隔离运行时门禁，避免维护两套命令。外部 Action 固定完整提交 SHA，`Required gate` 是分支保护使用的稳定汇总检查。代码位于公开仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)；`main` 已启用分支保护并要求该检查成功。M0 的[远端 Actions 基线](https://github.com/tonycc/ai-hub/actions/runs/31557248062)已通过，M1 Pull Request 还会额外运行真实身份/API 场景。
 
 根 `.env.example` 只用于 Docker Compose，并将所有示例密码显式标记为本地专用；平台和参考应用的宿主机进程配置分别参考 `backend/.env.example` 与 `examples/standalone-app/.env.example`。Compose 缺少必填密钥时不会使用公开默认密码继续启动，非本地 Python 进程也会拒绝本机地址、占位密码和不安全的身份/API 地址。
 
-第三方生产组件统一记录在 `deploy/component-lock.json`，Compose、Dockerfile 和 `.env.example` 使用精确标签加镜像摘要，并由测试阻止漂移。M0-08 已完成：PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4 和 RabbitMQ 4.2.9 已在两个全新数据卷部署档位完成迁移、健康、API 和数据库权限门禁；后续任何标签或摘要变化都必须重新验证。
+第三方生产组件统一记录在 `deploy/component-lock.json`，Compose、Dockerfile 和 `.env.example` 使用精确标签加镜像摘要，并由测试阻止漂移。当前锁定 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4、RabbitMQ 4.2.9、authentik 2026.5.6 和 Traefik 3.7.10；后续任何标签或摘要变化都必须重新验证。
 
 本地基础接入档位：
 
@@ -43,7 +43,13 @@ docker compose -f deploy/compose.yaml --profile base-access up -d --build
 docker compose -f deploy/compose.yaml --profile standard-events up -d --build
 ~~~
 
-当前 Compose 已使用单 PostgreSQL 服务承载三个隔离逻辑库，并提供平台 API、门户和参考应用的独立镜像、迁移容器与健康检查。两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。authentik 与 Traefik 仍按 M1-01 接入，事件账号、拓扑和 Worker 仍按 M2 实现；身份能力完成前，受保护 API 不使用临时令牌或伪造身份绕过正式接入。
+当前 Compose 使用单 PostgreSQL 服务承载三个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成 OIDC 授权码 + PKCE、Client Credentials、Discovery/JWKS 本地验证、应用登记、用户与权限、版本化授权缓存、测试通知、结构化日志和追加式审计；两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。事件账号、拓扑和 Worker 仍按 M2 实现，API-only 应用不会被强制安装事件组件。
+
+完整 M1 容器验收会从全新数据卷验证身份、权限、通知、故障降级和独立重启：
+
+~~~bash
+bash scripts/ci/m1-runtime.sh
+~~~
 
 ## 前端原型
 

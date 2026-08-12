@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.8 |
+| 文档版本 | V1.9 |
 | 文档状态 | 执行基线 |
 | 更新日期 | 2026-08-12 |
 | 适用范围 | 平台后端、平台管理端、Python SDK、业务中性接入参考应用、API/事件契约、本地与生产部署基线 |
@@ -81,7 +81,7 @@ flowchart LR
 
 V0.1 必须验证基础接入和一条标准事件链路，但这不意味着每个业务应用都启用事件能力。正式部署选择哪个档位由应用登记能力和运行目标决定。
 
-M0-04 先冻结 profile 名称、组件选择和生命周期：`base-access` 运行当前可用的 PostgreSQL、基础迁移、平台 API、门户和 API-only 参考应用；`standard-events` 在同一组组件上增加 RabbitMQ。M0-05 再为标准事件档位加入参考应用的可选 Outbox/Inbox 迁移入口。M1-01 把 authentik 与 Traefik 加入两个 profile，M2 再为 `standard-events` 增加事件账号、拓扑和实际 Worker。因此当前完成状态不代表身份链路或事件生产链路已经完成。
+M0-04 先冻结 profile 名称、组件选择和生命周期：`base-access` 运行 PostgreSQL、迁移、平台 API、门户和 API-only 参考应用；`standard-events` 在同一组组件上增加 RabbitMQ 和可选事件迁移。M1-01 已把 authentik 与 Traefik 加入两个 profile，并通过统一入口暴露身份、平台和参考应用；M2 再为 `standard-events` 增加事件账号、拓扑和实际 Worker。M1 完成不代表事件生产链路已经完成。
 
 ---
 
@@ -150,16 +150,16 @@ M0 退出条件：
 
 | 编号 | 任务 | 主要产物 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| M1-01 | 将 authentik 与 Traefik 加入基础接入部署 | Compose profile、入口和持久化配置 | M0 | 待实施 |
-| M1-02 | 配置用户 OIDC Client、服务身份、issuer、audience、scope 和回调白名单 | 可重复初始化的配置或受审计操作说明 | M1-01 | 待实施 |
-| M1-03 | 实现 OIDC Discovery/JWKS 获取、缓存和 JWT 本地验证 | 平台和 SDK 身份模块 | M1-02 | 待实施 |
-| M1-04 | 实现应用注册、环境入口、健康检查和接入能力登记 | 平台 API、迁移和测试 | M0 | 待实施 |
-| M1-05 | 实现用户映射、组织、权限点、授权查询和授权版本 | 平台模块、API 契约和迁移 | M1-03、M1-04 | 待实施 |
-| M1-06 | 实现版本化短时授权缓存与对象级授权接口约定 | SDK、示例应用中间件和测试 | M1-05 | 待实施 |
-| M1-07 | 实现服务身份调用和最小 scope 校验 | 平台接入模块、SDK 和审计 | M1-02、M1-04 | 待实施 |
-| M1-08 | 实现 request_id、结构化日志和接入审计 | 平台与示例应用中间件 | M1-04 | 待实施 |
-| M1-09 | 实现测试通知 API 和可观察送达结果 | 通知模块、API 契约和测试替身 | M1-07、M1-08 | 待实施 |
-| M1-10 | 完成独立示例应用端到端接入 | 示例应用登录、平台客户端和消费方契约测试 | M1-03 至 M1-09 | 待实施 |
+| M1-01 | 将 authentik 与 Traefik 加入基础接入部署 | Compose profile、入口和持久化配置 | M0 | 已完成 |
+| M1-02 | 配置用户 OIDC Client、服务身份、issuer、audience、scope 和回调白名单 | 可重复初始化的 Authentik blueprint | M1-01 | 已完成 |
+| M1-03 | 实现 OIDC Discovery/JWKS 获取、缓存和 JWT 本地验证 | 平台和 SDK 身份模块 | M1-02 | 已完成 |
+| M1-04 | 实现应用注册、环境入口、健康检查和接入能力登记 | 平台 API、迁移和测试 | M0 | 已完成 |
+| M1-05 | 实现用户映射、组织、权限点、授权查询和授权版本 | 平台模块、API 契约和迁移 | M1-03、M1-04 | 已完成 |
+| M1-06 | 实现版本化短时授权缓存与对象级授权接口约定 | SDK、示例应用中间件和测试 | M1-05 | 已完成 |
+| M1-07 | 实现服务身份调用和最小 scope 校验 | 平台接入模块、SDK 和审计 | M1-02、M1-04 | 已完成 |
+| M1-08 | 实现 request_id、结构化日志和接入审计 | 平台与示例应用中间件 | M1-04 | 已完成 |
+| M1-09 | 实现测试通知 API 和可观察送达结果 | 通知模块、API 契约和测试替身 | M1-07、M1-08 | 已完成 |
+| M1-10 | 完成独立示例应用端到端接入 | 示例应用登录、平台客户端和消费方契约测试 | M1-03 至 M1-09 | 已完成 |
 
 M1 必测场景：
 
@@ -173,6 +173,8 @@ M1 必测场景：
 - 平台和示例应用可以分别发布和重启。
 
 M1 退出条件：一个独立应用完成登录、用户令牌验证、当前用户与权限查询、对象级拒绝、服务身份通知调用和审计链路，不共享 Cookie、Session 表、平台源码或数据库账号。
+
+2026-08-12 已从全新隔离数据卷执行 `bash scripts/ci/m1-runtime.sh` 并满足退出条件。门禁还验证了 PKCE S256、错误 Client Secret、缺少 scope、服务身份撤销、短时 authentik 故障、权限平台故障、低风险有界陈旧读取、高风险失败关闭、平台与应用独立重启、数据库角色边界和结构化日志。运行时会创建唯一 Compose project，成功或失败后默认删除其容器、网络和卷；仅诊断时可显式设置 `M1_KEEP_ENV=1`。
 
 ### 6.3 M2：可靠事件纵向链路
 
@@ -287,11 +289,14 @@ M0-07 已冻结以下配置语义和当前前缀；名称调整必须同步更�
 | `DATABASE_URL` | `AI_HUB_DATABASE_URL` | `STANDALONE_DATABASE_URL` | 仅由对应 API 运行进程读取 |
 | 核心迁移连接 | `AI_HUB_MIGRATION_DATABASE_URL` | `STANDALONE_MIGRATION_DATABASE_URL` | 仅由对应 Alembic 进程读取，不进入 API Settings |
 | 投影迁移连接 | `AI_HUB_PROJECTION_MIGRATION_DATABASE_URL` | 不适用 | 仅由平台投影 Alembic 进程读取 |
-| `OIDC_ISSUER` | `AI_HUB_OIDC_ISSUER` | M1 接入时按受众确定 | authentik issuer，必须精确匹配令牌 |
-| `OIDC_AUDIENCE` | `AI_HUB_OIDC_AUDIENCE` | M1 接入时按受众确定 | 当前 API 接受的 audience |
+| `OIDC_ISSUER` | `AI_HUB_OIDC_ISSUER` | `STANDALONE_OIDC_ISSUER` | authentik issuer，必须精确匹配令牌 |
+| `OIDC_AUDIENCE` | `AI_HUB_OIDC_AUDIENCE` | `STANDALONE_OIDC_AUDIENCE` | 当前 API 接受的 audience |
+| OIDC Client | 不适用 | `STANDALONE_OIDC_CLIENT_ID`、`STANDALONE_OIDC_CLIENT_SECRET`、`STANDALONE_OIDC_REDIRECT_URI` | 授权码 + PKCE 和 Client Credentials 配置 |
+| JWKS 缓存 | `AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS`、`AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS` | `STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS`、`STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS` | 正常缓存与短时故障的有界陈旧窗口 |
+| 授权缓存 | `AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS` | `STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS` | 平台快照 TTL 与应用低风险陈旧上限 |
 | `RABBITMQ_URL` | M2 事件 Worker 专用 | M2 发布/消费进程专用 | API-only 进程不读取也不要求配置 |
 
-`OIDC_JWKS_CACHE_TTL_SECONDS`、`AUTHORIZATION_CACHE_TTL_SECONDS` 和 `INTEGRATION_CAPABILITIES` 保留为后续任务语义，在实际消费进程出现前不加入当前 Settings。
+`INTEGRATION_CAPABILITIES` 保留为 M2 的事件进程配置语义；OIDC/JWKS 和授权缓存参数已由 M1 的平台与独立应用进程实际消费。
 
 仓库根 `.env.example` 只服务 Docker Compose，不再混入宿主机连接串；平台和独立应用的宿主机运行示例分别位于 `backend/.env.example` 与 `examples/standalone-app/.env.example`。运行进程、核心迁移、投影迁移使用不同 Settings 模型，任何进程都不因未启用的 RabbitMQ 或其他能力而读取无关配置。
 
@@ -299,9 +304,9 @@ Compose 对所选 profile 的数据库、authentik 和 RabbitMQ 密码使用必�
 
 ### 7.4 生产组件锁
 
-M0-08 的机器可读生产清单位于 `deploy/component-lock.json`，升级和回滚规则位于 `docs/component-upgrade-policy.md`。PostgreSQL、Python、Node.js、Nginx 和 RabbitMQ 均使用“精确标签 + 多架构 OCI index digest”；uv 使用精确版本。Compose、Dockerfile、根 `.env.example` 和清单之间由自动化测试保持一致。
+M0-08/M1-01 的机器可读生产清单位于 `deploy/component-lock.json`，升级和回滚规则位于 `docs/component-upgrade-policy.md`。PostgreSQL、Python、Node.js、Nginx、RabbitMQ、authentik 和 Traefik 均使用“精确标签 + 多架构 OCI index digest”；uv 使用精确版本。Compose、Dockerfile、根 `.env.example` 和清单之间由自动化测试保持一致。
 
-当前锁定基线为 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1 LTS、Nginx 1.30.4 stable、RabbitMQ 4.2.9 和 uv 0.9.8。2026-08-12 已在 `linux/arm64` 上用两个独立的全新数据卷完成精确镜像运行验收：迁移、健康、独立应用 API 调用、RabbitMQ 和数据库权限边界均通过。任何版本或摘要变化都必须重跑相同门禁。
+当前锁定基线为 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1 LTS、Nginx 1.30.4 stable、RabbitMQ 4.2.9、authentik 2026.5.6、Traefik 3.7.10 和 uv 0.9.8。2026-08-12 已在 `linux/arm64` 上用全新数据卷完成精确镜像运行验收；任何版本或摘要变化都必须重跑对应迁移、健康、身份/API、数据库权限和故障门禁。
 
 ---
 
@@ -313,19 +318,26 @@ M0-09 使用仓库脚本作为唯一命令源，CI 平台只调用这些脚本�
 bash scripts/ci/all.sh
 ```
 
-三个可独立并行的入口分别是 `scripts/ci/python.sh`、`scripts/ci/frontend.sh` 和 `scripts/ci/deploy.sh`。Python 入口使用 `uv --frozen` 执行 pytest、Ruff、Pyright strict、import-linter、迁移契约、组件锁、公开契约和 CI 自检；前端入口使用 `npm ci` 后执行生产构建；部署入口解析两个 Compose profile。`.github/workflows/ci.yml` 使用 Python 3.14.7、Node.js 24.18.1 和 uv 0.9.8，外部 Action 固定完整提交 SHA，工作流权限只有 `contents: read`，并提供稳定的 `Required gate` 汇总作业供分支保护使用。
+三个轻量入口分别是 `scripts/ci/python.sh`、`scripts/ci/frontend.sh` 和 `scripts/ci/deploy.sh`。Python 入口使用 `uv --frozen` 执行 pytest、Ruff、Pyright strict、import-linter、迁移契约、组件锁、公开契约和 CI 自检；前端入口使用 `npm ci` 后执行生产构建；部署入口解析两个 Compose profile。`.github/workflows/ci.yml` 另有独立的 M1 运行时作业，四个作业都成功后才放行稳定的 `Required gate`。工作流使用 Python 3.14.7、Node.js 24.18.1 和 uv 0.9.8，外部 Action 固定完整提交 SHA，权限只有 `contents: read`。
+
+M1 的完整容器运行时门禁单独执行，避免普通单元测试隐式依赖本机 Docker 环境；它同时是 GitHub Actions `Required gate` 的前置作业：
+
+```bash
+bash scripts/ci/m1-runtime.sh
+```
+
+该门禁必须从空卷启动真实 authentik、Traefik、平台和参考应用，并验证身份、权限、服务身份、通知、审计、降级与独立故障边界。`M1_SKIP_BUILD=1` 只允许在待测镜像已由当前源码构建时用于本地重复调试，不能替代首次构建验证。
 
 当前目录已初始化为 Git 仓库并推送到公开仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)。[GitHub Actions 运行 31557248062](https://github.com/tonycc/ai-hub/actions/runs/31557248062)已确认三个并行作业与 `Required gate` 全部通过；`main` 已启用分支保护，要求变更通过 Pull Request、解决审查会话并通过 `Required gate`，同时禁止强制推送和删除。因此 M0-09 与整个 M0 已完成。
 
-后续实现必须补充：
+后续里程碑必须继续补充：
 
-- 从空数据库执行平台与示例应用迁移的自动化测试。
-- 数据库角色越权测试。
-- OpenAPI 提供方和 SDK/示例应用消费方契约测试。
+- 从空数据库执行后续新增迁移的自动化测试。
+- 后续新增数据库角色的越权测试。
+- 后续新增 OpenAPI/AsyncAPI 的提供方和消费方契约测试。
 - AsyncAPI 和事件载荷 Schema 校验。
-- OIDC/JWKS 缓存、未知 `kid`、错误 issuer/audience、过期与撤销测试。
 - Outbox 原子提交、Inbox 幂等、重复、重启、积压和投影重建测试。
-- 平台和独立应用分别启动、停止、升级与回滚测试。
+- 平台和独立应用的生产升级与回滚演练。
 
 任何未实际执行的验证不得在交付记录中写为“通过”。如果环境不具备某项验证条件，必须记录原因、风险和进入下一门禁前的补测条件。
 
@@ -358,6 +370,9 @@ bash scripts/ci/all.sh
 - M0-07 已完成：根 Compose 配置、平台宿主机配置和独立应用宿主机配置已经分离；变量名统一为稳定语义后缀。平台 API、核心迁移、投影迁移、独立应用 API 和独立应用迁移各自只读取所需配置。Compose 会拒绝缺失或空密钥，非本地 Settings 会拒绝本机地址、明文身份/API 地址和 `local-only`/占位密码，校验错误不回显连接串。两个 profile、独立应用到平台的 API 调用和数据库角色边界已在隔离容器中复验。
 - M0-08 已完成：已建立 `deploy/component-lock.json` 和组件升级策略，Compose、Dockerfile 与环境模板均使用精确标签和摘要，并把已 EOL 的 Node.js 20 构建基线调整为 Node.js 24 LTS、把门户运行时固定在 Nginx stable。精确镜像核验纠正了一项 Node 标签/摘要错配，并按 PostgreSQL 18 官方目录布局把命名卷挂载点调整为 `/var/lib/postgresql`。两个 profile 已分别从全新数据卷完成迁移、健康、独立应用调用平台、RabbitMQ 和数据库权限审计，实际运行版本与锁清单一致。
 - M0-09 已完成：已建立 GitHub Actions 基础工作流、三个可并行的仓库内 CI 入口和一个本地总入口；外部 Action 使用完整提交 SHA，版本与组件锁一致，权限限制为只读。OpenAPI/AsyncAPI/CloudEvents Schema、Python SDK 事件、CI 工作流与脚本自身均已加入契约测试。本地总入口的 36 项测试、Ruff、Pyright strict、import-linter、`npm ci`、前端生产构建和两个 Compose 配置检查已通过。公开 GitHub 仓库已经创建并推送，远端三个作业与 `Required gate` 已成功运行，`main` 分支保护已启用。
-- authentik、Traefik、OIDC/JWKS 本地验证和正式权限链路尚未完成。
+- M1-01 至 M1-03 已完成：authentik 与 Traefik 已进入两个部署档位；可重复 blueprint 创建严格回调的 OIDC Client、用户和最小 scopes；SDK 与平台完成 Discovery/JWKS 有界缓存、RS256 本地验签、issuer/audience/有效期/主体/scope 校验和未知 `kid` 单次刷新。
+- M1-04 至 M1-07 已完成：核心迁移建立应用、环境、身份映射、组织、权限点、授权和服务身份绑定；公开 API 与 Python SDK 提供应用登记、健康、当前用户、权限快照、在线决策和通知调用。授权缓存按主体、应用和版本隔离，低风险只在有界窗口内使用陈旧快照，高风险写操作在线判权并失败关闭；独立应用仍执行对象归属与业务状态最终校验。
+- M1-08 至 M1-10 已完成：平台和参考应用统一传播 request_id/trace_id、输出结构化访问与安全决策日志，并把认证拒绝、授权和通知调用写入追加式审计。业务中性参考应用通过 OIDC 授权码 + PKCE 登录、服务身份通知、独立数据库、独立镜像和独立重启完成接入认证，不包含平台源码或共享 Session/数据库账号。
+- M1 运行时门禁已从全新数据卷完整通过，覆盖正确与错误令牌、缺少 scope、凭据撤销、对象级拒绝、JWKS 缓存、authentik/平台短时故障、通知幂等、日志和审计链。静态门禁和远端 `Required gate` 仍是每次 Pull Request 的必需检查。
 
-M0 已完成。下一步从 M1-01 开始身份与 API 纵向链路，先把 authentik 与 Traefik 加入基础接入部署；M1 未通过前不开始 M2 事件生产链路验收。后续变更通过 Pull Request 合入受保护的 `main`。
+M0 和 M1 已完成。下一步按依赖从 M2-01 开始可靠事件纵向链路；API-only 应用继续只运行 `base-access`，不会因 M2 被强制安装 Outbox、Inbox 或事件 Worker。后续变更通过 Pull Request 合入受保护的 `main`。

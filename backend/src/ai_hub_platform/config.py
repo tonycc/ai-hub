@@ -123,6 +123,9 @@ class Settings(_PlatformSettings):
     )
     oidc_issuer: str = "http://localhost:9000/application/o/ai-hub/"
     oidc_audience: str = "ai-hub-platform"
+    oidc_jwks_cache_ttl_seconds: int = 300
+    oidc_jwks_stale_ttl_seconds: int = 3600
+    authorization_cache_ttl_seconds: int = 60
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -134,6 +137,14 @@ class Settings(_PlatformSettings):
             strict=strict,
         )
         _validate_oidc_issuer(self.oidc_issuer, strict=strict)
+        if self.oidc_jwks_cache_ttl_seconds < 1:
+            raise ValueError("oidc_jwks_cache_ttl_seconds must be positive")
+        if self.oidc_jwks_stale_ttl_seconds < self.oidc_jwks_cache_ttl_seconds:
+            raise ValueError(
+                "oidc_jwks_stale_ttl_seconds must not be shorter than the fresh cache TTL"
+            )
+        if not 1 <= self.authorization_cache_ttl_seconds <= 300:
+            raise ValueError("authorization_cache_ttl_seconds must be between 1 and 300")
         return self
 
 

@@ -25,8 +25,20 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
 
     assert workflow["permissions"] == {"contents": "read"}
     assert set(workflow["on"]) == {"pull_request", "push", "workflow_dispatch"}
-    assert set(jobs) == {"python", "frontend", "deployment", "required-gate"}
-    assert set(jobs["required-gate"]["needs"]) == {"python", "frontend", "deployment"}
+    assert workflow["on"]["push"] == {"branches": ["main"]}
+    assert set(jobs) == {
+        "python",
+        "frontend",
+        "deployment",
+        "m1-runtime",
+        "required-gate",
+    }
+    assert set(jobs["required-gate"]["needs"]) == {
+        "python",
+        "frontend",
+        "deployment",
+        "m1-runtime",
+    }
     assert jobs["required-gate"]["if"] == "${{ always() }}"
     assert jobs["required-gate"]["name"] == "Required gate"
 
@@ -67,6 +79,7 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     assert jobs["python"]["steps"][-1]["run"] == "bash scripts/ci/python.sh"
     assert jobs["frontend"]["steps"][-1]["run"] == "bash scripts/ci/frontend.sh"
     assert jobs["deployment"]["steps"][-1]["run"] == "bash scripts/ci/deploy.sh"
+    assert jobs["m1-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m1-runtime.sh"
 
 
 def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
@@ -90,3 +103,15 @@ def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
     assert "--profile standard-events config --quiet" in scripts["deploy"]
     for child_script in ("python.sh", "frontend.sh", "deploy.sh"):
         assert child_script in scripts["all"]
+
+    m1_runtime = (PROJECT_ROOT / "scripts/ci/m1-runtime.sh").read_text(encoding="utf-8")
+    for scenario in (
+        "code_challenge_method=S256",
+        "m1-missing-scope",
+        "m1-revoked-service",
+        "m1-object-denied",
+        "m1-high-risk-fail-closed",
+        "role-boundaries.sql",
+        "find_spec('ai_hub_platform') is None",
+    ):
+        assert scenario in m1_runtime

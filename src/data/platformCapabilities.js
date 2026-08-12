@@ -7,9 +7,9 @@ export const platformCapabilityGroups = [
     color: '#416f86',
     items: [
       { code: 'M0-DEPLOY', name: '部署基线', description: '单 PostgreSQL 集群、逻辑隔离、部署档位和配置校验', route: '/platform/operations', phase: 'M0', status: '已完成' },
-      { code: 'APP-REGISTRY', name: '应用注册', description: '登记环境、入口、回调、健康、版本和接入能力', route: '/applications', phase: 'V0.1', status: '待实施' },
+      { code: 'APP-REGISTRY', name: '应用注册', description: '登记环境、入口、回调、健康、版本和接入能力', route: '/applications', phase: 'V0.1', status: '已具备' },
       { code: 'PORTAL-APP', name: '平台门户', description: '按权限展示应用入口和平台治理入口', route: '/', phase: 'V0.1', status: '已具备' },
-      { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、scope、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '待实施' },
+      { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、scope、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
       { code: 'EVENT-KIT', name: '按需事件接入', description: 'RabbitMQ、Outbox、Inbox、幂等和投影重建模板', route: '/platform/integrations', phase: 'V0.1', status: '进行中' },
     ],
   },
@@ -20,11 +20,11 @@ export const platformCapabilityGroups = [
     icon: 'Lock',
     color: '#527a64',
     items: [
-      { code: 'IAM-IDENTITY', name: '用户与组织', description: 'authentik 身份映射、组织和账号生命周期', route: '/platform/identity', phase: 'V0.5', status: '待实施' },
-      { code: 'IAM-RBAC', name: '角色与权限点', description: '角色、权限注册、授权版本和访问复核', route: '/platform/permissions', phase: 'V0.5', status: '待实施' },
-      { code: 'IAM-SCOPE', name: '数据范围', description: '应用级数据范围契约与本地对象级校验边界', route: '/platform/permissions', phase: 'V0.5', status: '待实施' },
-      { code: 'APP-CREDENTIAL', name: '应用凭据', description: '服务身份、scope、轮换、撤销和紧急停用', route: '/platform/integrations', phase: 'V0.5', status: '待实施' },
-      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、凭据和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '待实施' },
+      { code: 'IAM-IDENTITY', name: '用户与组织', description: 'authentik 身份映射、组织和账号生命周期', route: '/platform/identity', phase: 'V0.5', status: '进行中' },
+      { code: 'IAM-RBAC', name: '角色与权限点', description: '角色、权限注册、授权版本和访问复核', route: '/platform/permissions', phase: 'V0.5', status: '进行中' },
+      { code: 'IAM-SCOPE', name: '数据范围', description: '应用级数据范围契约与本地对象级校验边界', route: '/platform/permissions', phase: 'V0.5', status: '进行中' },
+      { code: 'APP-CREDENTIAL', name: '应用凭据', description: '服务身份、scope、轮换、撤销和紧急停用', route: '/platform/integrations', phase: 'V0.5', status: '进行中' },
+      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、凭据和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '进行中' },
     ],
   },
   {
@@ -34,7 +34,7 @@ export const platformCapabilityGroups = [
     icon: 'Grid',
     color: '#836b48',
     items: [
-      { code: 'MSG-NOTIFY', name: '消息通知', description: '通知请求、测试送达、状态查询和失败原因', route: '/platform/notifications', phase: 'V0.5', status: '待实施' },
+      { code: 'MSG-NOTIFY', name: '消息通知', description: '通知请求、测试送达、状态查询和失败原因', route: '/platform/notifications', phase: 'V0.5', status: '进行中' },
       { code: 'XAPP-CATALOG', name: '契约目录', description: 'OpenAPI、AsyncAPI、能力、版本和消费方登记', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
       { code: 'PROJECTION', name: '只读投影', description: '字段白名单、版本水位、对账和从空库重建', route: '/platform/integrations', phase: 'V0.5', status: '待实施' },
       { code: 'PLATFORM-CONFIG', name: '平台配置', description: '平台功能开关、配额、保留策略和配置版本', route: '/platform/settings', phase: 'V1.0', status: '待实施' },
@@ -50,7 +50,7 @@ export const platformCapabilityGroups = [
       { code: 'OBS-CENTER', name: '运行监控', description: '健康、日志、指标、事件积压、配额和告警', route: '/platform/operations', phase: 'V1.0', status: '待实施' },
       { code: 'BACKUP-RECOVERY', name: '备份恢复', description: '备份、恢复演练、RPO、RTO 和运行手册', route: '/platform/operations', phase: 'V1.0', status: '待实施' },
       { code: 'DEV-CONTRACT', name: '开发者中心', description: '公开契约、SDK、沙箱、本地替身和接入文档', route: '/platform/developer', phase: 'V0.5', status: '进行中' },
-      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与按需事件配置的一致性测试', route: '/platform/developer', phase: 'V0.5', status: '进行中' },
+      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与按需事件配置的一致性测试', route: '/platform/developer', phase: 'V0.5', status: '已具备' },
     ],
   },
   {
@@ -79,8 +79,8 @@ export const platformServices = {
     metrics: [
       { label: '身份映射', value: '3', unit: '条', hint: '仅原型数据', icon: 'User', tone: 'blue' },
       { label: '组织节点', value: '3', unit: '个', hint: '平台治理角色', icon: 'OfficeBuilding', tone: 'green' },
-      { label: '待复核账号', value: '1', unit: '个', hint: '等待 M1 身份链路', icon: 'Warning', tone: 'amber' },
-      { label: '授权版本', value: '0', unit: '版', hint: '尚未启用', icon: 'Refresh', tone: 'blue' },
+      { label: '待复核账号', value: '1', unit: '个', hint: '账号治理待 V0.5', icon: 'Warning', tone: 'amber' },
+      { label: '授权版本', value: '1', unit: '版', hint: 'M1 缓存失效基线', icon: 'Refresh', tone: 'blue' },
     ],
     sections: [
       {
@@ -120,9 +120,9 @@ export const platformServices = {
     primaryAction: '创建角色',
     metrics: [
       { label: '平台角色', value: '4', unit: '个', hint: '目标角色模型', icon: 'UserFilled', tone: 'blue' },
-      { label: '权限点', value: '8', unit: '项', hint: '待 M1 实现', icon: 'Key', tone: 'green' },
-      { label: 'scope 定义', value: '4', unit: '项', hint: '最小权限', icon: 'Filter', tone: 'amber' },
-      { label: '异常授权', value: '0', unit: '项', hint: '尚未运行', icon: 'CircleCheck', tone: 'green' },
+      { label: '权限点', value: '2', unit: '项', hint: 'M1 中性契约', icon: 'Key', tone: 'green' },
+      { label: 'scope 定义', value: '5', unit: '项', hint: 'M1 最小权限', icon: 'Filter', tone: 'amber' },
+      { label: '异常授权', value: '0', unit: '项', hint: '运行时门禁通过', icon: 'CircleCheck', tone: 'green' },
     ],
     sections: [
       {
@@ -231,8 +231,8 @@ export const platformServices = {
     metrics: [
       { label: '今日记录', value: '7', unit: '条', hint: '原型演示数据', icon: 'Document', tone: 'blue' },
       { label: '高风险变更', value: '1', unit: '条', hint: '等待复核', icon: 'Warning', tone: 'amber' },
-      { label: '调用拒绝', value: '0', unit: '次', hint: '身份链路未启用', icon: 'Lock', tone: 'green' },
-      { label: '审计完整率', value: '—', hint: 'M1 后开始统计', icon: 'CircleCheck', tone: 'green' },
+      { label: '调用拒绝', value: '3', unit: '类', hint: '错误令牌、scope、撤销', icon: 'Lock', tone: 'green' },
+      { label: '审计完整率', value: '100', unit: '%', hint: 'M1 门禁场景', icon: 'CircleCheck', tone: 'green' },
     ],
     sections: [
       {
@@ -251,6 +251,7 @@ export const platformServices = {
           { requestId: 'req-m0-07-001', actor: '平台维护者', action: '验证配置与密钥边界', target: 'Compose / Pydantic Settings', time: '刚刚', status: '成功' },
           { requestId: 'req-m0-08-001', actor: '平台维护者', action: '验证生产组件精确锁', target: '镜像摘要 / 两个部署档位 / 权限边界', time: '刚刚', status: '成功' },
           { requestId: 'req-m0-09-001', actor: '平台维护者', action: '建立基础 CI 门禁', target: 'GitHub Actions / Required gate / main 分支保护', time: '刚刚', status: '成功' },
+          { requestId: 'req-m1-runtime-001', actor: '平台维护者', action: '验证身份与 API 纵向链路', target: 'OIDC / 权限 / 通知 / 审计 / 故障边界', time: '刚刚', status: '成功' },
         ],
       },
       {
@@ -261,8 +262,8 @@ export const platformServices = {
           { field: 'status', label: '状态', width: 100, type: 'status' },
         ],
         rows: [
-          { subject: '平台管理员目标权限', reviewer: '安全负责人', due: 'M1 验收前', findings: 0, status: '待实施' },
-          { subject: '参考应用 scope', reviewer: '平台技术负责人', due: 'M1 验收前', findings: 0, status: '待实施' },
+          { subject: 'M1 中性用户权限', reviewer: '安全负责人', due: '已完成', findings: 0, status: '已完成' },
+          { subject: '参考应用最小 scope', reviewer: '平台技术负责人', due: '已完成', findings: 0, status: '已完成' },
         ],
       },
     ],
@@ -275,8 +276,8 @@ export const platformServices = {
     tone: '#4d6b73',
     primaryAction: '运行基线检查',
     metrics: [
-      { label: '当前里程碑', value: 'M1', hint: '身份与 API 纵向链路', icon: 'Flag', tone: 'blue' },
-      { label: '基础检查', value: '9', unit: '项', hint: '远端 CI 已通过', icon: 'CircleCheck', tone: 'green' },
+      { label: '当前里程碑', value: 'M2', hint: '可靠事件纵向链路', icon: 'Flag', tone: 'blue' },
+      { label: 'M1 检查', value: '10', unit: '项', hint: '运行时门禁通过', icon: 'CircleCheck', tone: 'green' },
       { label: 'PostgreSQL 服务', value: '1', unit: '个', hint: '三个逻辑库已隔离', icon: 'Coin', tone: 'green' },
       { label: '生产 SLO', value: '—', hint: 'V1.0 前确认', icon: 'DataLine', tone: 'blue' },
     ],
@@ -289,11 +290,11 @@ export const platformServices = {
           { field: 'status', label: '状态', width: 100, type: 'status' },
         ],
         rows: [
-          { name: '平台 API', profile: '基础接入', endpoint: 'http://localhost:8000', owner: '平台研发组', status: '已具备' },
-          { name: '平台门户', profile: '基础接入', endpoint: 'http://localhost:8080', owner: '平台研发组', status: '已具备' },
-          { name: '接入参考应用', profile: '基础接入', endpoint: 'http://localhost:8100', owner: '接入工具', status: '已具备' },
+          { name: '平台 API', profile: '基础接入', endpoint: 'http://platform.localhost:8088/platform-api/v1', owner: '平台研发组', status: '已具备' },
+          { name: '平台门户', profile: '基础接入', endpoint: 'http://platform.localhost:8088', owner: '平台研发组', status: '已具备' },
+          { name: '接入参考应用', profile: '基础接入', endpoint: 'http://app.localhost:8088', owner: '接入工具', status: '已具备' },
           { name: 'RabbitMQ', profile: '标准事件', endpoint: 'amqp://localhost:5672', owner: '平台运维组', status: '已具备' },
-          { name: 'authentik / Traefik', profile: '基础接入', endpoint: '待 M1 配置', owner: '平台运维组', status: '待实施' },
+          { name: 'authentik / Traefik', profile: '基础接入', endpoint: 'http://auth.localhost:8088', owner: '平台运维组', status: '已具备' },
         ],
       },
       {
@@ -332,10 +333,10 @@ export const platformServices = {
     tone: '#58667b',
     primaryAction: '运行接入认证',
     metrics: [
-      { label: 'OpenAPI', value: '1', unit: '份', hint: '平台 API 骨架', icon: 'Document', tone: 'blue' },
+      { label: 'OpenAPI', value: '1', unit: '份', hint: 'M1 平台 API 契约', icon: 'Document', tone: 'blue' },
       { label: 'AsyncAPI', value: '1', unit: '份', hint: '示例事件骨架', icon: 'Connection', tone: 'green' },
       { label: 'Python SDK', value: '1', unit: '个', hint: 'workspace 版本', icon: 'Box', tone: 'amber' },
-      { label: '认证测试', value: '7', unit: '项', hint: '本地门禁通过', icon: 'CircleCheck', tone: 'green' },
+      { label: '认证测试', value: '10', unit: '项', hint: 'M1 运行时门禁通过', icon: 'CircleCheck', tone: 'green' },
     ],
     sections: [
       {
@@ -346,7 +347,7 @@ export const platformServices = {
           { field: 'status', label: '状态', width: 100, type: 'status' },
         ],
         rows: [
-          { name: '平台公共 API', path: 'contracts/api/platform-api.openapi.yaml', version: 'v1-draft', owner: '平台研发组', status: '已具备' },
+          { name: '平台公共 API', path: 'contracts/api/platform-api.openapi.yaml', version: 'v0.2.0', owner: '平台研发组', status: '已具备' },
           { name: '平台事件契约', path: 'contracts/events/ai-hub.asyncapi.yaml', version: 'v1-draft', owner: '平台研发组', status: '已具备' },
         ],
       },
@@ -357,8 +358,8 @@ export const platformServices = {
           { field: 'purpose', label: '用途', minWidth: 260 }, { field: 'status', label: '状态', width: 100, type: 'status' },
         ],
         rows: [
-          { name: 'Python 接入 SDK', location: 'sdk/python', purpose: 'API 客户端与事件信封', status: '进行中' },
-          { name: '中性参考应用', location: 'examples/standalone-app', purpose: '接入与故障边界认证', status: '进行中' },
+          { name: 'Python 接入 SDK', location: 'sdk/python', purpose: 'OIDC、授权缓存、API 客户端与事件信封', status: '已具备' },
+          { name: '中性参考应用', location: 'examples/standalone-app', purpose: 'API-only 接入与故障边界认证', status: '已具备' },
         ],
       },
       {
@@ -369,14 +370,15 @@ export const platformServices = {
           { field: 'status', label: '结果', width: 100, type: 'status' },
         ],
         rows: [
-          { name: 'Python 单元测试', scope: '平台、SDK、参考应用', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
-          { name: 'Python 静态检查', scope: 'Ruff 与 Pyright strict', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
-          { name: '模块边界检查', scope: '平台后端模块', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
-          { name: '前端生产构建', scope: 'npm ci 与平台管理端制品', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
-          { name: '组件锁一致性', scope: '清单、Compose、Dockerfile 与环境模板', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
-          { name: '精确镜像运行门禁', scope: '两个 profile、迁移、健康与权限边界', lastRun: 'M0-08 本轮', findings: 0, status: '通过' },
-          { name: '公开契约与 CI 自检', scope: 'OpenAPI、AsyncAPI、CloudEvents 与工作流', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
-          { name: '远端 GitHub Actions', scope: '三个并行作业与 Required gate', lastRun: '运行 31556943888', findings: 0, status: '通过' },
+          { name: 'Python 单元测试', scope: '平台、SDK、参考应用', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: 'Python 静态检查', scope: 'Ruff 与 Pyright strict', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: '模块边界检查', scope: '平台后端模块', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: '前端生产构建', scope: 'npm ci 与平台管理端制品', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: '组件锁一致性', scope: '清单、Compose、Dockerfile 与环境模板', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: '精确镜像运行门禁', scope: '身份、API、迁移、健康与权限边界', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: '公开契约与 CI 自检', scope: 'OpenAPI、AsyncAPI、CloudEvents 与工作流', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: 'M1 运行时纵向门禁', scope: 'OIDC、授权、通知、审计、降级与独立重启', lastRun: 'M1 本轮', findings: 0, status: '通过' },
+          { name: '远端 GitHub Actions', scope: 'M0 三个作业与 Required gate', lastRun: '运行 31557248062', findings: 0, status: '通过' },
           { name: 'main 分支保护', scope: 'Pull Request 与 Required gate 必需检查', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
         ],
       },
@@ -385,8 +387,8 @@ export const platformServices = {
 }
 
 export const messageItems = [
-  { id: 'msg-1', category: '实施进度', title: 'M0 基线建设已完成', summary: '三个并行作业与 Required gate 已在公开 GitHub 仓库运行成功，main 分支保护已经启用。', app: '平台实施', time: '刚刚', unread: true, icon: 'CircleCheck', tone: 'success', route: '/platform/operations', context: 'M0-09 · completed' },
+  { id: 'msg-1', category: '实施进度', title: 'M1 身份与 API 已完成', summary: '全新环境已通过 OIDC、权限、服务身份、通知、审计、故障降级和独立重启门禁。', app: '平台实施', time: '刚刚', unread: true, icon: 'CircleCheck', tone: 'success', route: '/platform/operations', context: 'M1-10 · completed' },
   { id: 'msg-2', category: '安全提醒', title: '本地示例密码不得用于生产环境', summary: '生产凭据需要进入密钥管理并完成轮换、撤销与泄露响应演练。', app: '安全治理', time: '今天', unread: true, icon: 'Lock', tone: 'danger', route: '/platform/settings', context: 'SEC-CONFIG · 密钥与配置边界' },
-  { id: 'msg-3', category: '接入结果', title: '中性参考应用基础测试通过', summary: '当前只验证工程骨架；OIDC、权限、通知和事件认证将在后续门禁完成。', app: '开发者中心', time: '今天', unread: false, icon: 'CircleCheck', tone: 'success', route: '/platform/developer', context: 'standalone-reference · API_CLIENT' },
+  { id: 'msg-3', category: '接入结果', title: '中性参考应用 API-only 认证通过', summary: 'OIDC、权限、对象级拒绝、服务身份通知和故障边界均已验证；事件接入进入 M2。', app: '开发者中心', time: '今天', unread: false, icon: 'CircleCheck', tone: 'success', route: '/platform/developer', context: 'standalone-reference · API_CLIENT' },
   { id: 'msg-4', category: '平台公告', title: '平台建设范围已收敛', summary: '真实业务应用不属于平台交付物，历史领域演示代码已从平台制品中移除。', app: '平台产品', time: '今天', unread: false, icon: 'Bell', tone: 'info', route: '/', context: 'PLATFORM-SCOPE · 平台公共能力' },
 ]

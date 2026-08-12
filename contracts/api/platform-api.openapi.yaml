@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
   title: AI Hub Platform API
-  version: 0.1.0
-  description: Public API contract for standalone applications.
+  version: 0.2.0
+  description: Versioned public identity, authorization, application, notification, and health API.
 servers:
   - url: https://platform.example.internal
+security:
+  - oidcAuth: [ai_hub.identity]
 paths:
   /health/live:
     get:
@@ -16,19 +18,314 @@ paths:
           description: Platform process is alive.
           content:
             application/json:
+              schema: {$ref: "#/components/schemas/HealthResponse"}
+  /health/ready:
+    get:
+      operationId: getPlatformReadiness
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Platform database dependency is ready.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HealthResponse"}
+  /platform-api/v1/me:
+    get:
+      operationId: getCurrentPlatformUser
+      tags: [identity]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.me.read]
+      parameters:
+        - {$ref: "#/components/parameters/ApplicationId"}
+      responses:
+        "200":
+          description: Stable platform user and organization mapping.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CurrentUser"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/me/permissions:
+    get:
+      operationId: getCurrentUserPermissions
+      tags: [authorization]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.me.read]
+      parameters:
+        - {$ref: "#/components/parameters/RequiredApplicationId"}
+      responses:
+        "200":
+          description: Versioned, short-lived authorization snapshot for an application.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PermissionSnapshot"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/authorization/decisions:
+    post:
+      operationId: createAuthorizationDecision
+      tags: [authorization]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.authorization.decide]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AuthorizationDecisionRequest"}
+      responses:
+        "200":
+          description: Online decision for a registered high-risk permission.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthorizationDecision"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/applications/{application_id}:
+    get:
+      operationId: getApplicationRegistration
+      tags: [applications]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.application.read]
+      parameters:
+        - {$ref: "#/components/parameters/ApplicationPathId"}
+      responses:
+        "200":
+          description: Application registration, capabilities, and environment entry.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ApplicationRegistration"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /platform-api/v1/applications/{application_id}/environments/{environment}/health-check:
+    post:
+      operationId: checkApplicationEnvironmentHealth
+      tags: [applications]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.application.health.write]
+      parameters:
+        - {$ref: "#/components/parameters/ApplicationPathId"}
+        - name: environment
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Persisted health result for the registered environment.
+          content:
+            application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: {type: string, enum: [HEALTHY, UNHEALTHY]}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /platform-api/v1/notifications:
+    post:
+      operationId: createNotification
+      tags: [notifications]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.notification.request]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NotificationRequest"}
+      responses:
+        "201":
+          description: Idempotent notification request and observable delivery result.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NotificationResult"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/notifications/{notification_id}:
+    get:
+      operationId: getNotification
+      tags: [notifications]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.notification.request]
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Notification delivery result visible only to its calling application.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NotificationResult"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 components:
+  securitySchemes:
+    oidcAuth:
+      type: openIdConnect
+      openIdConnectUrl: https://identity.example.internal/application/o/ai-hub/.well-known/openid-configuration
+      description: Short-lived authentik access token validated locally using OIDC Discovery and JWKS. Every protected operation also requires ai_hub.identity.
+  parameters:
+    ApplicationId:
+      name: X-Application-ID
+      in: header
+      required: false
+      schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+    RequiredApplicationId:
+      name: X-Application-ID
+      in: header
+      required: true
+      schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+    ApplicationPathId:
+      name: application_id
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+  responses:
+    Unauthorized:
+      description: Missing, malformed, expired, or otherwise invalid bearer token.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Forbidden:
+      description: Scope, actor type, application status, or authorization denied the request.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    NotFound:
+      description: The requested resource was not found in the caller's scope.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
   schemas:
     HealthResponse:
       type: object
       additionalProperties: false
       required: [status, service, version]
       properties:
-        status:
-          type: string
-          const: ok
-        service:
-          type: string
-        version:
-          type: string
+        status: {type: string, const: ok}
+        service: {type: string}
+        version: {type: string}
+    CurrentUser:
+      type: object
+      additionalProperties: false
+      required: [user_id, subject, display_name, status, organization_id, organization_name, authorization_version]
+      properties:
+        user_id: {type: string, format: uuid}
+        subject: {type: string}
+        display_name: {type: string}
+        email: {type: [string, "null"], format: email}
+        status: {type: string}
+        organization_id: {type: string}
+        organization_name: {type: string}
+        authorization_version: {type: integer, minimum: 1}
+    DataScope:
+      type: object
+      additionalProperties: false
+      required: [scope_type, value]
+      properties:
+        scope_type: {type: string}
+        value: {type: object, additionalProperties: true}
+    PermissionSnapshot:
+      type: object
+      additionalProperties: false
+      required: [application_id, user_id, permissions, data_scopes, authorization_version, expires_at]
+      properties:
+        application_id: {type: string}
+        user_id: {type: string, format: uuid}
+        permissions:
+          type: array
+          uniqueItems: true
+          items: {type: string}
+        data_scopes:
+          type: array
+          items: {$ref: "#/components/schemas/DataScope"}
+        authorization_version: {type: integer, minimum: 1}
+        expires_at: {type: string, format: date-time}
+    AuthorizationDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [application_id, permission]
+      properties:
+        application_id: {type: string}
+        permission: {type: string}
+        risk: {type: string, enum: [low, high], default: high}
+    AuthorizationDecision:
+      type: object
+      additionalProperties: false
+      required: [allowed, permission, authorization_version, reason_code, expires_at]
+      properties:
+        allowed: {type: boolean}
+        permission: {type: string}
+        authorization_version: {type: integer, minimum: 1}
+        reason_code: {type: string}
+        expires_at: {type: string, format: date-time}
+    ApplicationEnvironment:
+      type: object
+      additionalProperties: false
+      required: [environment, portal_url, api_base_url, health_url, oidc_redirect_uris, version, status]
+      properties:
+        environment: {type: string}
+        portal_url: {type: string, format: uri}
+        api_base_url: {type: string, format: uri}
+        health_url: {type: string, format: uri}
+        oidc_redirect_uris:
+          type: array
+          items: {type: string, format: uri}
+        version: {type: string}
+        status: {type: string}
+        last_health_status: {type: [string, "null"]}
+        last_health_checked_at: {type: [string, "null"], format: date-time}
+    ApplicationRegistration:
+      type: object
+      additionalProperties: false
+      required: [application_id, name, description, owner, status, capabilities, environments]
+      properties:
+        application_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        owner: {type: string}
+        status: {type: string}
+        capabilities:
+          type: array
+          items: {type: string, enum: [API_CLIENT, EVENT_PUBLISHER, EVENT_CONSUMER, PROJECTION_SOURCE]}
+        environments:
+          type: array
+          items: {$ref: "#/components/schemas/ApplicationEnvironment"}
+    NotificationRequest:
+      type: object
+      additionalProperties: false
+      required: [recipient_user_id, subject, body, idempotency_key]
+      properties:
+        recipient_user_id: {type: string, format: uuid}
+        subject: {type: string, minLength: 1, maxLength: 200}
+        body: {type: string, minLength: 1, maxLength: 4000}
+        idempotency_key: {type: string, minLength: 8, maxLength: 128}
+        payload: {type: object, additionalProperties: true, default: {}}
+    NotificationResult:
+      type: object
+      additionalProperties: false
+      required: [notification_id, application_id, recipient_user_id, subject, status, requested_at]
+      properties:
+        notification_id: {type: string, format: uuid}
+        application_id: {type: string}
+        recipient_user_id: {type: string, format: uuid}
+        subject: {type: string}
+        status: {type: string, enum: [PENDING, DELIVERED, FAILED]}
+        requested_at: {type: string, format: date-time}
+        delivered_at: {type: [string, "null"], format: date-time}
+        delivery_reference: {type: [string, "null"]}
+        failure_reason: {type: [string, "null"]}
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error_code, message, details, request_id]
+      properties:
+        error_code: {type: string}
+        message: {type: string}
+        details: {type: object, additionalProperties: true}
+        request_id: {type: string}

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "lock_id": "m0-08-2026-08-12",
+  "lock_id": "m1-01-2026-08-12",
   "updated_at": "2026-08-12",
   "digest_kind": "multi-platform OCI index",
   "images": {
@@ -41,6 +41,20 @@
       "version": "4.2.9",
       "role": "standard-events broker",
       "verification": "exact digest, RabbitMQ 4.2.9 runtime, health check, and diagnostic ping verified on linux/arm64"
+    },
+    "authentik": {
+      "environment_variable": "AUTHENTIK_IMAGE",
+      "reference": "ghcr.io/goauthentik/server:2026.5.6@sha256:ed120caf710ccf82ef0026f0bc74e51615bc95ebff228a7a2d6fc60c441c3868",
+      "version": "2026.5.6",
+      "role": "OIDC identity provider server and worker",
+      "verification": "exact digest, fresh-volume blueprint, Discovery/JWKS, authorization-code PKCE, client credentials, and short-outage runtime gates verified on linux/arm64"
+    },
+    "traefik": {
+      "environment_variable": "TRAEFIK_IMAGE",
+      "reference": "traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac",
+      "version": "3.7.10",
+      "role": "HTTP ingress and routing",
+      "verification": "exact digest, single-ingress routing, backend health, and M1 end-to-end runtime gates verified on linux/arm64"
     }
   },
   "tools": {
@@ -51,6 +65,6 @@
   },
   "release_requirements": {
     "internal_images": "Platform, portal, and standalone artifacts must use registry digest references in a production release manifest.",
-    "runtime_gate": "Passed on linux/arm64 on 2026-08-12 for base-access and standard-events; every changed image must repeat the component-specific migration and health gates before production."
+    "runtime_gate": "Passed on linux/arm64 on 2026-08-12 for base-access, standard-events, and the complete M1 identity/API scenarios; every changed image must repeat the component-specific migration, health, identity, authorization, and fault-boundary gates before production."
   }
 }

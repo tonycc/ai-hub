@@ -2,7 +2,7 @@
 
 Python 模块化单体。HTTP API 与事件 Worker 使用同一组领域和应用模块，但以不同进程运行和扩缩容。
 
-实施顺序、数据库逻辑隔离、身份/API 门禁和事件可靠性门禁见[方案实施计划](../docs/implementation-plan.md)。当前代码是基础骨架，尚未完成 authentik、Traefik 和正式 OIDC/JWKS 验证，不使用临时身份实现替代。
+实施顺序、数据库逻辑隔离、身份/API 门禁和事件可靠性门禁见[方案实施计划](../docs/implementation-plan.md)。M1 已完成 authentik、Traefik、正式 OIDC/JWKS 本地验证、应用登记、身份权限、服务身份、测试通知和追加式审计；不使用临时身份实现替代。
 
 完整容器化启动：
 
@@ -11,10 +11,10 @@ cp .env.example .env
 docker compose -f deploy/compose.yaml --profile base-access up -d --build
 ~~~
 
-只在宿主机运行平台 API 时，先单独启动 PostgreSQL，并通过后端专用环境文件执行迁移和进程：
+只在宿主机调试平台 API 时，先启动完整基础档位，使 PostgreSQL 和 authentik 仍通过已验证的本地拓扑提供服务；容器内平台 API 可以与宿主机的 `localhost:8000` 调试进程并存。随后通过后端专用环境文件执行迁移和进程：
 
 ~~~bash
-docker compose -f deploy/compose.yaml --profile base-access up -d postgres
+docker compose -f deploy/compose.yaml --profile base-access up -d --build
 cp backend/.env.example backend/.env
 uv sync --all-packages --all-groups
 uv run --env-file backend/.env --package ai-hub-platform-backend \
@@ -40,7 +40,7 @@ uv run --env-file backend/.env --package ai-hub-platform-backend alembic \
 
 两个运行账号都不能读取或修改 Alembic 版本表；投影迁移账号不能访问核心 Schema，核心迁移账号也不能访问投影 Schema。记录过旧平台 revision `20260811_0001` 的预生产开发卷必须重建，或在备份后制定显式迁移方案，不能直接标记为新基线。
 
-健康检查：`GET http://localhost:8000/health/live`。
+Compose 通过统一入口暴露健康检查：`GET http://platform.localhost:8088/health/live`。宿主机单独运行后端时仍使用 `GET http://localhost:8000/health/live`。
 
 模块只能通过公开的 application 接口协作，禁止跨模块导入对方的 SQLAlchemy Model、Repository 或内部实现。认证凭据、会话和令牌由 authentik 管理；平台只维护用户映射、组织、角色、权限和授权版本。
 
