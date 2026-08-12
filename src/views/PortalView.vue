@@ -17,7 +17,7 @@ const milestoneTasks = [
   { code: 'M0-06', name: '平台核心与投影权限边界', owner: '平台研发', status: '已完成' },
   { code: 'M0-07', name: '配置与密钥占位校验', owner: '平台研发', status: '已完成' },
   { code: 'M0-08', name: '生产组件锁与升级策略', owner: '平台运维', status: '已完成' },
-  { code: 'M0-09', name: '基础 CI 与公开契约门禁', owner: '平台研发', status: '进行中' },
+  { code: 'M0-09', name: '基础 CI 与公开契约门禁', owner: '平台研发', status: '已完成' },
 ]
 
 const platformEntries = [
@@ -31,7 +31,7 @@ const platformEntries = [
 <template>
   <div class="page-shell portal-page">
     <PageHeader
-      eyebrow="PLATFORM IMPLEMENTATION · M0"
+      eyebrow="PLATFORM IMPLEMENTATION · M1"
       title="AI Hub 平台控制台"
       description="当前只建设平台公共能力。真实业务应用通过公开 API 和事件独立接入，不进入平台源码、数据库或发布制品。"
     >
@@ -44,14 +44,14 @@ const platformEntries = [
     <section class="attention-strip" aria-label="当前实施提醒">
       <span class="attention-strip__mark"><el-icon><CircleCheck /></el-icon></span>
       <div>
-        <strong>M0-09 进行中：本地门禁与远端 Required gate 均已通过</strong>
-        <small>私有仓库分支保护受当前 GitHub 账号方案限制；仓库保持私有，待账号升级后启用。</small>
+        <strong>M0 已完成：本地门禁与远端 Required gate 均已通过</strong>
+        <small>公开仓库的 main 已启用分支保护；下一步从 M1-01 开始身份与 API 纵向链路。</small>
       </div>
       <el-button text type="primary" @click="router.push('/platform/operations')">查看运行基线<el-icon><ArrowRight /></el-icon></el-button>
     </section>
 
     <div class="metric-grid page-section">
-      <MetricCard label="当前里程碑" value="M0" hint="架构与部署基线" icon="Flag" tone="orange" />
+      <MetricCard label="当前里程碑" value="M1" hint="身份与 API 纵向链路" icon="Flag" tone="blue" />
       <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="均为中性认证配置" icon="Grid" tone="blue" />
       <MetricCard label="公开契约骨架" value="2" unit="份" hint="OpenAPI · AsyncAPI" icon="Document" tone="green" />
       <MetricCard label="基线检查" value="9" unit="项" hint="远端 CI 已通过" icon="CircleCheck" tone="green" />

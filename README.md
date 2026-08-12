@@ -25,7 +25,7 @@ cp .env.example .env
 bash scripts/ci/all.sh
 ~~~
 
-基础 CI 定义在 `.github/workflows/ci.yml`，本地与流水线共同调用 `scripts/ci/` 下的 Python、前端和部署门禁，避免维护两套命令。外部 Action 固定完整提交 SHA，`Required gate` 是分支保护应使用的稳定汇总检查。代码已推送到私有仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)，[远端 Actions 验证](https://github.com/tonycc/ai-hub/actions/runs/31556943888)中的三个并行作业和 `Required gate` 均已通过。当前 GitHub 账号方案不支持私有仓库分支保护，因此仓库继续保持私有，`main` 的必需检查将在账号升级后启用。
+基础 CI 定义在 `.github/workflows/ci.yml`，本地与流水线共同调用 `scripts/ci/` 下的 Python、前端和部署门禁，避免维护两套命令。外部 Action 固定完整提交 SHA，`Required gate` 是分支保护使用的稳定汇总检查。代码已推送到公开仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)，[远端 Actions 验证](https://github.com/tonycc/ai-hub/actions/runs/31557248062)中的三个并行作业和 `Required gate` 均已通过；`main` 已启用分支保护并要求该检查成功。
 
 根 `.env.example` 只用于 Docker Compose，并将所有示例密码显式标记为本地专用；平台和参考应用的宿主机进程配置分别参考 `backend/.env.example` 与 `examples/standalone-app/.env.example`。Compose 缺少必填密钥时不会使用公开默认密码继续启动，非本地 Python 进程也会拒绝本机地址、占位密码和不安全的身份/API 地址。
 
