@@ -50,6 +50,9 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     component_lock = json.loads(COMPONENT_LOCK_PATH.read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
 
+    python_step = next(
+        step for step in jobs["python"]["steps"] if "setup-python@" in step.get("uses", "")
+    )
     uv_step = next(step for step in jobs["python"]["steps"] if "setup-uv@" in step.get("uses", ""))
     node_step = next(
         step for step in jobs["frontend"]["steps"] if "setup-node@" in step.get("uses", "")
@@ -59,7 +62,7 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     expected_uv = component_lock["tools"]["uv"]["version"]
 
     assert uv_step["with"]["version"] == expected_uv
-    assert uv_step["with"]["python-version"] == expected_python
+    assert python_step["with"]["python-version"] == expected_python
     assert node_step["with"]["node-version"] == expected_node
     assert jobs["python"]["steps"][-1]["run"] == "bash scripts/ci/python.sh"
     assert jobs["frontend"]["steps"][-1]["run"] == "bash scripts/ci/frontend.sh"
