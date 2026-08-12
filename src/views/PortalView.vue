@@ -44,8 +44,8 @@ const platformEntries = [
     <section class="attention-strip" aria-label="当前实施提醒">
       <span class="attention-strip__mark"><el-icon><CircleCheck /></el-icon></span>
       <div>
-        <strong>M0-09 进行中：CI 工作流、本地等价入口和公开契约门禁已通过</strong>
-        <small>待仓库接入 GitHub 后完成远端首次运行，并把 Required gate 设为分支保护必需检查。</small>
+        <strong>M0-09 进行中：本地门禁与远端 Required gate 均已通过</strong>
+        <small>私有仓库分支保护受当前 GitHub 账号方案限制；仓库保持私有，待账号升级后启用。</small>
       </div>
       <el-button text type="primary" @click="router.push('/platform/operations')">查看运行基线<el-icon><ArrowRight /></el-icon></el-button>
     </section>
@@ -54,7 +54,7 @@ const platformEntries = [
       <MetricCard label="当前里程碑" value="M0" hint="架构与部署基线" icon="Flag" tone="orange" />
       <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="均为中性认证配置" icon="Grid" tone="blue" />
       <MetricCard label="公开契约骨架" value="2" unit="份" hint="OpenAPI · AsyncAPI" icon="Document" tone="green" />
-      <MetricCard label="基线检查" value="9" unit="项" hint="远端门禁待启用" icon="Warning" tone="orange" />
+      <MetricCard label="基线检查" value="9" unit="项" hint="远端 CI 已通过" icon="CircleCheck" tone="green" />
     </div>
 
     <div class="work-grid page-section">

@@ -250,7 +250,7 @@ export const platformServices = {
           { requestId: 'req-m0-06-001', actor: '平台维护者', action: '验证平台数据库边界', target: 'platform_core / platform_projection', time: '刚刚', status: '成功' },
           { requestId: 'req-m0-07-001', actor: '平台维护者', action: '验证配置与密钥边界', target: 'Compose / Pydantic Settings', time: '刚刚', status: '成功' },
           { requestId: 'req-m0-08-001', actor: '平台维护者', action: '验证生产组件精确锁', target: '镜像摘要 / 两个部署档位 / 权限边界', time: '刚刚', status: '成功' },
-          { requestId: 'req-m0-09-001', actor: '平台维护者', action: '建立基础 CI 门禁', target: '仓库脚本 / GitHub Actions / 公开契约', time: '刚刚', status: '进行中' },
+          { requestId: 'req-m0-09-001', actor: '平台维护者', action: '建立基础 CI 门禁', target: 'GitHub Actions / Required gate / 分支保护待启用', time: '刚刚', status: '进行中' },
         ],
       },
       {
@@ -276,7 +276,7 @@ export const platformServices = {
     primaryAction: '运行基线检查',
     metrics: [
       { label: '当前里程碑', value: 'M0', hint: '部署基线收敛', icon: 'Flag', tone: 'orange' },
-      { label: '基础检查', value: '9', unit: '项', hint: '远端门禁待启用', icon: 'Warning', tone: 'amber' },
+      { label: '基础检查', value: '9', unit: '项', hint: '远端 CI 已通过', icon: 'CircleCheck', tone: 'green' },
       { label: 'PostgreSQL 服务', value: '1', unit: '个', hint: '三个逻辑库已隔离', icon: 'Coin', tone: 'green' },
       { label: '生产 SLO', value: '—', hint: 'V1.0 前确认', icon: 'DataLine', tone: 'blue' },
     ],
@@ -376,6 +376,8 @@ export const platformServices = {
           { name: '组件锁一致性', scope: '清单、Compose、Dockerfile 与环境模板', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
           { name: '精确镜像运行门禁', scope: '两个 profile、迁移、健康与权限边界', lastRun: 'M0-08 本轮', findings: 0, status: '通过' },
           { name: '公开契约与 CI 自检', scope: 'OpenAPI、AsyncAPI、CloudEvents 与工作流', lastRun: 'M0-09 本轮', findings: 0, status: '通过' },
+          { name: '远端 GitHub Actions', scope: '三个并行作业与 Required gate', lastRun: '运行 31556943888', findings: 0, status: '通过' },
+          { name: 'main 分支保护', scope: 'Required gate 必需检查', lastRun: '当前账号方案', findings: 1, status: '待启用' },
         ],
       },
     ],
@@ -383,7 +385,7 @@ export const platformServices = {
 }
 
 export const messageItems = [
-  { id: 'msg-1', category: '实施进度', title: 'M0-09 本地 CI 门禁已通过', summary: '36 项测试、静态检查、模块边界、公开契约、前端构建和 Compose 配置已由统一脚本验证；远端 Required gate 待启用。', app: '平台实施', time: '刚刚', unread: true, icon: 'Warning', tone: 'warning', route: '/platform/operations', context: 'M0-09 · remote gate pending' },
+  { id: 'msg-1', category: '实施进度', title: 'M0-09 远端 CI 门禁已通过', summary: '三个并行作业与 Required gate 已在私有 GitHub 仓库运行成功；分支保护受当前账号方案限制，待升级后启用。', app: '平台实施', time: '刚刚', unread: true, icon: 'Warning', tone: 'warning', route: '/platform/operations', context: 'M0-09 · branch protection pending' },
   { id: 'msg-2', category: '安全提醒', title: '本地示例密码不得用于生产环境', summary: '生产凭据需要进入密钥管理并完成轮换、撤销与泄露响应演练。', app: '安全治理', time: '今天', unread: true, icon: 'Lock', tone: 'danger', route: '/platform/settings', context: 'SEC-CONFIG · 密钥与配置边界' },
   { id: 'msg-3', category: '接入结果', title: '中性参考应用基础测试通过', summary: '当前只验证工程骨架；OIDC、权限、通知和事件认证将在后续门禁完成。', app: '开发者中心', time: '今天', unread: false, icon: 'CircleCheck', tone: 'success', route: '/platform/developer', context: 'standalone-reference · API_CLIENT' },
   { id: 'msg-4', category: '平台公告', title: '平台建设范围已收敛', summary: '真实业务应用不属于平台交付物，历史领域演示代码已从平台制品中移除。', app: '平台产品', time: '今天', unread: false, icon: 'Bell', tone: 'info', route: '/', context: 'PLATFORM-SCOPE · 平台公共能力' },

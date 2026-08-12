@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.6 |
+| 文档版本 | V1.7 |
 | 文档状态 | 执行基线 |
 | 更新日期 | 2026-08-12 |
 | 适用范围 | 平台后端、平台管理端、Python SDK、业务中性接入参考应用、API/事件契约、本地与生产部署基线 |
@@ -315,7 +315,7 @@ bash scripts/ci/all.sh
 
 三个可独立并行的入口分别是 `scripts/ci/python.sh`、`scripts/ci/frontend.sh` 和 `scripts/ci/deploy.sh`。Python 入口使用 `uv --frozen` 执行 pytest、Ruff、Pyright strict、import-linter、迁移契约、组件锁、公开契约和 CI 自检；前端入口使用 `npm ci` 后执行生产构建；部署入口解析两个 Compose profile。`.github/workflows/ci.yml` 使用 Python 3.14.7、Node.js 24.18.1 和 uv 0.9.8，外部 Action 固定完整提交 SHA，工作流权限只有 `contents: read`，并提供稳定的 `Required gate` 汇总作业供分支保护使用。
 
-当前目录没有 Git 元数据和远端仓库，因此只能验证工作流结构与本地等价入口，尚不能形成远端 Actions 成功记录或配置分支保护。把仓库接入 GitHub 后，必须先确认三个作业与 `Required gate` 实际通过，再将 `Required gate` 配置为受保护分支的必需检查；完成这项外部门禁前 M0-09 保持 `进行中`。
+当前目录已初始化为 Git 仓库并推送到私有仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)。[GitHub Actions 运行 31556943888](https://github.com/tonycc/ai-hub/actions/runs/31556943888)已确认三个并行作业与 `Required gate` 全部通过。随后配置 `main` 分支保护时，GitHub 返回当前账号方案不支持私有仓库分支保护，要求升级 GitHub Pro 或将仓库公开；项目继续保持私有，不以改变可见性规避限制。账号升级并将 `Required gate` 配置为必需检查前，M0-09 保持 `进行中`。
 
 后续实现必须补充：
 
@@ -357,7 +357,7 @@ bash scripts/ci/all.sh
 - M0-06 已完成：平台核心与投影使用独立 Alembic 配置、revision、Schema 内版本表和迁移账号。核心空库迁移只建立受保护的版本基线，不再把 Outbox 带入 `base-access`；投影在第二个空库中的独立迁移、完整标准事件档位及数据库所有权/越权断言均已通过。平台 API 对投影只读，投影运行账号不能访问核心，两者均不能修改迁移元数据。
 - M0-07 已完成：根 Compose 配置、平台宿主机配置和独立应用宿主机配置已经分离；变量名统一为稳定语义后缀。平台 API、核心迁移、投影迁移、独立应用 API 和独立应用迁移各自只读取所需配置。Compose 会拒绝缺失或空密钥，非本地 Settings 会拒绝本机地址、明文身份/API 地址和 `local-only`/占位密码，校验错误不回显连接串。两个 profile、独立应用到平台的 API 调用和数据库角色边界已在隔离容器中复验。
 - M0-08 已完成：已建立 `deploy/component-lock.json` 和组件升级策略，Compose、Dockerfile 与环境模板均使用精确标签和摘要，并把已 EOL 的 Node.js 20 构建基线调整为 Node.js 24 LTS、把门户运行时固定在 Nginx stable。精确镜像核验纠正了一项 Node 标签/摘要错配，并按 PostgreSQL 18 官方目录布局把命名卷挂载点调整为 `/var/lib/postgresql`。两个 profile 已分别从全新数据卷完成迁移、健康、独立应用调用平台、RabbitMQ 和数据库权限审计，实际运行版本与锁清单一致。
-- M0-09 进行中：已建立 GitHub Actions 基础工作流、三个可并行的仓库内 CI 入口和一个本地总入口；外部 Action 使用完整提交 SHA，版本与组件锁一致，权限限制为只读。OpenAPI/AsyncAPI/CloudEvents Schema、Python SDK 事件、CI 工作流与脚本自身均已加入契约测试。本地总入口的 36 项测试、Ruff、Pyright strict、import-linter、`npm ci`、前端生产构建和两个 Compose 配置检查已通过；因当前目录没有 Git 远端，仍待远端 Actions 首次成功运行并启用 `Required gate` 分支保护。
+- M0-09 进行中：已建立 GitHub Actions 基础工作流、三个可并行的仓库内 CI 入口和一个本地总入口；外部 Action 使用完整提交 SHA，版本与组件锁一致，权限限制为只读。OpenAPI/AsyncAPI/CloudEvents Schema、Python SDK 事件、CI 工作流与脚本自身均已加入契约测试。本地总入口的 36 项测试、Ruff、Pyright strict、import-linter、`npm ci`、前端生产构建和两个 Compose 配置检查已通过。私有 GitHub 仓库已经创建并推送，远端三个作业与 `Required gate` 已成功运行；当前只剩 `main` 分支保护因 GitHub 账号方案限制尚未启用。
 - authentik、Traefik、OIDC/JWKS 本地验证和正式权限链路尚未完成。
 
-下一步把当前目录纳入 Git 仓库并关联 GitHub 远端，执行 `.github/workflows/ci.yml`，确认 `Required gate` 成功后将其设为受保护分支必需检查。完成后才能把 M0-09 和整个 M0 标记为 `已完成`；随后从 M1-01 开始身份与 API 纵向链路，M1 未通过前不开始 M2 事件生产链路验收。
+下一步在保持仓库私有的前提下升级 GitHub 账号方案，再为 `main` 启用分支保护并将 `Required gate` 设为必需检查；如果确需改为公开仓库，必须先取得明确授权。完成后才能把 M0-09 和整个 M0 标记为 `已完成`；随后从 M1-01 开始身份与 API 纵向链路，M1 未通过前不开始 M2 事件生产链路验收。
