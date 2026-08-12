@@ -1,0 +1,14 @@
+[importlinter]
+root_package = ai_hub_platform
+include_external_packages = False
+
+[importlinter:contract:business_modules_are_independent]
+name = Platform business modules are independent
+type = independence
+modules =
+    ai_hub_platform.modules.app_registry
+    ai_hub_platform.modules.identity
+    ai_hub_platform.modules.permission
+    ai_hub_platform.modules.notification
+    ai_hub_platform.modules.projection
+    ai_hub_platform.modules.audit

@@ -1,0 +1,83 @@
+import pytest
+from pydantic import ValidationError
+from standalone_app.config import MigrationSettings, Settings
+
+
+def test_local_runtime_defaults_are_valid() -> None:
+    settings = Settings()
+
+    assert settings.environment == "local"
+    assert settings.application_id == "standalone-example"
+    assert settings.platform_api_base_url == "http://localhost:8000"
+
+
+def test_production_rejects_local_platform_api_url() -> None:
+    with pytest.raises(ValidationError, match="must use https outside local/test"):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://standalone_app:ProdSecret-8374@"
+                "standalone-db.internal:5432/standalone_app_db"
+            ),
+        )
+
+
+def test_production_runtime_accepts_secure_non_local_configuration() -> None:
+    settings = Settings(
+        environment="production",
+        platform_api_base_url="https://platform.example.org",
+        database_url=(
+            "postgresql+psycopg://standalone_app:ProdSecret-8374@"
+            "standalone-db.internal:5432/standalone_app_db"
+        ),
+    )
+
+    assert settings.environment == "production"
+
+
+def test_production_rejects_placeholder_database_password() -> None:
+    with pytest.raises(ValidationError, match="cannot use a placeholder password"):
+        Settings(
+            environment="production",
+            platform_api_base_url="https://platform.example.org",
+            database_url=(
+                "postgresql+psycopg://standalone_app:change-me-password@"
+                "standalone-db.internal:5432/standalone_app_db"
+            ),
+        )
+
+
+def test_platform_api_url_rejects_embedded_credentials() -> None:
+    with pytest.raises(ValidationError, match="cannot include credentials"):
+        Settings(
+            environment="test",
+            platform_api_base_url="http://user:password@platform.test",
+        )
+
+
+def test_validation_error_does_not_expose_database_password() -> None:
+    exposed_password = "change-me-sensitive-value"
+
+    with pytest.raises(ValidationError) as error:
+        Settings(
+            environment="production",
+            platform_api_base_url="https://platform.example.org",
+            database_url=(
+                f"postgresql+psycopg://standalone_app:{exposed_password}@"
+                "standalone-db.internal:5432/standalone_app_db"
+            ),
+        )
+
+    assert exposed_password not in str(error.value)
+
+
+def test_migration_process_does_not_require_platform_api_configuration() -> None:
+    settings = MigrationSettings(
+        environment="production",
+        migration_database_url=(
+            "postgresql+psycopg://standalone_app_migrator:MigrationSecret-3819@"
+            "standalone-db.internal:5432/standalone_app_db"
+        ),
+    )
+
+    assert settings.environment == "production"

@@ -1,0 +1,34 @@
+openapi: 3.1.0
+info:
+  title: AI Hub Platform API
+  version: 0.1.0
+  description: Public API contract for standalone applications.
+servers:
+  - url: https://platform.example.internal
+paths:
+  /health/live:
+    get:
+      operationId: getPlatformLiveness
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Platform process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          const: ok
+        service:
+          type: string
+        version:
+          type: string

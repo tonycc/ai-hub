@@ -1,0 +1,240 @@
+name: ai-hub-local
+
+x-core-profiles: &core-profiles
+  - base-access
+  - standard-events
+
+services:
+  postgres:
+    profiles: *core-profiles
+    image: ${POSTGRES_IMAGE:-postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15}
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+      AUTHENTIK_DB_PASSWORD: ${AUTHENTIK_DB_PASSWORD:?Set AUTHENTIK_DB_PASSWORD in .env}
+      AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD: ${AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD in .env}
+      AI_HUB_PLATFORM_DB_PASSWORD: ${AI_HUB_PLATFORM_DB_PASSWORD:?Set AI_HUB_PLATFORM_DB_PASSWORD in .env}
+      AI_HUB_PROJECTION_MIGRATOR_DB_PASSWORD: ${AI_HUB_PROJECTION_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PROJECTION_MIGRATOR_DB_PASSWORD in .env}
+      AI_HUB_PROJECTION_DB_PASSWORD: ${AI_HUB_PROJECTION_DB_PASSWORD:?Set AI_HUB_PROJECTION_DB_PASSWORD in .env}
+      STANDALONE_MIGRATOR_DB_PASSWORD: ${STANDALONE_MIGRATOR_DB_PASSWORD:?Set STANDALONE_MIGRATOR_DB_PASSWORD in .env}
+      STANDALONE_APP_DB_PASSWORD: ${STANDALONE_APP_DB_PASSWORD:?Set STANDALONE_APP_DB_PASSWORD in .env}
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - type: volume
+        source: postgres-data
+        target: ${POSTGRES_DATA_VOLUME_TARGET:-/var/lib/postgresql}
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/verify:/opt/ai-hub/postgres-verify:ro
+
+  platform-core-migrate:
+    profiles: *core-profiles
+    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["alembic", "-c", "/workspace/backend/alembic.ini", "upgrade", "head"]
+    environment:
+      AI_HUB_ENVIRONMENT: ${AI_HUB_ENVIRONMENT:-local}
+      AI_HUB_MIGRATION_DATABASE_URL: postgresql+psycopg://ai_hub_platform_migrator:${AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/platform_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  platform-projection-migrate:
+    profiles:
+      - standard-events
+    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["alembic", "-c", "/workspace/backend/alembic-projection.ini", "upgrade", "head"]
+    environment:
+      AI_HUB_ENVIRONMENT: ${AI_HUB_ENVIRONMENT:-local}
+      AI_HUB_PROJECTION_MIGRATION_DATABASE_URL: postgresql+psycopg://ai_hub_projection_migrator:${AI_HUB_PROJECTION_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PROJECTION_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/platform_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  platform-api:
+    profiles: *core-profiles
+    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    environment:
+      AI_HUB_ENVIRONMENT: ${AI_HUB_ENVIRONMENT:-local}
+      AI_HUB_APPLICATION_ID: ${AI_HUB_APPLICATION_ID:-ai-hub-platform}
+      AI_HUB_DATABASE_URL: postgresql+psycopg://ai_hub_platform:${AI_HUB_PLATFORM_DB_PASSWORD:?Set AI_HUB_PLATFORM_DB_PASSWORD in .env}@postgres:5432/platform_db
+      AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:-http://authentik:9000/application/o/ai-hub/}
+      AI_HUB_OIDC_AUDIENCE: ${AI_HUB_OIDC_AUDIENCE:-ai-hub-platform}
+    ports:
+      - "${AI_HUB_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      platform-core-migrate:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+
+  portal:
+    profiles: *core-profiles
+    image: "${AI_HUB_PORTAL_IMAGE:-ai-hub-portal}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: deploy/docker/portal.Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24.18.1-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46}
+    ports:
+      - "${AI_HUB_PORTAL_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  standalone-migrate:
+    profiles: *core-profiles
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["alembic", "-c", "/workspace/examples/standalone-app/alembic.ini", "upgrade", "head"]
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_MIGRATION_DATABASE_URL: postgresql+psycopg://standalone_app_migrator:${STANDALONE_MIGRATOR_DB_PASSWORD:?Set STANDALONE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  standalone-event-publisher-migrate:
+    profiles:
+      - standard-events
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command:
+      - alembic
+      - -c
+      - /workspace/examples/standalone-app/alembic-event-publisher.ini
+      - upgrade
+      - head
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_MIGRATION_DATABASE_URL: postgresql+psycopg://standalone_app_migrator:${STANDALONE_MIGRATOR_DB_PASSWORD:?Set STANDALONE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  standalone-event-consumer-migrate:
+    profiles:
+      - standard-events
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command:
+      - alembic
+      - -c
+      - /workspace/examples/standalone-app/alembic-event-consumer.ini
+      - upgrade
+      - head
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_MIGRATION_DATABASE_URL: postgresql+psycopg://standalone_app_migrator:${STANDALONE_MIGRATOR_DB_PASSWORD:?Set STANDALONE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  standalone-app:
+    profiles: *core-profiles
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_DATABASE_URL: postgresql+psycopg://standalone_app:${STANDALONE_APP_DB_PASSWORD:?Set STANDALONE_APP_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+      STANDALONE_PLATFORM_API_BASE_URL: ${STANDALONE_PLATFORM_API_BASE_URL:-http://platform-api:8000}
+      STANDALONE_APPLICATION_ID: ${STANDALONE_APPLICATION_ID:-standalone-example}
+    ports:
+      - "${STANDALONE_APP_PORT:-8100}:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health/live', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+      platform-api:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+
+  rabbitmq:
+    profiles:
+      - standard-events
+    image: ${RABBITMQ_IMAGE:-rabbitmq:4.2.9-management@sha256:a2751b3b5eed89e47ebbd5e776de0d6d85d924002773933ab881da49c073b85d}
+    environment:
+      RABBITMQ_DEFAULT_USER: ai_hub
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+volumes:
+  postgres-data:
+  rabbitmq-data:

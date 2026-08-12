@@ -1,0 +1,268 @@
+\set ON_ERROR_STOP on
+
+DO $$
+DECLARE
+    expected_role text;
+BEGIN
+    FOREACH expected_role IN ARRAY ARRAY[
+        'authentik',
+        'ai_hub_platform_migrator',
+        'ai_hub_platform',
+        'ai_hub_projection_migrator',
+        'ai_hub_projection',
+        'standalone_app_migrator',
+        'standalone_app'
+    ]
+    LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = expected_role) THEN
+            RAISE EXCEPTION 'required role % is missing', expected_role;
+        END IF;
+    END LOOP;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_roles
+        WHERE rolname = ANY (ARRAY[
+            'authentik',
+            'ai_hub_platform_migrator',
+            'ai_hub_platform',
+            'ai_hub_projection_migrator',
+            'ai_hub_projection',
+            'standalone_app_migrator',
+            'standalone_app'
+        ])
+          AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+    ) THEN
+        RAISE EXCEPTION 'an application role has administrative privileges';
+    END IF;
+
+    IF NOT has_database_privilege('authentik', 'authentik_db', 'CONNECT')
+       OR has_database_privilege('authentik', 'platform_db', 'CONNECT')
+       OR has_database_privilege('authentik', 'standalone_app_db', 'CONNECT') THEN
+        RAISE EXCEPTION 'authentik database boundary is invalid';
+    END IF;
+
+    IF NOT has_database_privilege('ai_hub_platform', 'platform_db', 'CONNECT')
+       OR has_database_privilege('ai_hub_platform', 'authentik_db', 'CONNECT')
+       OR has_database_privilege('ai_hub_platform', 'standalone_app_db', 'CONNECT') THEN
+        RAISE EXCEPTION 'platform runtime database boundary is invalid';
+    END IF;
+
+    IF NOT has_database_privilege(
+        'ai_hub_platform_migrator', 'platform_db', 'CONNECT'
+    ) OR has_database_privilege(
+        'ai_hub_platform_migrator', 'authentik_db', 'CONNECT'
+    ) OR has_database_privilege(
+        'ai_hub_platform_migrator', 'standalone_app_db', 'CONNECT'
+    ) THEN
+        RAISE EXCEPTION 'platform migrator database boundary is invalid';
+    END IF;
+
+    IF NOT has_database_privilege(
+        'ai_hub_projection_migrator', 'platform_db', 'CONNECT'
+    ) OR has_database_privilege(
+        'ai_hub_projection_migrator', 'authentik_db', 'CONNECT'
+    ) OR has_database_privilege(
+        'ai_hub_projection_migrator', 'standalone_app_db', 'CONNECT'
+    ) THEN
+        RAISE EXCEPTION 'projection migrator database boundary is invalid';
+    END IF;
+
+    IF NOT has_database_privilege('ai_hub_projection', 'platform_db', 'CONNECT')
+       OR has_database_privilege('ai_hub_projection', 'authentik_db', 'CONNECT')
+       OR has_database_privilege('ai_hub_projection', 'standalone_app_db', 'CONNECT') THEN
+        RAISE EXCEPTION 'projection runtime database boundary is invalid';
+    END IF;
+
+    IF NOT has_database_privilege('standalone_app', 'standalone_app_db', 'CONNECT')
+       OR has_database_privilege('standalone_app', 'authentik_db', 'CONNECT')
+       OR has_database_privilege('standalone_app', 'platform_db', 'CONNECT') THEN
+        RAISE EXCEPTION 'standalone runtime database boundary is invalid';
+    END IF;
+
+    IF NOT has_database_privilege(
+        'standalone_app_migrator', 'standalone_app_db', 'CONNECT'
+    ) OR has_database_privilege(
+        'standalone_app_migrator', 'authentik_db', 'CONNECT'
+    ) OR has_database_privilege(
+        'standalone_app_migrator', 'platform_db', 'CONNECT'
+    ) THEN
+        RAISE EXCEPTION 'standalone migrator database boundary is invalid';
+    END IF;
+END
+$$;
+
+\connect platform_db
+
+DO $$
+BEGIN
+    IF (
+        SELECT pg_get_userbyid(nspowner)
+        FROM pg_namespace
+        WHERE nspname = 'platform_core'
+    ) IS DISTINCT FROM 'ai_hub_platform_migrator' THEN
+        RAISE EXCEPTION 'platform_core schema owner is invalid';
+    END IF;
+
+    IF (
+        SELECT pg_get_userbyid(nspowner)
+        FROM pg_namespace
+        WHERE nspname = 'platform_projection'
+    ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
+        RAISE EXCEPTION 'platform_projection schema owner is invalid';
+    END IF;
+
+    IF NOT has_schema_privilege(
+        'ai_hub_platform_migrator', 'platform_core', 'USAGE,CREATE'
+    ) OR has_schema_privilege(
+        'ai_hub_platform_migrator', 'platform_projection', 'USAGE'
+    ) THEN
+        RAISE EXCEPTION 'platform migrator schema boundary is invalid';
+    END IF;
+
+    IF NOT has_schema_privilege(
+        'ai_hub_projection_migrator', 'platform_projection', 'USAGE,CREATE'
+    ) OR has_schema_privilege(
+        'ai_hub_projection_migrator', 'platform_core', 'USAGE'
+    ) THEN
+        RAISE EXCEPTION 'projection migrator schema boundary is invalid';
+    END IF;
+
+    IF NOT has_schema_privilege('ai_hub_platform', 'platform_core', 'USAGE')
+       OR has_schema_privilege('ai_hub_platform', 'platform_core', 'CREATE') THEN
+        RAISE EXCEPTION 'platform runtime platform_core schema privilege is invalid';
+    END IF;
+
+    IF (
+        SELECT tableowner
+        FROM pg_tables
+        WHERE schemaname = 'platform_core'
+          AND tablename = 'alembic_version'
+    ) IS DISTINCT FROM 'ai_hub_platform_migrator' THEN
+        RAISE EXCEPTION 'platform core migration table owner is invalid';
+    END IF;
+
+    IF (
+        SELECT count(DISTINCT privilege_type)
+        FROM pg_default_acl default_acl
+        CROSS JOIN LATERAL aclexplode(default_acl.defaclacl) privilege
+        JOIN pg_namespace namespace
+          ON namespace.oid = default_acl.defaclnamespace
+        WHERE default_acl.defaclrole = 'ai_hub_platform_migrator'::regrole
+          AND default_acl.defaclobjtype = 'r'
+          AND namespace.nspname = 'platform_core'
+          AND privilege.grantee = 'ai_hub_platform'::regrole
+          AND privilege.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+    ) <> 4 THEN
+        RAISE EXCEPTION 'platform core default table privileges are invalid';
+    END IF;
+
+    IF has_table_privilege(
+        'ai_hub_platform',
+        'platform_core.alembic_version',
+        'SELECT,INSERT,UPDATE,DELETE'
+    ) THEN
+        RAISE EXCEPTION 'platform runtime can modify core migration metadata';
+    END IF;
+
+    IF NOT has_schema_privilege('ai_hub_platform', 'platform_projection', 'USAGE')
+       OR NOT has_table_privilege(
+           'ai_hub_platform',
+           'platform_projection.integration_inbox',
+           'SELECT'
+       )
+       OR has_table_privilege(
+           'ai_hub_platform',
+           'platform_projection.integration_inbox',
+           'INSERT,UPDATE,DELETE'
+       ) THEN
+        RAISE EXCEPTION 'platform runtime projection privilege is not read-only';
+    END IF;
+
+    IF has_table_privilege(
+        'ai_hub_platform',
+        'platform_projection.alembic_version',
+        'SELECT,INSERT,UPDATE,DELETE'
+    ) THEN
+        RAISE EXCEPTION 'platform runtime can access projection migration metadata';
+    END IF;
+
+    IF has_schema_privilege('ai_hub_projection', 'platform_core', 'USAGE')
+       OR has_table_privilege(
+           'ai_hub_projection',
+           'platform_core.alembic_version',
+           'SELECT,INSERT,UPDATE,DELETE'
+       ) THEN
+        RAISE EXCEPTION 'projection runtime can access platform_core';
+    END IF;
+
+    IF NOT has_schema_privilege('ai_hub_projection', 'platform_projection', 'USAGE')
+       OR has_schema_privilege('ai_hub_projection', 'platform_projection', 'CREATE')
+       OR NOT has_table_privilege(
+           'ai_hub_projection', 'platform_projection.integration_inbox', 'SELECT'
+       )
+       OR NOT has_table_privilege(
+           'ai_hub_projection', 'platform_projection.integration_inbox', 'INSERT'
+       )
+       OR NOT has_table_privilege(
+           'ai_hub_projection', 'platform_projection.integration_inbox', 'UPDATE'
+       )
+       OR NOT has_table_privilege(
+           'ai_hub_projection', 'platform_projection.integration_inbox', 'DELETE'
+       ) THEN
+        RAISE EXCEPTION 'projection runtime platform_projection privilege is invalid';
+    END IF;
+
+    IF (
+        SELECT tableowner
+        FROM pg_tables
+        WHERE schemaname = 'platform_projection'
+          AND tablename = 'integration_inbox'
+    ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
+        RAISE EXCEPTION 'platform projection table owner is invalid';
+    END IF;
+
+    IF (
+        SELECT tableowner
+        FROM pg_tables
+        WHERE schemaname = 'platform_projection'
+          AND tablename = 'alembic_version'
+    ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
+        RAISE EXCEPTION 'platform projection migration table owner is invalid';
+    END IF;
+
+    IF has_table_privilege(
+        'ai_hub_projection',
+        'platform_projection.alembic_version',
+        'SELECT,INSERT,UPDATE,DELETE'
+    ) THEN
+        RAISE EXCEPTION 'projection runtime can modify migration metadata';
+    END IF;
+END
+$$;
+
+\connect standalone_app_db
+
+DO $$
+BEGIN
+    IF NOT has_schema_privilege('standalone_app', 'app', 'USAGE')
+       OR has_schema_privilege('standalone_app', 'app', 'CREATE') THEN
+        RAISE EXCEPTION 'standalone runtime app schema privilege is invalid';
+    END IF;
+
+    IF NOT has_table_privilege('standalone_app', 'app.example_record', 'SELECT')
+       OR NOT has_table_privilege('standalone_app', 'app.example_record', 'INSERT')
+       OR NOT has_table_privilege('standalone_app', 'app.example_record', 'UPDATE')
+       OR NOT has_table_privilege('standalone_app', 'app.example_record', 'DELETE') THEN
+        RAISE EXCEPTION 'standalone runtime cannot use app tables';
+    END IF;
+
+    IF has_schema_privilege('ai_hub_platform', 'app', 'USAGE')
+       OR has_schema_privilege('ai_hub_projection', 'app', 'USAGE')
+       OR has_schema_privilege('authentik', 'app', 'USAGE') THEN
+        RAISE EXCEPTION 'a platform role can access the standalone app schema';
+    END IF;
+END
+$$;
+
+SELECT 'database role boundaries verified' AS result;

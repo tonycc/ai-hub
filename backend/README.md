@@ -1,0 +1,51 @@
+# AI Hub Platform Backend
+
+Python 模块化单体。HTTP API 与事件 Worker 使用同一组领域和应用模块，但以不同进程运行和扩缩容。
+
+实施顺序、数据库逻辑隔离、身份/API 门禁和事件可靠性门禁见[方案实施计划](../docs/implementation-plan.md)。当前代码是基础骨架，尚未完成 authentik、Traefik 和正式 OIDC/JWKS 验证，不使用临时身份实现替代。
+
+完整容器化启动：
+
+~~~bash
+cp .env.example .env
+docker compose -f deploy/compose.yaml --profile base-access up -d --build
+~~~
+
+只在宿主机运行平台 API 时，先单独启动 PostgreSQL，并通过后端专用环境文件执行迁移和进程：
+
+~~~bash
+docker compose -f deploy/compose.yaml --profile base-access up -d postgres
+cp backend/.env.example backend/.env
+uv sync --all-packages --all-groups
+uv run --env-file backend/.env --package ai-hub-platform-backend \
+  alembic -c backend/alembic.ini upgrade head
+uv run --env-file backend/.env --package ai-hub-platform-backend ai-hub-api
+~~~
+
+平台 API 只读取 `AI_HUB_DATABASE_URL`、应用标识和 OIDC 配置；核心、投影 Alembic 分别只读取自己的迁移连接串。API-only 进程不读取 RabbitMQ 地址。`integration`、`uat` 与 `production` 配置会拒绝本机地址、占位密码和非 HTTPS issuer，且校验错误不显示连接串输入值。
+
+平台核心和只读投影使用完全独立的迁移入口、Schema、版本表和迁移账号：
+
+| 范围 | Alembic 配置 | Schema | 迁移账号 | 运行账号 |
+| --- | --- | --- | --- | --- |
+| 平台核心 | `backend/alembic.ini` | `platform_core` | `ai_hub_platform_migrator` | `ai_hub_platform` 可读写 |
+| 平台投影 | `backend/alembic-projection.ini` | `platform_projection` | `ai_hub_projection_migrator` | `ai_hub_projection` 可读写，`ai_hub_platform` 只读 |
+
+只有需要事件投影的 `standard-events` 档位执行投影迁移。手工执行时使用独立命令：
+
+~~~bash
+uv run --env-file backend/.env --package ai-hub-platform-backend alembic \
+  -c backend/alembic-projection.ini upgrade head
+~~~
+
+两个运行账号都不能读取或修改 Alembic 版本表；投影迁移账号不能访问核心 Schema，核心迁移账号也不能访问投影 Schema。记录过旧平台 revision `20260811_0001` 的预生产开发卷必须重建，或在备份后制定显式迁移方案，不能直接标记为新基线。
+
+健康检查：`GET http://localhost:8000/health/live`。
+
+模块只能通过公开的 application 接口协作，禁止跨模块导入对方的 SQLAlchemy Model、Repository 或内部实现。认证凭据、会话和令牌由 authentik 管理；平台只维护用户映射、组织、角色、权限和授权版本。
+
+模块边界验证：
+
+~~~bash
+uv run --package ai-hub-platform-backend lint-imports --config backend/.importlinter
+~~~

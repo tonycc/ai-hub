@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "lock_id": "m0-08-2026-08-12",
+  "updated_at": "2026-08-12",
+  "digest_kind": "multi-platform OCI index",
+  "images": {
+    "postgresql": {
+      "environment_variable": "POSTGRES_IMAGE",
+      "reference": "postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15",
+      "version": "18.4",
+      "role": "runtime database",
+      "verification": "exact digest, PostgreSQL 18.4 runtime, fresh-volume migrations, both Compose profiles, and role boundaries verified on linux/arm64",
+      "runtime_constraints": {
+        "data_volume_target": "/var/lib/postgresql"
+      }
+    },
+    "python": {
+      "environment_variable": "PYTHON_IMAGE",
+      "reference": "python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc",
+      "version": "3.14.7",
+      "role": "backend build and runtime base",
+      "verification": "exact digest and Python 3.14.7 runtime verified in platform and standalone images on linux/arm64"
+    },
+    "node": {
+      "environment_variable": "NODE_IMAGE",
+      "reference": "node:24.18.1-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3",
+      "version": "24.18.1 LTS",
+      "role": "portal build only",
+      "verification": "exact digest, Node 24.18.1 runtime, npm ci, and portal production build verified on linux/arm64"
+    },
+    "nginx": {
+      "environment_variable": "NGINX_IMAGE",
+      "reference": "nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46",
+      "version": "1.30.4 stable",
+      "role": "portal runtime",
+      "verification": "exact digest, Nginx 1.30.4 runtime, portal image, and both profile health checks verified on linux/arm64"
+    },
+    "rabbitmq": {
+      "environment_variable": "RABBITMQ_IMAGE",
+      "reference": "rabbitmq:4.2.9-management@sha256:a2751b3b5eed89e47ebbd5e776de0d6d85d924002773933ab881da49c073b85d",
+      "version": "4.2.9",
+      "role": "standard-events broker",
+      "verification": "exact digest, RabbitMQ 4.2.9 runtime, health check, and diagnostic ping verified on linux/arm64"
+    }
+  },
+  "tools": {
+    "uv": {
+      "version": "0.9.8",
+      "role": "Python dependency installation"
+    }
+  },
+  "release_requirements": {
+    "internal_images": "Platform, portal, and standalone artifacts must use registry digest references in a production release manifest.",
+    "runtime_gate": "Passed on linux/arm64 on 2026-08-12 for base-access and standard-events; every changed image must repeat the component-specific migration and health gates before production."
+  }
+}

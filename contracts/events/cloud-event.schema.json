@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-hub.example.internal/contracts/events/cloud-event.schema.json",
+  "title": "AI Hub CloudEvent",
+  "type": "object",
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "datacontenttype",
+    "data"
+  ],
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "format": "uri-reference"
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subject": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "datacontenttype": {
+      "const": "application/json"
+    },
+    "dataschema": {
+      "type": "string",
+      "format": "uri-reference"
+    },
+    "data": {}
+  },
+  "additionalProperties": true
+}

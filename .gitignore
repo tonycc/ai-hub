@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+npm-debug.log*
+
+# Python
+.python-version.local
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local runtime
+.env
+.env.*
+!.env.example

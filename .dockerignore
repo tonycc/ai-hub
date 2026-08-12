@@ -1,0 +1,13 @@
+.git
+.agents
+.codex
+.venv
+node_modules
+dist
+.pytest_cache
+.ruff_cache
+.import_linter_cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.DS_Store
