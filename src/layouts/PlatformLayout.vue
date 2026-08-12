@@ -308,6 +308,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
   flex: 1;
   padding: 14px 10px;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.main-nav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .nav-group + .nav-group {
