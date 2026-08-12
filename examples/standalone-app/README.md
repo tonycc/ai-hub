@@ -10,11 +10,11 @@
 | `EVENT_PUBLISHER`（可选） | `alembic-event-publisher.ini` | `app.integration_outbox` 及发布索引 |
 | `EVENT_CONSUMER`（可选） | `alembic-event-consumer.ini` | `app.integration_inbox` |
 
-当前 M0-05 只完成迁移模板和部署入口；Outbox 发布器与事件消费者 Worker 在 M2 实现。
+M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、用户和权限查询、版本化授权缓存、对象级最终校验、服务身份测试通知与故障边界认证。Outbox 发布器与事件消费者 Worker 仍在 M2 实现。
 
 ~~~bash
 cp .env.example .env
-docker compose -f deploy/compose.yaml --profile base-access up -d postgres platform-api
+docker compose -f deploy/compose.yaml --profile base-access up -d --build
 cp examples/standalone-app/.env.example examples/standalone-app/.env
 uv sync --all-packages --all-groups
 uv run --env-file examples/standalone-app/.env --package ai-hub-standalone-example alembic \
@@ -22,6 +22,8 @@ uv run --env-file examples/standalone-app/.env --package ai-hub-standalone-examp
 uv run --env-file examples/standalone-app/.env \
   --package ai-hub-standalone-example standalone-app
 ~~~
+
+上述宿主机进程使用 Traefik 暴露的平台和身份地址。若要在宿主机完成登录回调，还需在本地 authentik 客户端中把 `http://localhost:8100/auth/callback` 登记为严格匹配的 Redirect URI；默认 blueprint 只登记容器入口 `http://app.localhost:8088/auth/callback`。完整验收和日常启动优先使用下方全容器方式。
 
 运行进程使用 `STANDALONE_PLATFORM_API_BASE_URL`，迁移进程只读取 `STANDALONE_MIGRATION_DATABASE_URL`。`integration`、`uat` 与 `production` 会拒绝本机平台地址、非 HTTPS 平台地址和占位数据库密码；API-only 配置不要求 RabbitMQ。
 
@@ -44,8 +46,12 @@ docker compose -f deploy/compose.yaml --profile base-access up -d --build
 
 `base-access` 只执行基础迁移；`standard-events` 会为中性参考应用额外执行发布者和消费者迁移，并启动 RabbitMQ，但尚不启动事件 Worker。
 
-- 应用健康检查：`GET http://localhost:8100/health/live`
-- 平台连通性：`GET http://localhost:8100/api/v1/platform-status`
+- 应用健康检查：`GET http://app.localhost:8088/health/live`
+- 登录入口：`GET http://app.localhost:8088/auth/login`
+- 当前会话：`GET http://app.localhost:8088/api/v1/session`
+- 平台连通性：`GET http://app.localhost:8088/api/v1/platform-status`
+
+完整独立接入认证由仓库根目录执行 `bash scripts/ci/m1-runtime.sh`。该门禁还会证明参考应用镜像没有安装平台代码包，且平台与应用分别停止、启动时不会形成进程级反向依赖。
 
 执行“可独立提取”认证时，将 workspace 中的 `ai-hub-sdk` 依赖替换为内部 Python 包仓库中的已发布版本。未来真实业务应用可参考其接入方式，但不得复制其中的测试数据模型作为领域模型。
 

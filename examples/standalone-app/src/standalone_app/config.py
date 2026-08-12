@@ -103,6 +103,22 @@ def _validate_platform_api_base_url(value: str, *, strict: bool) -> None:
         )
 
 
+def _validate_oidc_issuer(value: str, *, strict: bool) -> None:
+    parsed = _parse_url(
+        value,
+        field_name="oidc_issuer",
+        allowed_schemes={"http", "https"},
+    )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("oidc_issuer cannot include credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("oidc_issuer cannot include a query or fragment")
+    if strict and parsed.scheme != "https":
+        raise ValueError("oidc_issuer must use https outside local/test")
+    if strict and _is_local_hostname(parsed.hostname or ""):
+        raise ValueError("oidc_issuer cannot use a local hostname outside local/test")
+
+
 class _StandaloneSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -123,17 +139,41 @@ class Settings(_StandaloneSettings):
         "postgresql+psycopg://standalone_app:local-only-standalone-password@"
         "localhost:5433/standalone_app_db"
     )
+    oidc_issuer: str = "http://localhost:9000/application/o/ai-hub/"
+    oidc_audience: str = "ai-hub-platform"
+    oidc_client_id: str = "ai-hub-platform"
+    oidc_client_secret: str = "local-only-oidc-client-secret"
+    oidc_redirect_uri: str = "http://localhost:8100/auth/callback"
+    oidc_jwks_cache_ttl_seconds: int = 300
+    oidc_jwks_stale_ttl_seconds: int = 3600
+    session_secret: str = "local-only-standalone-session-signing-secret"
+    authorization_cache_stale_ttl_seconds: int = 300
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
         strict = _is_strict_environment(self.environment)
         _validate_application_id(self.application_id)
         _validate_platform_api_base_url(self.platform_api_base_url, strict=strict)
+        _validate_oidc_issuer(self.oidc_issuer, strict=strict)
         _validate_database_url(
             self.database_url,
             field_name="database_url",
             strict=strict,
         )
+        if strict and _has_placeholder_secret(self.oidc_client_secret):
+            raise ValueError("oidc_client_secret cannot use a placeholder outside local/test")
+        if strict and _has_placeholder_secret(self.session_secret):
+            raise ValueError("session_secret cannot use a placeholder outside local/test")
+        if len(self.session_secret) < 32:
+            raise ValueError("session_secret must contain at least 32 characters")
+        if self.oidc_jwks_cache_ttl_seconds < 1:
+            raise ValueError("oidc_jwks_cache_ttl_seconds must be positive")
+        if self.oidc_jwks_stale_ttl_seconds < self.oidc_jwks_cache_ttl_seconds:
+            raise ValueError(
+                "oidc_jwks_stale_ttl_seconds must not be shorter than the fresh cache TTL"
+            )
+        if self.authorization_cache_stale_ttl_seconds < 1:
+            raise ValueError("authorization_cache_stale_ttl_seconds must be positive")
         return self
 
 

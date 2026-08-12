@@ -60,7 +60,7 @@ function retry(row) {
 
     <div class="metric-grid page-section">
       <MetricCard label="登记能力" :value="store.state.capabilities.length" unit="项" hint="中性接入契约" icon="Connection" tone="blue" />
-      <MetricCard label="认证调用" value="0" unit="次" hint="等待 M1 身份链路" icon="DataLine" tone="green" />
+      <MetricCard label="认证调用" value="1" unit="套" hint="M1 纵向链路通过" icon="DataLine" tone="green" />
       <MetricCard label="事件配置" value="1" unit="套" hint="默认保持未启用" icon="CircleCheck" tone="green" />
       <MetricCard label="待验证命令" :value="store.state.commands.length" unit="项" hint="仅中性测试记录" icon="Warning" tone="amber" />
     </div>

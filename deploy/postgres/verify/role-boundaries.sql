@@ -165,26 +165,12 @@ BEGIN
         RAISE EXCEPTION 'platform runtime can modify core migration metadata';
     END IF;
 
-    IF NOT has_schema_privilege('ai_hub_platform', 'platform_projection', 'USAGE')
-       OR NOT has_table_privilege(
-           'ai_hub_platform',
-           'platform_projection.integration_inbox',
-           'SELECT'
-       )
-       OR has_table_privilege(
-           'ai_hub_platform',
-           'platform_projection.integration_inbox',
-           'INSERT,UPDATE,DELETE'
-       ) THEN
-        RAISE EXCEPTION 'platform runtime projection privilege is not read-only';
-    END IF;
-
-    IF has_table_privilege(
-        'ai_hub_platform',
-        'platform_projection.alembic_version',
-        'SELECT,INSERT,UPDATE,DELETE'
+    IF NOT has_table_privilege(
+        'ai_hub_platform', 'platform_core.audit_event', 'INSERT'
+    ) OR has_table_privilege(
+        'ai_hub_platform', 'platform_core.audit_event', 'SELECT,UPDATE,DELETE'
     ) THEN
-        RAISE EXCEPTION 'platform runtime can access projection migration metadata';
+        RAISE EXCEPTION 'platform audit table is not append-only for runtime';
     END IF;
 
     IF has_schema_privilege('ai_hub_projection', 'platform_core', 'USAGE')
@@ -196,47 +182,75 @@ BEGIN
         RAISE EXCEPTION 'projection runtime can access platform_core';
     END IF;
 
-    IF NOT has_schema_privilege('ai_hub_projection', 'platform_projection', 'USAGE')
-       OR has_schema_privilege('ai_hub_projection', 'platform_projection', 'CREATE')
-       OR NOT has_table_privilege(
-           'ai_hub_projection', 'platform_projection.integration_inbox', 'SELECT'
-       )
-       OR NOT has_table_privilege(
-           'ai_hub_projection', 'platform_projection.integration_inbox', 'INSERT'
-       )
-       OR NOT has_table_privilege(
-           'ai_hub_projection', 'platform_projection.integration_inbox', 'UPDATE'
-       )
-       OR NOT has_table_privilege(
-           'ai_hub_projection', 'platform_projection.integration_inbox', 'DELETE'
-       ) THEN
-        RAISE EXCEPTION 'projection runtime platform_projection privilege is invalid';
-    END IF;
+    IF to_regclass('platform_projection.integration_inbox') IS NOT NULL THEN
+        IF NOT has_schema_privilege('ai_hub_platform', 'platform_projection', 'USAGE')
+           OR NOT has_table_privilege(
+               'ai_hub_platform',
+               'platform_projection.integration_inbox',
+               'SELECT'
+           )
+           OR has_table_privilege(
+               'ai_hub_platform',
+               'platform_projection.integration_inbox',
+               'INSERT,UPDATE,DELETE'
+           ) THEN
+            RAISE EXCEPTION 'platform runtime projection privilege is not read-only';
+        END IF;
 
-    IF (
-        SELECT tableowner
-        FROM pg_tables
-        WHERE schemaname = 'platform_projection'
-          AND tablename = 'integration_inbox'
-    ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
-        RAISE EXCEPTION 'platform projection table owner is invalid';
-    END IF;
+        IF to_regclass('platform_projection.alembic_version') IS NULL THEN
+            RAISE EXCEPTION 'platform projection migration metadata is missing';
+        END IF;
 
-    IF (
-        SELECT tableowner
-        FROM pg_tables
-        WHERE schemaname = 'platform_projection'
-          AND tablename = 'alembic_version'
-    ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
-        RAISE EXCEPTION 'platform projection migration table owner is invalid';
-    END IF;
+        IF has_table_privilege(
+            'ai_hub_platform',
+            'platform_projection.alembic_version',
+            'SELECT,INSERT,UPDATE,DELETE'
+        ) THEN
+            RAISE EXCEPTION 'platform runtime can access projection migration metadata';
+        END IF;
 
-    IF has_table_privilege(
-        'ai_hub_projection',
-        'platform_projection.alembic_version',
-        'SELECT,INSERT,UPDATE,DELETE'
-    ) THEN
-        RAISE EXCEPTION 'projection runtime can modify migration metadata';
+        IF NOT has_schema_privilege('ai_hub_projection', 'platform_projection', 'USAGE')
+           OR has_schema_privilege('ai_hub_projection', 'platform_projection', 'CREATE')
+           OR NOT has_table_privilege(
+               'ai_hub_projection', 'platform_projection.integration_inbox', 'SELECT'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_projection', 'platform_projection.integration_inbox', 'INSERT'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_projection', 'platform_projection.integration_inbox', 'UPDATE'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_projection', 'platform_projection.integration_inbox', 'DELETE'
+           ) THEN
+            RAISE EXCEPTION 'projection runtime platform_projection privilege is invalid';
+        END IF;
+
+        IF (
+            SELECT tableowner
+            FROM pg_tables
+            WHERE schemaname = 'platform_projection'
+              AND tablename = 'integration_inbox'
+        ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
+            RAISE EXCEPTION 'platform projection table owner is invalid';
+        END IF;
+
+        IF (
+            SELECT tableowner
+            FROM pg_tables
+            WHERE schemaname = 'platform_projection'
+              AND tablename = 'alembic_version'
+        ) IS DISTINCT FROM 'ai_hub_projection_migrator' THEN
+            RAISE EXCEPTION 'platform projection migration table owner is invalid';
+        END IF;
+
+        IF has_table_privilege(
+            'ai_hub_projection',
+            'platform_projection.alembic_version',
+            'SELECT,INSERT,UPDATE,DELETE'
+        ) THEN
+            RAISE EXCEPTION 'projection runtime can modify migration metadata';
+        END IF;
     END IF;
 END
 $$;

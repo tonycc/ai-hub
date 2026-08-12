@@ -18,10 +18,13 @@ def render_upgrade_sql(config_name: str) -> str:
     return output.getvalue()
 
 
-def test_api_client_migration_only_creates_reference_record() -> None:
+def test_api_client_migration_creates_reference_record_with_m1_owner() -> None:
     sql = render_upgrade_sql("alembic.ini")
 
     assert "CREATE TABLE app.example_record" in sql
+    assert "ADD COLUMN owner_subject" in sql
+    assert "M1 ownership denial record" in sql
+    assert "another-user" in sql
     assert "integration_outbox" not in sql
     assert "integration_inbox" not in sql
     assert "CREATE TABLE alembic_version" in sql

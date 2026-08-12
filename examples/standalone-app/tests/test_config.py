@@ -26,6 +26,9 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
     settings = Settings(
         environment="production",
         platform_api_base_url="https://platform.example.org",
+        oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+        oidc_client_secret="ProdOidcSecret-8374",
+        session_secret="ProdSessionSecret-8374-LongEnough-ForSigning",
         database_url=(
             "postgresql+psycopg://standalone_app:ProdSecret-8374@"
             "standalone-db.internal:5432/standalone_app_db"
@@ -40,6 +43,9 @@ def test_production_rejects_placeholder_database_password() -> None:
         Settings(
             environment="production",
             platform_api_base_url="https://platform.example.org",
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            oidc_client_secret="ProdOidcSecret-8374",
+            session_secret="ProdSessionSecret-8374-LongEnough-ForSigning",
             database_url=(
                 "postgresql+psycopg://standalone_app:change-me-password@"
                 "standalone-db.internal:5432/standalone_app_db"
@@ -62,6 +68,9 @@ def test_validation_error_does_not_expose_database_password() -> None:
         Settings(
             environment="production",
             platform_api_base_url="https://platform.example.org",
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            oidc_client_secret="ProdOidcSecret-8374",
+            session_secret="ProdSessionSecret-8374-LongEnough-ForSigning",
             database_url=(
                 f"postgresql+psycopg://standalone_app:{exposed_password}@"
                 "standalone-db.internal:5432/standalone_app_db"
@@ -81,3 +90,12 @@ def test_migration_process_does_not_require_platform_api_configuration() -> None
     )
 
     assert settings.environment == "production"
+
+
+def test_jwks_stale_window_cannot_be_shorter_than_fresh_cache() -> None:
+    with pytest.raises(ValidationError, match="must not be shorter"):
+        Settings(
+            environment="test",
+            oidc_jwks_cache_ttl_seconds=60,
+            oidc_jwks_stale_ttl_seconds=30,
+        )
