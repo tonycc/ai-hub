@@ -309,7 +309,7 @@ async def test_operations_queue_diagnostics_use_read_only_metrics_and_thresholds
             json=[
                 {
                     "name": "ai-hub.platform.projection",
-                    "messages_ready": 12,
+                    "messages_ready": 101,
                     "messages_unacknowledged": 1,
                     "consumers": 1,
                 },
@@ -343,11 +343,11 @@ async def test_operations_queue_diagnostics_use_read_only_metrics_and_thresholds
     assert rows == [
         {
             "queue_name": "ai-hub.platform.projection",
-            "messages_ready": 12,
+            "messages_ready": 101,
             "messages_unacknowledged": 1,
             "consumer_count": 1,
             "status": "WARNING",
-            "reason": "Event queue has a pending backlog",
+            "reason": "Event backlog exceeds the warning threshold",
         }
     ]
     assert requests[0].method == "GET"

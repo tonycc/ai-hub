@@ -23,6 +23,7 @@ MAGIC = b"AIHUBBKP1"
 NONCE_BYTES = 12
 TAG_BYTES = 16
 CHUNK_BYTES = 1024 * 1024
+VERIFICATION_RECEIPT_SCHEMA_VERSION = 1
 DATABASES = ("authentik_db", "platform_db", "standalone_app_db")
 AUTHENTIK_DATA_ARCHIVE = "authentik-data.tar"
 BASE_REQUIRED_ROLES = (
@@ -114,6 +115,39 @@ def sha256_file(path: Path) -> str:
         while chunk := source.read(CHUNK_BYTES):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def verification_receipt_path(archive_path: Path) -> Path:
+    return archive_path.with_suffix(archive_path.suffix + ".verified.json")
+
+
+def _write_verification_receipt(
+    archive_path: Path,
+    manifest: dict[str, Any],
+) -> Path:
+    receipt_path = verification_receipt_path(archive_path)
+    temporary = receipt_path.with_suffix(receipt_path.suffix + ".partial")
+    receipt = {
+        "schema_version": VERIFICATION_RECEIPT_SCHEMA_VERSION,
+        "verified": True,
+        "archive": archive_path.name,
+        "archive_sha256": sha256_file(archive_path),
+        "backup_id": manifest["backup_id"],
+        "created_at": manifest["created_at"],
+        "verified_at": datetime.now(UTC).isoformat(),
+        "storage_class": manifest["storage_class"],
+        "profile": manifest["profile"],
+    }
+    try:
+        temporary.write_text(
+            json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.chmod(temporary, 0o600)
+        temporary.replace(receipt_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return receipt_path
 
 
 def encrypt_file(source: Path, destination: Path, key: bytes) -> None:
@@ -437,11 +471,22 @@ def create_backup(args: argparse.Namespace) -> dict[str, object]:
     checksum_path = archive_path.with_suffix(archive_path.suffix + ".sha256")
     checksum_path.write_text(f"{archive_sha256}  {archive_path.name}\n", encoding="utf-8")
     os.chmod(checksum_path, 0o600)
+    try:
+        with tempfile.TemporaryDirectory(prefix="ai-hub-backup-verify-") as temporary:
+            verified_manifest = _read_bundle(archive_path, key, Path(temporary))
+        receipt_path = _write_verification_receipt(archive_path, verified_manifest)
+    except Exception:
+        verification_receipt_path(archive_path).unlink(missing_ok=True)
+        checksum_path.unlink(missing_ok=True)
+        archive_path.unlink(missing_ok=True)
+        raise
     return {
         "created": True,
+        "verified": True,
         "backup_id": backup_id,
         "archive": str(archive_path),
         "sha256": archive_sha256,
+        "verification_receipt": str(receipt_path),
         "storage_class": args.storage_class,
     }
 
@@ -496,12 +541,14 @@ def verify_backup(args: argparse.Namespace) -> dict[str, object]:
     archive_path = Path(args.archive).resolve()
     with tempfile.TemporaryDirectory(prefix="ai-hub-backup-verify-") as temporary:
         manifest = _read_bundle(archive_path, _key_from_environment(), Path(temporary))
+    receipt_path = _write_verification_receipt(archive_path, manifest)
     return {
         "verified": True,
         "backup_id": manifest["backup_id"],
         "created_at": manifest["created_at"],
         "storage_class": manifest["storage_class"],
         "databases": manifest["databases"],
+        "verification_receipt": str(receipt_path),
     }
 
 
@@ -662,6 +709,7 @@ def prune_backups(args: argparse.Namespace) -> dict[str, object]:
     if args.apply:
         for path in sorted(delete):
             checksum = path.with_suffix(path.suffix + ".sha256")
+            receipt = verification_receipt_path(path)
             restore_lock = path.with_suffix(path.suffix + ".restore-lock")
             if restore_lock.exists() or not checksum.is_file():
                 skipped.append(path.name)
@@ -672,6 +720,7 @@ def prune_backups(args: argparse.Namespace) -> dict[str, object]:
                 continue
             path.unlink()
             checksum.unlink()
+            receipt.unlink(missing_ok=True)
             deleted.append(path.name)
     return {
         "applied": bool(args.apply),

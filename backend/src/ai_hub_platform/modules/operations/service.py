@@ -282,9 +282,9 @@ class OperationsService:
             elif ready + unacknowledged > 1000:
                 status = "CRITICAL"
                 reason = "Event backlog exceeds the critical threshold"
-            elif ready + unacknowledged > 0:
+            elif ready + unacknowledged > 100:
                 status = "WARNING"
-                reason = "Event queue has a pending backlog"
+                reason = "Event backlog exceeds the warning threshold"
             rows.append(
                 {
                     "queue_name": name,

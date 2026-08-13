@@ -93,3 +93,17 @@ def test_systemd_backup_uses_off_host_storage_and_persistent_timers() -> None:
     assert "OnCalendar=hourly" in backup_timer
     assert "Persistent=true" in backup_timer
     assert "Persistent=true" in prune_timer
+
+
+def test_systemd_monitor_runs_each_minute_with_durable_state_and_no_public_bind() -> None:
+    systemd = PROJECT_ROOT / "deploy" / "operations" / "systemd"
+    service = (systemd / "ai-hub-monitor.service").read_text(encoding="utf-8")
+    timer = (systemd / "ai-hub-monitor.timer").read_text(encoding="utf-8")
+    compose = (PROJECT_ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "EnvironmentFile=/etc/ai-hub/monitor.env" in service
+    assert "--state-file /var/lib/ai-hub-monitor/state.json" in service
+    assert "ReadOnlyPaths=/mnt/ai-hub-off-host-backups" in service
+    assert "OnUnitActiveSec=60" in timer
+    assert "Persistent=true" in timer
+    assert '"127.0.0.1:${AI_HUB_INTERNAL_API_PORT:-18080}:8000"' in compose

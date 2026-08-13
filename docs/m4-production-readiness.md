@@ -39,6 +39,8 @@ M4 采用 `STANDARD_SINGLE_NODE`：单台受管 Linux 主机运行 Docker Compos
 
 告警消息必须包含规则 ID、严重级别、首次发生时间、当前状态、对象、Request ID（存在时）、责任路由和运行手册，不得包含访问令牌、Cookie、连接串或通知正文。主责任超过确认时间未响应时升级给备份责任；P0 数据丢失、身份绕过或大面积不可用立即升级给 platform-owner。
 
+平台 API 通过仅绑定主机回环地址的内部端口提供 OpenMetrics 和运维摘要；Traefik 不发布 `/internal/*`。`ai-hub-monitor.timer` 每分钟按 [`deploy/operations/alert-rules.json`](../deploy/operations/alert-rules.json) 检查 readiness、应用入口、事件消费者、积压、投影 gap 和异机备份新鲜度，并通过带 HMAC 的 webhook 发送去重告警与恢复事件。安装、确认和逐条处置见 [`docs/runbooks/alert-response.md`](runbooks/alert-response.md)。
+
 ## 5. 发布与恢复原则
 
 - 发布遵循 expand → migrate/backfill → canary → promote → contract；破坏性 contract 至少晚一个兼容版本。

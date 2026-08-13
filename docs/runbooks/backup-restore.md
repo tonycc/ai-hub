@@ -42,7 +42,7 @@ AI_HUB_BACKUP_KEY_BASE64="$(sudo sed -n 's/^AI_HUB_BACKUP_KEY_BASE64=//p' /etc/a
   /mnt/ai-hub-off-host-backups/ai-hub-backup-YYYYMMDDTHHMMSSZ-ID.tar.aesgcm
 ```
 
-成功输出必须含 `"verified": true`。归档缺少 SHA-256 sidecar、AES-GCM 认证失败、内部文件摘要不符或迁移清单不可读时均停止操作并路由给 `data-recovery`。
+成功输出必须含 `"verified": true`，并在归档旁原子写入 `.verified.json` 验证凭证。自动创建也会执行相同的解密、内部清单与文件摘要校验；监控只有在凭证、归档 SHA-256、异机存储类别和归档创建时间全部匹配时才接受该恢复点。归档缺少 SHA-256 sidecar 或验证凭证、AES-GCM 认证失败、内部文件摘要不符或迁移清单不可读时均停止操作并路由给 `data-recovery`。
 
 ## 4. 灾难恢复
 
@@ -78,4 +78,4 @@ AI_HUB_BACKUP_KEY_BASE64="$(sudo sed -n 's/^AI_HUB_BACKUP_KEY_BASE64=//p' /etc/a
 - 恢复过程会在归档旁创建 `.restore-lock`，清理任务不会删除被锁定归档。成功或失败退出时工具自动移除锁；进程被强制终止后，由数据责任人确认没有恢复进程再人工移除。
 - 数据库恢复已经开始后失败，不得启动业务服务。保留日志和目标卷，修复目标角色、磁盘空间或归档问题后从同一已校验归档重新执行完整恢复。
 - `globals.sql` 仅作无密码角色证据，不直接覆盖目标密码；恢复后的角色密码以目标运行环境为准，因此恢复不会把旧凭据重新启用。
-- 自动保留只删除 sidecar 和内容摘要均有效、未锁定且超出小时/每日保留集合的归档。先省略 `--apply` 预览，再执行删除。
+- 自动保留只删除 sidecar 和内容摘要均有效、未锁定且超出小时/每日保留集合的归档，并同步删除对应验证凭证。先省略 `--apply` 预览，再执行删除。

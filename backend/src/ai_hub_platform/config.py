@@ -181,6 +181,7 @@ class Settings(_PlatformSettings):
     public_identity_base_url: str = "http://auth.localhost:8088"
     sandbox_application_id: str = "standalone-example"
     sandbox_user_subject: str = "ai-hub-demo-user"
+    monitor_token: SecretStr | None = None
     operations_rabbitmq_management_url: str | None = None
     operations_rabbitmq_vhost: str = "ai-hub-local"
     operations_rabbitmq_username: str | None = None
@@ -257,6 +258,9 @@ class Settings(_PlatformSettings):
         _validate_application_id(self.sandbox_application_id)
         if not self.sandbox_user_subject.strip():
             raise ValueError("sandbox_user_subject cannot be empty")
+        if strict and self.monitor_token is not None:
+            if _has_placeholder_secret(self.monitor_token.get_secret_value()):
+                raise ValueError("monitor_token cannot use a placeholder outside local/test")
         operations_values = (
             self.operations_rabbitmq_management_url,
             self.operations_rabbitmq_username,
