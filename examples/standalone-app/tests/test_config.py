@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from standalone_app.config import MigrationSettings, Settings
+from standalone_app.config import EventPublisherSettings, MigrationSettings, Settings
 
 
 def test_local_runtime_defaults_are_valid() -> None:
@@ -86,6 +86,29 @@ def test_migration_process_does_not_require_platform_api_configuration() -> None
         migration_database_url=(
             "postgresql+psycopg://standalone_app_migrator:MigrationSecret-3819@"
             "standalone-db.internal:5432/standalone_app_db"
+        ),
+    )
+
+    assert settings.environment == "production"
+
+
+def test_event_publisher_uses_a_distinct_database_setting() -> None:
+    settings = EventPublisherSettings()
+
+    assert "standalone_outbox_publisher" in settings.publisher_database_url
+    assert not hasattr(settings, "platform_api_base_url")
+
+
+def test_production_event_publisher_requires_secure_broker_and_database() -> None:
+    settings = EventPublisherSettings(
+        environment="production",
+        publisher_database_url=(
+            "postgresql+psycopg://standalone_outbox_publisher:RelaySecret-3819@"
+            "standalone-db.internal:5432/standalone_app_db"
+        ),
+        rabbitmq_url=(
+            "amqps://standalone_publisher:BrokerSecret-3819@"
+            "rabbitmq.internal:5671/production-events"
         ),
     )
 

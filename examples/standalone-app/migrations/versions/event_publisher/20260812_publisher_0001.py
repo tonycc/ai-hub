@@ -58,6 +58,17 @@ def upgrade() -> None:
         ["status", "next_attempt_at", "lock_expires_at", "created_at"],
         schema="app",
     )
+    op.execute(
+        "GRANT SELECT ON app.integration_outbox TO standalone_outbox_publisher"
+    )
+    op.execute(
+        "GRANT UPDATE (status, attempts, next_attempt_at, locked_by, "
+        "lock_expires_at, published_at, last_error) "
+        "ON app.integration_outbox TO standalone_outbox_publisher"
+    )
+    op.execute(
+        "REVOKE SELECT, UPDATE, DELETE ON app.integration_outbox FROM standalone_app"
+    )
 
 
 def downgrade() -> None:

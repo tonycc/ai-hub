@@ -35,6 +35,7 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "platform_projection" not in sql
     assert "integration_outbox" not in sql
     assert "integration_inbox" not in sql
+    assert "event_contract_registration" not in sql
 
 
 def test_platform_projection_migration_does_not_create_core_objects() -> None:
@@ -42,5 +43,21 @@ def test_platform_projection_migration_does_not_create_core_objects() -> None:
 
     assert "CREATE TABLE platform_projection.alembic_version" in sql
     assert "CREATE TABLE platform_projection.integration_inbox" in sql
+    assert "CREATE TABLE platform_projection.projection_checkpoint" in sql
+    assert "CREATE TABLE platform_projection.example_record_projection" in sql
+    assert "CREATE TABLE platform_projection.projection_gap" in sql
     assert "platform_core" not in sql
     assert "integration_outbox" not in sql
+
+
+def test_event_registration_migration_enables_only_registered_contracts() -> None:
+    sql = render_upgrade_sql("alembic-events.ini")
+
+    assert "CREATE TABLE platform_core.alembic_version_events" in sql
+    assert "CREATE TABLE platform_core.event_contract_registration" in sql
+    assert "EVENT_PUBLISHER" in sql
+    assert "PROJECTION_SOURCE" in sql
+    assert "company.example.record.changed.v1" in sql
+    assert "company.example.record.deleted.v1" in sql
+    assert "CREATE TABLE platform_core.application" not in sql
+    assert "platform_projection" not in sql

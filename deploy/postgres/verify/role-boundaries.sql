@@ -29,7 +29,8 @@ BEGIN
             'ai_hub_projection_migrator',
             'ai_hub_projection',
             'standalone_app_migrator',
-            'standalone_app'
+            'standalone_app',
+            'standalone_outbox_publisher'
         ])
           AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
     ) THEN
@@ -88,6 +89,18 @@ BEGIN
         'standalone_app_migrator', 'platform_db', 'CONNECT'
     ) THEN
         RAISE EXCEPTION 'standalone migrator database boundary is invalid';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = 'standalone_outbox_publisher'
+    ) THEN
+        IF has_database_privilege(
+            'standalone_outbox_publisher', 'authentik_db', 'CONNECT'
+        ) OR has_database_privilege(
+            'standalone_outbox_publisher', 'platform_db', 'CONNECT'
+        ) THEN
+            RAISE EXCEPTION 'Outbox publisher can connect outside its application database';
+        END IF;
     END IF;
 END
 $$;
@@ -275,6 +288,60 @@ BEGIN
        OR has_schema_privilege('ai_hub_projection', 'app', 'USAGE')
        OR has_schema_privilege('authentik', 'app', 'USAGE') THEN
         RAISE EXCEPTION 'a platform role can access the standalone app schema';
+    END IF;
+
+    IF to_regclass('app.integration_outbox') IS NULL THEN
+        IF EXISTS (
+            SELECT 1 FROM pg_roles WHERE rolname = 'standalone_outbox_publisher'
+        ) THEN
+            RAISE EXCEPTION 'API-only database enables the Outbox publisher role';
+        END IF;
+    ELSE
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_roles WHERE rolname = 'standalone_outbox_publisher'
+        ) THEN
+            RAISE EXCEPTION 'EVENT_PUBLISHER database role is missing';
+        END IF;
+
+        IF NOT has_database_privilege(
+            'standalone_outbox_publisher', 'standalone_app_db', 'CONNECT'
+        ) OR NOT has_schema_privilege('standalone_outbox_publisher', 'app', 'USAGE')
+           OR has_schema_privilege('standalone_outbox_publisher', 'app', 'CREATE')
+           OR NOT has_table_privilege(
+               'standalone_outbox_publisher', 'app.integration_outbox', 'SELECT'
+           )
+           OR has_table_privilege(
+               'standalone_outbox_publisher', 'app.integration_outbox', 'INSERT,DELETE'
+           )
+           OR NOT has_column_privilege(
+               'standalone_outbox_publisher', 'app.integration_outbox', 'status', 'UPDATE'
+           )
+           OR NOT has_column_privilege(
+               'standalone_outbox_publisher', 'app.integration_outbox', 'attempts', 'UPDATE'
+           )
+           OR has_column_privilege(
+               'standalone_outbox_publisher', 'app.integration_outbox', 'payload', 'UPDATE'
+           )
+           OR has_table_privilege(
+               'standalone_outbox_publisher', 'app.example_record', 'SELECT,INSERT,UPDATE,DELETE'
+           )
+           OR has_table_privilege(
+               'standalone_outbox_publisher', 'app.integration_source_state', 'SELECT,INSERT,UPDATE,DELETE'
+           ) THEN
+            RAISE EXCEPTION 'Outbox publisher database privilege is broader than its relay duties';
+        END IF;
+
+        IF has_table_privilege(
+            'standalone_app', 'app.integration_outbox', 'SELECT,UPDATE,DELETE'
+        ) OR has_table_privilege(
+            'standalone_app', 'app.integration_source_state', 'INSERT,DELETE'
+        ) OR has_column_privilege(
+            'standalone_app', 'app.integration_source_state', 'application_id', 'UPDATE'
+        ) OR NOT has_column_privilege(
+            'standalone_app', 'app.integration_source_state', 'current_sequence', 'UPDATE'
+        ) THEN
+            RAISE EXCEPTION 'standalone API can modify event delivery state';
+        END IF;
     END IF;
 END
 $$;

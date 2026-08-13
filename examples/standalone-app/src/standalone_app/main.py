@@ -34,6 +34,7 @@ from standalone_app.observability import (
     log_security_event,
     request_id_from,
 )
+from standalone_app.records import change_record, delete_record
 
 
 class HealthResponse(BaseModel):
@@ -60,6 +61,7 @@ class RecordResponse(BaseModel):
     name: str
     state: str
     owner_subject: str
+    aggregate_version: int
 
 
 class RecordUpdate(BaseModel):
@@ -268,8 +270,9 @@ async def get_record(
             await session.execute(
                 sa.text(
                     """
-                    SELECT id, name, state, owner_subject
-                    FROM app.example_record WHERE id = :record_id
+                    SELECT id, name, state, owner_subject, aggregate_version
+                    FROM app.example_record
+                    WHERE id = :record_id AND state <> 'DELETED'
                     """
                 ),
                 {"record_id": record_id},
@@ -301,6 +304,7 @@ async def get_record(
         name=row["name"],
         state=row["state"],
         owner_subject=row["owner_subject"],
+        aggregate_version=row["aggregate_version"],
     )
 
 
@@ -357,25 +361,18 @@ async def update_record(
         )
         raise PermissionError("Online authorization decision denied the write")
     async with session_factory(request)() as session:
-        row = (
-            await session.execute(
-                sa.text(
-                    """
-                    UPDATE app.example_record
-                    SET name = :name
-                    WHERE id = :record_id AND owner_subject = :owner_subject
-                      AND state = 'ACTIVE'
-                    RETURNING id, name, state, owner_subject
-                    """
-                ),
-                {
-                    "record_id": record_id,
-                    "name": payload.name,
-                    "owner_subject": token.subject,
-                },
-            )
-        ).mappings().one_or_none()
-        if row is None:
+        mutation = await change_record(
+            session,
+            application_id=settings.application_id,
+            events_enabled="EVENT_PUBLISHER" in settings.capabilities,
+            record_id=record_id,
+            owner_subject=token.subject,
+            name=payload.name,
+            actor_type="user",
+            actor_id=token.subject,
+            trace_id=trace_id_from(request),
+        )
+        if mutation is None:
             log_security_event(
                 request,
                 action="example.record.write",
@@ -396,10 +393,75 @@ async def update_record(
         target_id=str(record_id),
     )
     return RecordResponse(
-        record_id=row["id"],
-        name=row["name"],
-        state=row["state"],
-        owner_subject=row["owner_subject"],
+        record_id=mutation.record_id,
+        name=mutation.name,
+        state=mutation.state,
+        owner_subject=mutation.owner_subject,
+        aggregate_version=mutation.aggregate_version,
+    )
+
+
+@router.delete("/api/v1/records/{record_id}", response_model=RecordResponse, tags=["records"])
+async def remove_record(
+    record_id: UUID,
+    request: Request,
+    token: Annotated[VerifiedToken, Depends(current_token)],
+) -> RecordResponse:
+    snapshot = await permission_snapshot(
+        request,
+        token,
+        platform_client(request),
+        authorization_cache(request),
+        risk="high",
+    )
+    if "example.record.write" not in snapshot.permissions:
+        raise PermissionError("Record write permission is required")
+    settings: Settings = request.app.state.settings
+    try:
+        decision = await platform_client(request).authorization_decision(
+            AuthorizationDecisionRequest(
+                application_id=settings.application_id,
+                permission="example.record.write",
+                risk="high",
+            ),
+            access_token=session_access_token(request),
+            request_id=request_id_from(request),
+            trace_id=trace_id_from(request),
+        )
+    except httpx.HTTPError as error:
+        raise AuthorizationUnavailableError(
+            "Online authorization decision is unavailable"
+        ) from error
+    if not decision.allowed or decision.authorization_version != token.authorization_version:
+        raise PermissionError("Online authorization decision denied the delete")
+    async with session_factory(request)() as session:
+        mutation = await delete_record(
+            session,
+            application_id=settings.application_id,
+            events_enabled="EVENT_PUBLISHER" in settings.capabilities,
+            record_id=record_id,
+            owner_subject=token.subject,
+            actor_type="user",
+            actor_id=token.subject,
+            trace_id=trace_id_from(request),
+        )
+        if mutation is None:
+            raise PermissionError("Local ownership or business-state check denied the delete")
+        await session.commit()
+    log_security_event(
+        request,
+        action="example.record.delete",
+        result="SUCCESS",
+        actor_id=token.subject,
+        target_type="record",
+        target_id=str(record_id),
+    )
+    return RecordResponse(
+        record_id=mutation.record_id,
+        name=mutation.name,
+        state=mutation.state,
+        owner_subject=mutation.owner_subject,
+        aggregate_version=mutation.aggregate_version,
     )
 
 

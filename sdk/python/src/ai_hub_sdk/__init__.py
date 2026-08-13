@@ -6,7 +6,13 @@ from ai_hub_sdk.authorization import (
     AuthorizationVersionMismatchError,
 )
 from ai_hub_sdk.client import AiHubClient
-from ai_hub_sdk.events import CloudEvent
+from ai_hub_sdk.events import (
+    CloudEvent,
+    EventActor,
+    ExampleRecordSnapshot,
+    ExampleRecordSnapshotItem,
+    example_record_snapshot_checksum,
+)
 from ai_hub_sdk.identity import (
     AuthorizationRequest,
     OAuthProtocolError,
@@ -45,6 +51,10 @@ __all__ = [
     "CurrentUser",
     "DataScope",
     "ErrorResponse",
+    "EventActor",
+    "ExampleRecordSnapshot",
+    "ExampleRecordSnapshotItem",
+    "example_record_snapshot_checksum",
     "HealthResponse",
     "NotificationRequest",
     "NotificationResult",

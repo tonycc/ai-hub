@@ -101,6 +101,24 @@ def _validate_oidc_issuer(value: str, *, strict: bool) -> None:
         raise ValueError("oidc_issuer cannot use a local hostname outside local/test")
 
 
+def _validate_rabbitmq_url(value: str, *, strict: bool) -> None:
+    parsed = _parse_url(
+        value,
+        field_name="rabbitmq_url",
+        allowed_schemes={"amqp", "amqps"},
+    )
+    if not parsed.username or not parsed.password:
+        raise ValueError("rabbitmq_url must include a username and password")
+    if not parsed.path.strip("/"):
+        raise ValueError("rabbitmq_url must include an environment vhost")
+    if strict and parsed.scheme != "amqps":
+        raise ValueError("rabbitmq_url must use amqps outside local/test")
+    if strict and _is_local_hostname(parsed.hostname or ""):
+        raise ValueError("rabbitmq_url cannot use a local hostname outside local/test")
+    if strict and _has_placeholder_secret(unquote(parsed.password)):
+        raise ValueError("rabbitmq_url cannot use a placeholder password outside local/test")
+
+
 class _PlatformSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -180,6 +198,48 @@ class ProjectionMigrationSettings(_PlatformSettings):
         return self
 
 
+class ProjectionWorkerSettings(_PlatformSettings):
+    projection_database_url: str = (
+        "postgresql+psycopg://ai_hub_projection:local-only-projection-password@"
+        "localhost:5433/platform_db"
+    )
+    rabbitmq_url: str = (
+        "amqp://platform_projection:local-only-rabbitmq-projection-password@"
+        "localhost:5672/ai-hub-local"
+    )
+    queue_name: str = "ai-hub.platform.projection"
+    prefetch_count: int = 20
+    max_redeliveries: int = 5
+    connection_timeout_seconds: float = 10.0
+    processing_delay_seconds: float = 0.0
+    acknowledgement_delay_seconds: float = 0.0
+
+    @model_validator(mode="after")
+    def validate_configuration(self) -> Self:
+        strict = _is_strict_environment(self.environment)
+        _validate_database_url(
+            self.projection_database_url,
+            field_name="projection_database_url",
+            strict=strict,
+        )
+        _validate_rabbitmq_url(self.rabbitmq_url, strict=strict)
+        if self.queue_name != "ai-hub.platform.projection":
+            raise ValueError("queue_name must use the registered projection queue")
+        if not 1 <= self.prefetch_count <= 500:
+            raise ValueError("prefetch_count must be between 1 and 500")
+        if not 1 <= self.max_redeliveries <= 20:
+            raise ValueError("max_redeliveries must be between 1 and 20")
+        if self.connection_timeout_seconds <= 0:
+            raise ValueError("connection_timeout_seconds must be positive")
+        for value in (
+            self.processing_delay_seconds,
+            self.acknowledgement_delay_seconds,
+        ):
+            if not 0 <= value <= 60:
+                raise ValueError("worker diagnostic delays must be between 0 and 60 seconds")
+        return self
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
@@ -193,3 +253,8 @@ def get_core_migration_settings() -> CoreMigrationSettings:
 @lru_cache
 def get_projection_migration_settings() -> ProjectionMigrationSettings:
     return ProjectionMigrationSettings()
+
+
+@lru_cache
+def get_projection_worker_settings() -> ProjectionWorkerSettings:
+    return ProjectionWorkerSettings()

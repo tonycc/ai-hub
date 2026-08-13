@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
-from ai_hub_sdk import CloudEvent
+from ai_hub_sdk import CloudEvent, EventActor
 from jsonschema import Draft202012Validator
 from jsonschema.protocols import Validator
+from referencing import Registry, Resource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPENAPI_PATH = PROJECT_ROOT / "contracts/api/platform-api.openapi.yaml"
 ASYNCAPI_PATH = PROJECT_ROOT / "contracts/events/ai-hub.asyncapi.yaml"
 CLOUD_EVENT_SCHEMA_PATH = PROJECT_ROOT / "contracts/events/cloud-event.schema.json"
+EVENT_DATA_SCHEMA_PATH = PROJECT_ROOT / "contracts/events/example-record-event-data.v1.schema.json"
 
 
 def load_yaml_mapping(path: Path) -> dict[str, Any]:
@@ -126,7 +129,9 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
 
 def test_asyncapi_payload_reference_resolves_to_valid_cloud_event_schema() -> None:
     contract = load_yaml_mapping(ASYNCAPI_PATH)
-    payload_reference = contract["components"]["messages"]["DomainEvent"]["payload"]["$ref"]
+    payload_reference = contract["components"]["messages"]["ExampleRecordEvent"]["payload"][
+        "$ref"
+    ]
     resolved_payload_path = (ASYNCAPI_PATH.parent / payload_reference).resolve()
 
     assert contract["asyncapi"] == "3.0.0"
@@ -140,13 +145,35 @@ def test_asyncapi_payload_reference_resolves_to_valid_cloud_event_schema() -> No
 
 def test_python_sdk_cloud_event_conforms_to_public_json_schema() -> None:
     schema = json.loads(CLOUD_EVENT_SCHEMA_PATH.read_text(encoding="utf-8"))
+    event_data_schema = json.loads(EVENT_DATA_SCHEMA_PATH.read_text(encoding="utf-8"))
     event = CloudEvent(
-        source="urn:ai-hub:application:contract-test",
+        source="urn:ai-hub:application:standalone-example",
         type="company.example.record.changed.v1",
-        subject="record/REC-001",
-        data={"record_id": "REC-001", "aggregate_version": 1},
+        subject="example-record/44af7cca-1852-4a50-a17a-114422098fa1",
+        time=datetime(2026, 8, 12, tzinfo=UTC),
+        dataschema=(
+            "https://ai-hub.example.internal/contracts/events/"
+            "example-record-event-data.v1.schema.json"
+        ),
+        producer_application_id="standalone-example",
+        event_version=1,
+        aggregate_version=1,
+        source_sequence=1,
+        object_type="example_record",
+        actor=EventActor(type="service", id="standalone-example"),
+        data_classification="internal",
+        data={
+            "record_id": "44af7cca-1852-4a50-a17a-114422098fa1",
+            "name": "Contract record",
+            "state": "ACTIVE",
+            "owner_subject": "user-001",
+        },
     )
 
-    validator = cast(Validator, Draft202012Validator(schema))
-    errors = list(validator.iter_errors(event.model_dump(mode="json", exclude_none=True)))
+    registry: Registry[Any] = Registry[Any]().with_resource(
+        cast(str, event_data_schema["$id"]),
+        Resource.from_contents(event_data_schema),
+    )
+    validator = cast(Validator, Draft202012Validator(schema, registry=registry))
+    errors = list(validator.iter_errors(event.model_dump(mode="json", exclude_none=False)))
     assert not errors

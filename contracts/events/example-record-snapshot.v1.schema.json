@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-hub.example.internal/contracts/events/example-record-snapshot.v1.schema.json",
+  "title": "Business-neutral example record snapshot v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "producer_application_id",
+    "generated_at",
+    "watermark",
+    "records",
+    "checksum"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "snapshot_id": {"type": "string", "format": "uuid"},
+    "producer_application_id": {"const": "standalone-example"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "watermark": {"type": "integer", "minimum": 0},
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "record_id",
+          "name",
+          "state",
+          "owner_subject",
+          "aggregate_version",
+          "updated_at"
+        ],
+        "properties": {
+          "record_id": {"type": "string", "format": "uuid"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 200},
+          "state": {"type": "string", "minLength": 1, "maxLength": 50},
+          "owner_subject": {"type": "string", "minLength": 1, "maxLength": 255},
+          "aggregate_version": {"type": "integer", "minimum": 1},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

@@ -31,6 +31,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "m1-runtime",
+        "m2-runtime",
         "required-gate",
     }
     assert set(jobs["required-gate"]["needs"]) == {
@@ -38,6 +39,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "m1-runtime",
+        "m2-runtime",
     }
     assert jobs["required-gate"]["if"] == "${{ always() }}"
     assert jobs["required-gate"]["name"] == "Required gate"
@@ -80,6 +82,7 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     assert jobs["frontend"]["steps"][-1]["run"] == "bash scripts/ci/frontend.sh"
     assert jobs["deployment"]["steps"][-1]["run"] == "bash scripts/ci/deploy.sh"
     assert jobs["m1-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m1-runtime.sh"
+    assert jobs["m2-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m2-runtime.sh"
 
 
 def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
@@ -115,3 +118,18 @@ def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
         "find_spec('ai_hub_platform') is None",
     ):
         assert scenario in m1_runtime
+
+    m2_runtime = (PROJECT_ROOT / "scripts/ci/m2-runtime.sh").read_text(encoding="utf-8")
+    for scenario in (
+        "base-access unexpectedly includes",
+        "rollback must disappear",
+        "broker outage retention and recovery",
+        "crash before database commit",
+        "crash after commit but before acknowledgement",
+        "version gap was not made explicit",
+        "snapshot watermark rebuild from an empty projection schema",
+        "an older snapshot was allowed to roll back an installed checkpoint",
+        "Outbox publisher database role can modify application business data",
+        "platform API role can modify source-derived projection",
+    ):
+        assert scenario in m2_runtime

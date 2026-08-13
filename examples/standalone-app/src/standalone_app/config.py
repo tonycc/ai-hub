@@ -119,6 +119,24 @@ def _validate_oidc_issuer(value: str, *, strict: bool) -> None:
         raise ValueError("oidc_issuer cannot use a local hostname outside local/test")
 
 
+def _validate_rabbitmq_url(value: str, *, strict: bool) -> None:
+    parsed = _parse_url(
+        value,
+        field_name="rabbitmq_url",
+        allowed_schemes={"amqp", "amqps"},
+    )
+    if not parsed.username or not parsed.password:
+        raise ValueError("rabbitmq_url must include a username and password")
+    if not parsed.path.strip("/"):
+        raise ValueError("rabbitmq_url must include an environment vhost")
+    if strict and parsed.scheme != "amqps":
+        raise ValueError("rabbitmq_url must use amqps outside local/test")
+    if strict and _is_local_hostname(parsed.hostname or ""):
+        raise ValueError("rabbitmq_url cannot use a local hostname outside local/test")
+    if strict and _has_placeholder_secret(unquote(parsed.password)):
+        raise ValueError("rabbitmq_url cannot use a placeholder password outside local/test")
+
+
 class _StandaloneSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -148,6 +166,15 @@ class Settings(_StandaloneSettings):
     oidc_jwks_stale_ttl_seconds: int = 3600
     session_secret: str = "local-only-standalone-session-signing-secret"
     authorization_cache_stale_ttl_seconds: int = 300
+    integration_capabilities: str = "API_CLIENT"
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        return frozenset(
+            capability.strip()
+            for capability in self.integration_capabilities.split(",")
+            if capability.strip()
+        )
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -174,6 +201,72 @@ class Settings(_StandaloneSettings):
             )
         if self.authorization_cache_stale_ttl_seconds < 1:
             raise ValueError("authorization_cache_stale_ttl_seconds must be positive")
+        unknown_capabilities = self.capabilities - {
+            "API_CLIENT",
+            "EVENT_PUBLISHER",
+            "EVENT_CONSUMER",
+            "PROJECTION_SOURCE",
+        }
+        if unknown_capabilities:
+            raise ValueError("integration_capabilities contains an unsupported capability")
+        if "API_CLIENT" not in self.capabilities:
+            raise ValueError("integration_capabilities must include API_CLIENT")
+        if (
+            "PROJECTION_SOURCE" in self.capabilities
+            and "EVENT_PUBLISHER" not in self.capabilities
+        ):
+            raise ValueError("PROJECTION_SOURCE requires EVENT_PUBLISHER")
+        return self
+
+
+class EventPublisherSettings(_StandaloneSettings):
+    application_id: str = "standalone-example"
+    publisher_database_url: str = (
+        "postgresql+psycopg://standalone_outbox_publisher:"
+        "local-only-standalone-publisher-password@"
+        "localhost:5433/standalone_app_db"
+    )
+    rabbitmq_url: str = (
+        "amqp://standalone_publisher:local-only-rabbitmq-publisher-password@"
+        "localhost:5672/ai-hub-local"
+    )
+    exchange_name: str = "ai-hub.events"
+    batch_size: int = 50
+    max_attempts: int = 8
+    retry_base_seconds: int = 1
+    retry_max_seconds: int = 60
+    lease_seconds: int = 30
+    publish_timeout_seconds: float = 10.0
+    connection_timeout_seconds: float = 10.0
+    poll_interval_seconds: float = 0.5
+
+    @model_validator(mode="after")
+    def validate_configuration(self) -> Self:
+        strict = _is_strict_environment(self.environment)
+        _validate_application_id(self.application_id)
+        _validate_database_url(
+            self.publisher_database_url,
+            field_name="publisher_database_url",
+            strict=strict,
+        )
+        _validate_rabbitmq_url(self.rabbitmq_url, strict=strict)
+        if self.exchange_name != "ai-hub.events":
+            raise ValueError("exchange_name must use the registered exchange")
+        if not 1 <= self.batch_size <= 500:
+            raise ValueError("batch_size must be between 1 and 500")
+        if not 1 <= self.max_attempts <= 20:
+            raise ValueError("max_attempts must be between 1 and 20")
+        if not 1 <= self.retry_base_seconds <= self.retry_max_seconds <= 3600:
+            raise ValueError("retry timing is invalid")
+        if self.lease_seconds < 10:
+            raise ValueError("lease_seconds must be at least 10")
+        for value in (
+            self.publish_timeout_seconds,
+            self.connection_timeout_seconds,
+            self.poll_interval_seconds,
+        ):
+            if value <= 0:
+                raise ValueError("publisher timeout values must be positive")
         return self
 
 
@@ -201,3 +294,8 @@ def get_settings() -> Settings:
 @lru_cache
 def get_migration_settings() -> MigrationSettings:
     return MigrationSettings()
+
+
+@lru_cache
+def get_event_publisher_settings() -> EventPublisherSettings:
+    return EventPublisherSettings()

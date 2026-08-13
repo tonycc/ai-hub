@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.9 |
+| 文档版本 | V2.0 |
 | 文档状态 | 执行基线 |
 | 更新日期 | 2026-08-12 |
 | 适用范围 | 平台后端、平台管理端、Python SDK、业务中性接入参考应用、API/事件契约、本地与生产部署基线 |
@@ -81,7 +81,7 @@ flowchart LR
 
 V0.1 必须验证基础接入和一条标准事件链路，但这不意味着每个业务应用都启用事件能力。正式部署选择哪个档位由应用登记能力和运行目标决定。
 
-M0-04 先冻结 profile 名称、组件选择和生命周期：`base-access` 运行 PostgreSQL、迁移、平台 API、门户和 API-only 参考应用；`standard-events` 在同一组组件上增加 RabbitMQ 和可选事件迁移。M1-01 已把 authentik 与 Traefik 加入两个 profile，并通过统一入口暴露身份、平台和参考应用；M2 再为 `standard-events` 增加事件账号、拓扑和实际 Worker。M1 完成不代表事件生产链路已经完成。
+M0-04 先冻结 profile 名称、组件选择和生命周期：`base-access` 运行 PostgreSQL、迁移、平台 API、门户和 API-only 参考应用；`standard-events` 在同一组组件上增加 RabbitMQ 和可选事件迁移。M1-01 已把 authentik 与 Traefik 加入两个 profile，并通过统一入口暴露身份、平台和参考应用；M2 已为 `standard-events` 增加事件登记、最小权限拓扑、应用侧 Outbox 发布器和平台投影 Worker。两个档位仍保持按能力隔离。
 
 ---
 
@@ -94,7 +94,7 @@ M0-04 先冻结 profile 名称、组件选择和生命周期：`base-access` 运
 | `authentik_db` | authentik 专用角色 | authentik 自身 | authentik 内部表 |
 | `platform_db` 核心 Schema | 平台 API 角色 | `backend/migrations` | 应用注册、身份映射、权限、通知和审计 |
 | `platform_db.platform_projection` | 平台投影 Worker 角色 | `ai_hub_projection_migrator` 通过独立入口迁移 | 投影 Inbox、检查点和已登记类型化投影 |
-| `standalone_app_db` | 参考应用角色 | `examples/standalone-app/migrations` | 中性测试记录及按能力启用的本地集成表 |
+| `standalone_app_db` | 参考应用角色；启用事件时另有受限发布器角色 | `examples/standalone-app/migrations` | API 写中性记录并只插入 Outbox；发布器只更新 Outbox 投递状态 |
 
 必须通过数据库权限测试证明：
 
@@ -182,14 +182,14 @@ M1 退出条件：一个独立应用完成登录、用户令牌验证、当前�
 
 | 编号 | 任务 | 主要产物 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| M2-01 | 配置 RabbitMQ vhost、应用凭据、交换机、队列、死信和最小权限 | 标准事件 profile、配置说明 | M0、M1-07 | 待实施 |
-| M2-02 | 收敛 CloudEvents 信封、示例事件和 AsyncAPI 契约 | `contracts/events` | M1-04 | 待实施 |
-| M2-03 | 启用参考应用 `EVENT_PUBLISHER` 可选迁移和事务内 Outbox 写入 | 参考应用迁移、中性测试用例和测试 | M0-05、M2-02 | 待实施 |
-| M2-04 | 实现应用侧 Outbox 发布器 | 独立启动入口、发布确认、有限重试和指标 | M2-01、M2-03 | 待实施 |
-| M2-05 | 实现平台 Inbox、检查点和类型化摘要投影 | 平台投影迁移、Worker 和测试 | M0-06、M2-02 | 待实施 |
-| M2-06 | 实现重复、乱序、版本缺口、删除和失败处理 | 幂等策略、重试和错误审计 | M2-04、M2-05 | 待实施 |
-| M2-07 | 实现快照水位、对账和从空投影重建的最小接口 | 示例快照契约、重建命令和测试 | M2-05、M2-06 | 待实施 |
-| M2-08 | 完成 API-only 与事件应用两种接入契约测试 | 测试矩阵和 CI 门禁 | M2-03 至 M2-07 | 待实施 |
+| M2-01 | 配置 RabbitMQ vhost、应用凭据、交换机、队列、死信和最小权限 | 标准事件 profile、配置说明 | M0、M1-07 | 已完成 |
+| M2-02 | 收敛 CloudEvents 信封、示例事件和 AsyncAPI 契约 | `contracts/events` | M1-04 | 已完成 |
+| M2-03 | 启用参考应用 `EVENT_PUBLISHER` 可选迁移和事务内 Outbox 写入 | 参考应用迁移、中性测试用例和测试 | M0-05、M2-02 | 已完成 |
+| M2-04 | 实现应用侧 Outbox 发布器 | 独立启动入口、发布确认、有限重试和指标 | M2-01、M2-03 | 已完成 |
+| M2-05 | 实现平台 Inbox、检查点和类型化摘要投影 | 平台投影迁移、Worker 和测试 | M0-06、M2-02 | 已完成 |
+| M2-06 | 实现重复、乱序、版本缺口、删除和失败处理 | 幂等策略、重试和错误审计 | M2-04、M2-05 | 已完成 |
+| M2-07 | 实现快照水位、对账和从空投影重建的最小接口 | 示例快照契约、重建命令和测试 | M2-05、M2-06 | 已完成 |
+| M2-08 | 完成 API-only 与事件应用两种接入契约测试 | 测试矩阵和 CI 门禁 | M2-03 至 M2-07 | 已完成 |
 
 M2 必测场景：
 
@@ -202,6 +202,8 @@ M2 必测场景：
 - 未登记事件能力的应用不能发布或订阅，且无需安装事件表和 Worker。
 
 M2 退出条件：一条已登记事件能够可靠更新平台只读摘要投影，重复、失败、重启和重建测试通过，平台不能通过修改投影改变来源测试记录。
+
+2026-08-12 已从全新隔离数据卷执行 `bash scripts/ci/m2-runtime.sh` 并满足退出条件。门禁先证明 `base-access` 不包含任何事件依赖，再验证事件登记、RabbitMQ vhost/Quorum 队列/DLQ/最小权限账号、业务与 Outbox 同事务、发布确认和故障续传、Inbox 幂等、消费者提交前与确认前崩溃、乱序与版本缺口、删除墓碑、永久错误死信、快照校验和与水位、从空投影 Schema 重建、增量续接、旧水位快照拒绝、对账、结构化指标和平台只读边界。当前参考应用只登记发布与投影来源能力，不安装没有本地业务副作用的应用侧 Inbox。
 
 ### 6.4 M3：平台公共能力
 
@@ -287,6 +289,7 @@ M0-07 已冻结以下配置语义和当前前缀；名称调整必须同步更�
 | `APPLICATION_ID` | `AI_HUB_APPLICATION_ID` | `STANDALONE_APPLICATION_ID` | 当前平台或业务应用的稳定登记 ID |
 | `PLATFORM_API_BASE_URL` | 不适用 | `STANDALONE_PLATFORM_API_BASE_URL` | 独立应用调用的平台公共 API 地址 |
 | `DATABASE_URL` | `AI_HUB_DATABASE_URL` | `STANDALONE_DATABASE_URL` | 仅由对应 API 运行进程读取 |
+| `PUBLISHER_DATABASE_URL` | 不适用 | `STANDALONE_PUBLISHER_DATABASE_URL` | 仅由已登记 `EVENT_PUBLISHER` 的 Outbox 发布器读取，使用受限数据库角色 |
 | 核心迁移连接 | `AI_HUB_MIGRATION_DATABASE_URL` | `STANDALONE_MIGRATION_DATABASE_URL` | 仅由对应 Alembic 进程读取，不进入 API Settings |
 | 投影迁移连接 | `AI_HUB_PROJECTION_MIGRATION_DATABASE_URL` | 不适用 | 仅由平台投影 Alembic 进程读取 |
 | `OIDC_ISSUER` | `AI_HUB_OIDC_ISSUER` | `STANDALONE_OIDC_ISSUER` | authentik issuer，必须精确匹配令牌 |
@@ -318,7 +321,7 @@ M0-09 使用仓库脚本作为唯一命令源，CI 平台只调用这些脚本�
 bash scripts/ci/all.sh
 ```
 
-三个轻量入口分别是 `scripts/ci/python.sh`、`scripts/ci/frontend.sh` 和 `scripts/ci/deploy.sh`。Python 入口使用 `uv --frozen` 执行 pytest、Ruff、Pyright strict、import-linter、迁移契约、组件锁、公开契约和 CI 自检；前端入口使用 `npm ci` 后执行生产构建；部署入口解析两个 Compose profile。`.github/workflows/ci.yml` 另有独立的 M1 运行时作业，四个作业都成功后才放行稳定的 `Required gate`。工作流使用 Python 3.14.7、Node.js 24.18.1 和 uv 0.9.8，外部 Action 固定完整提交 SHA，权限只有 `contents: read`。
+三个轻量入口分别是 `scripts/ci/python.sh`、`scripts/ci/frontend.sh` 和 `scripts/ci/deploy.sh`。Python 入口使用 `uv --frozen` 执行 pytest、Ruff、Pyright strict、import-linter、迁移契约、组件锁、公开契约和 CI 自检；前端入口使用 `npm ci` 后执行生产构建；部署入口解析两个 Compose profile。`.github/workflows/ci.yml` 另有相互隔离的 M1 身份/API 与 M2 可靠事件运行时作业，五个前置作业都成功后才放行稳定的 `Required gate`。工作流使用 Python 3.14.7、Node.js 24.18.1 和 uv 0.9.8，外部 Action 固定完整提交 SHA，权限只有 `contents: read`。
 
 M1 的完整容器运行时门禁单独执行，避免普通单元测试隐式依赖本机 Docker 环境；它同时是 GitHub Actions `Required gate` 的前置作业：
 
@@ -327,6 +330,14 @@ bash scripts/ci/m1-runtime.sh
 ```
 
 该门禁必须从空卷启动真实 authentik、Traefik、平台和参考应用，并验证身份、权限、服务身份、通知、审计、降级与独立故障边界。`M1_SKIP_BUILD=1` 只允许在待测镜像已由当前源码构建时用于本地重复调试，不能替代首次构建验证。
+
+M2 可靠事件运行时门禁同样独立执行，并从空卷验证应用 Outbox 到平台 Inbox/只读投影的完整链路：
+
+```bash
+bash scripts/ci/m2-runtime.sh
+```
+
+该门禁覆盖 API-only 隔离、最小权限、事务原子性、发布确认、代理中断续传、重复与乱序、消费者崩溃窗口、死信、删除墓碑、快照校验、水位续接、从空投影 Schema 重建和对账。`M2_SKIP_BUILD=1` 只用于当前源码镜像已经构建完成的本地重复调试。
 
 当前目录已初始化为 Git 仓库并推送到公开仓库 [tonycc/ai-hub](https://github.com/tonycc/ai-hub)。[GitHub Actions 运行 31557248062](https://github.com/tonycc/ai-hub/actions/runs/31557248062)已确认三个并行作业与 `Required gate` 全部通过；`main` 已启用分支保护，要求变更通过 Pull Request、解决审查会话并通过 `Required gate`，同时禁止强制推送和删除。因此 M0-09 与整个 M0 已完成。
 
@@ -362,10 +373,10 @@ bash scripts/ci/m1-runtime.sh
 
 - 总体方案已按企业 B 端、稳定可靠和简单部署目标收敛。
 - 平台后端、SDK、独立应用示例、OpenAPI/AsyncAPI 和初始迁移骨架已经存在。
-- M0-03 已完成：`deploy/compose.yaml` 只保留一个 PostgreSQL 服务，可从空数据卷初始化 authentik、平台和参考应用三个逻辑数据库。M0-06 增加投影专用迁移账号后，当前共初始化七个受限角色。
+- M0-03 已完成：`deploy/compose.yaml` 只保留一个 PostgreSQL 服务，可从空数据卷初始化 authentik、平台和参考应用三个逻辑数据库。基础档位固定初始化七个受限角色；标准事件档位再按能力创建不可访问业务表的 Outbox 发布器角色。
 - 平台和参考应用迁移已改用独立迁移连接串；空库迁移与数据库/Schema 权限断言已通过。M0-03 至 M0-07 使用本机缓存的 `postgres:16-alpine` 做无下载验证；这类兼容验证不替代 M0-08 的 PostgreSQL 18.4 精确镜像门禁。
 - M0-04 已完成：平台 API、门户和参考应用具备容器镜像；`base-access` 与 `standard-events` 的服务集合、迁移依赖、健康检查和启停命令已通过实际验证。
-- M0-05 已完成：参考应用基础、`EVENT_PUBLISHER` 和 `EVENT_CONSUMER` 使用三个独立 Alembic 入口及版本表。迁移契约测试通过，并在全新 PostgreSQL 中按“基础 → 发布者 → 消费者”逐级验证：基础只创建 `example_record`，两类可选迁移分别只新增 Outbox 和 Inbox。标准事件档位会执行两类可选迁移，但未提前实现 M2 Worker。
+- M0-05 已完成：参考应用基础、`EVENT_PUBLISHER` 和 `EVENT_CONSUMER` 使用三个独立 Alembic 入口及版本表。迁移契约测试通过，并在全新 PostgreSQL 中按“基础 → 发布者 → 消费者”逐级验证：基础只创建 `example_record`，两类可选迁移分别只新增 Outbox 和 Inbox。M2 最终档位只执行当前已登记的发布者迁移；消费者入口继续作为按需模板保留。
 - M0-06 已完成：平台核心与投影使用独立 Alembic 配置、revision、Schema 内版本表和迁移账号。核心空库迁移只建立受保护的版本基线，不再把 Outbox 带入 `base-access`；投影在第二个空库中的独立迁移、完整标准事件档位及数据库所有权/越权断言均已通过。平台 API 对投影只读，投影运行账号不能访问核心，两者均不能修改迁移元数据。
 - M0-07 已完成：根 Compose 配置、平台宿主机配置和独立应用宿主机配置已经分离；变量名统一为稳定语义后缀。平台 API、核心迁移、投影迁移、独立应用 API 和独立应用迁移各自只读取所需配置。Compose 会拒绝缺失或空密钥，非本地 Settings 会拒绝本机地址、明文身份/API 地址和 `local-only`/占位密码，校验错误不回显连接串。两个 profile、独立应用到平台的 API 调用和数据库角色边界已在隔离容器中复验。
 - M0-08 已完成：已建立 `deploy/component-lock.json` 和组件升级策略，Compose、Dockerfile 与环境模板均使用精确标签和摘要，并把已 EOL 的 Node.js 20 构建基线调整为 Node.js 24 LTS、把门户运行时固定在 Nginx stable。精确镜像核验纠正了一项 Node 标签/摘要错配，并按 PostgreSQL 18 官方目录布局把命名卷挂载点调整为 `/var/lib/postgresql`。两个 profile 已分别从全新数据卷完成迁移、健康、独立应用调用平台、RabbitMQ 和数据库权限审计，实际运行版本与锁清单一致。
@@ -374,5 +385,7 @@ bash scripts/ci/m1-runtime.sh
 - M1-04 至 M1-07 已完成：核心迁移建立应用、环境、身份映射、组织、权限点、授权和服务身份绑定；公开 API 与 Python SDK 提供应用登记、健康、当前用户、权限快照、在线决策和通知调用。授权缓存按主体、应用和版本隔离，低风险只在有界窗口内使用陈旧快照，高风险写操作在线判权并失败关闭；独立应用仍执行对象归属与业务状态最终校验。
 - M1-08 至 M1-10 已完成：平台和参考应用统一传播 request_id/trace_id、输出结构化访问与安全决策日志，并把认证拒绝、授权和通知调用写入追加式审计。业务中性参考应用通过 OIDC 授权码 + PKCE 登录、服务身份通知、独立数据库、独立镜像和独立重启完成接入认证，不包含平台源码或共享 Session/数据库账号。
 - M1 运行时门禁已从全新数据卷完整通过，覆盖正确与错误令牌、缺少 scope、凭据撤销、对象级拒绝、JWKS 缓存、authentik/平台短时故障、通知幂等、日志和审计链。静态门禁和远端 `Required gate` 仍是每次 Pull Request 的必需检查。
+- M2-01 至 M2-04 已完成：标准事件档位按登记能力创建独立 vhost、交换机、Quorum 队列、DLQ 和两个最小权限账号；严格 CloudEvents 信封、事件数据 Schema 与 AsyncAPI 已收敛。参考应用的记录变更、来源序列和 Outbox 使用同一事务，独立发布器具备租约恢复、publisher confirms、mandatory 路由检查、有限指数退避和结构化累计指标。
+- M2-05 至 M2-08 已完成：平台专用 Worker 使用手动确认和独立数据库角色，在同一事务内写 Inbox、检查点、版本缺口、暂存事件和类型化只读投影；重复、旧版本、乱序、删除和永久失败均有明确处理。快照导出、校验和、水位重建与对账命令已落地，API-only 与标准事件两套 CI 契约及真实故障场景均已通过。
 
-M0 和 M1 已完成。下一步按依赖从 M2-01 开始可靠事件纵向链路；API-only 应用继续只运行 `base-access`，不会因 M2 被强制安装 Outbox、Inbox 或事件 Worker。后续变更通过 Pull Request 合入受保护的 `main`。
+M0、M1 和 M2 已完成。下一步按依赖从 M3-01 开始平台公共能力建设；API-only 应用继续只运行 `base-access`，不会因可靠事件能力被强制安装 Outbox、Inbox 或事件 Worker。后续变更通过 Pull Request 合入受保护的 `main`。

@@ -101,6 +101,7 @@ version = "0.1.0"
 source = { editable = "examples/standalone-app" }
 dependencies = [
     { name = "ai-hub-sdk" },
+    { name = "aio-pika" },
     { name = "alembic" },
     { name = "fastapi" },
     { name = "itsdangerous" },
@@ -122,6 +123,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ai-hub-sdk", editable = "sdk/python" },
+    { name = "aio-pika", specifier = ">=9.5,<10" },
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "fastapi", specifier = ">=0.116,<1" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },

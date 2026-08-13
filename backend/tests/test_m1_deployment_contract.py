@@ -73,3 +73,23 @@ def test_standalone_image_build_does_not_copy_platform_source() -> None:
 
     assert "COPY backend/src" not in dockerfile
     assert "COPY sdk/python/src" in dockerfile
+
+
+def test_event_profile_uses_a_dedicated_outbox_relay_database_role() -> None:
+    compose = load_yaml("deploy/compose.yaml")
+    publisher = compose["services"]["standalone-outbox-publisher"]
+    application = compose["services"]["standalone-app"]
+    event_application = compose["services"]["standalone-app-events"]
+
+    assert "STANDALONE_PUBLISHER_DATABASE_URL" in publisher["environment"]
+    assert "standalone_outbox_publisher" in publisher["environment"][
+        "STANDALONE_PUBLISHER_DATABASE_URL"
+    ]
+    assert "STANDALONE_DATABASE_URL" in application["environment"]
+    assert "standalone_app:" in application["environment"]["STANDALONE_DATABASE_URL"]
+    assert application["profiles"] == ["base-access"]
+    assert event_application["profiles"] == ["standard-events"]
+    assert application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == "API_CLIENT"
+    assert event_application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == (
+        "API_CLIENT,EVENT_PUBLISHER,PROJECTION_SOURCE"
+    )

@@ -24,7 +24,7 @@ version_table_schema = config.get_main_option("version_table_schema") or None
 
 
 def get_migration_database_url() -> str:
-    if migration_target == "core":
+    if migration_target in {"core", "events"}:
         return get_core_migration_settings().migration_database_url
     if migration_target == "projection":
         return get_projection_migration_settings().projection_migration_database_url
