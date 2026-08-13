@@ -15,6 +15,38 @@ x-authentik-environment: &authentik-environment
   AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
   AUTHENTIK_LOG_LEVEL: info
 
+x-standalone-app-environment: &standalone-app-environment
+  STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+  STANDALONE_DATABASE_URL: postgresql+psycopg://standalone_app:${STANDALONE_APP_DB_PASSWORD:?Set STANDALONE_APP_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+  STANDALONE_PLATFORM_API_BASE_URL: ${STANDALONE_PLATFORM_API_BASE_URL:-http://platform.localhost:8088}
+  STANDALONE_APPLICATION_ID: ${STANDALONE_APPLICATION_ID:-standalone-example}
+  STANDALONE_OIDC_ISSUER: ${STANDALONE_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub/}
+  STANDALONE_OIDC_AUDIENCE: ${STANDALONE_OIDC_AUDIENCE:-ai-hub-platform}
+  STANDALONE_OIDC_CLIENT_ID: ${STANDALONE_OIDC_CLIENT_ID:-ai-hub-platform}
+  STANDALONE_OIDC_CLIENT_SECRET: ${STANDALONE_OIDC_CLIENT_SECRET:?Set STANDALONE_OIDC_CLIENT_SECRET in .env}
+  STANDALONE_OIDC_REDIRECT_URI: ${STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
+  STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS:-300}
+  STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS:-3600}
+  STANDALONE_SESSION_SECRET: ${STANDALONE_SESSION_SECRET:?Set STANDALONE_SESSION_SECRET in .env}
+  STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS: ${STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS:-300}
+
+x-standalone-app-common: &standalone-app-common
+  image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+  build:
+    context: ..
+    dockerfile: examples/standalone-app/Dockerfile
+    args:
+      PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+      UV_VERSION: ${UV_VERSION:-0.9.8}
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health/live', timeout=2).read()"]
+    interval: 5s
+    timeout: 3s
+    retries: 12
+    start_period: 5s
+  init: true
+  restart: unless-stopped
+
 services:
   postgres:
     profiles: *core-profiles
@@ -79,6 +111,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: "no"
+
+  platform-event-registration-migrate:
+    profiles:
+      - standard-events
+    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["alembic", "-c", "/workspace/backend/alembic-events.ini", "upgrade", "head"]
+    environment:
+      AI_HUB_ENVIRONMENT: ${AI_HUB_ENVIRONMENT:-local}
+      AI_HUB_MIGRATION_DATABASE_URL: postgresql+psycopg://ai_hub_platform_migrator:${AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/platform_db
+    depends_on:
+      platform-core-migrate:
+        condition: service_completed_successfully
     restart: "no"
 
   platform-api:
@@ -173,68 +224,66 @@ services:
     depends_on:
       standalone-migrate:
         condition: service_completed_successfully
-    restart: "no"
-
-  standalone-event-consumer-migrate:
-    profiles:
-      - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
-    build:
-      context: ..
-      dockerfile: examples/standalone-app/Dockerfile
-      args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
-        UV_VERSION: ${UV_VERSION:-0.9.8}
-    command:
-      - alembic
-      - -c
-      - /workspace/examples/standalone-app/alembic-event-consumer.ini
-      - upgrade
-      - head
-    environment:
-      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
-      STANDALONE_MIGRATION_DATABASE_URL: postgresql+psycopg://standalone_app_migrator:${STANDALONE_MIGRATOR_DB_PASSWORD:?Set STANDALONE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
-    depends_on:
-      standalone-migrate:
+      standalone-publisher-db-bootstrap:
         condition: service_completed_successfully
     restart: "no"
 
-  standalone-app:
-    profiles: *core-profiles
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
-    build:
-      context: ..
-      dockerfile: examples/standalone-app/Dockerfile
-      args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
-        UV_VERSION: ${UV_VERSION:-0.9.8}
+  standalone-publisher-db-bootstrap:
+    profiles:
+      - standard-events
+    image: ${POSTGRES_IMAGE:-postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15}
+    command:
+      - psql
+      - --host=postgres
+      - --username=postgres
+      - --dbname=standalone_app_db
+      - --set=ON_ERROR_STOP=1
+      - --file=/opt/ai-hub/postgres-bootstrap/enable-outbox-publisher.sql
     environment:
-      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
-      STANDALONE_DATABASE_URL: postgresql+psycopg://standalone_app:${STANDALONE_APP_DB_PASSWORD:?Set STANDALONE_APP_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
-      STANDALONE_PLATFORM_API_BASE_URL: ${STANDALONE_PLATFORM_API_BASE_URL:-http://platform.localhost:8088}
-      STANDALONE_APPLICATION_ID: ${STANDALONE_APPLICATION_ID:-standalone-example}
-      STANDALONE_OIDC_ISSUER: ${STANDALONE_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub/}
-      STANDALONE_OIDC_AUDIENCE: ${STANDALONE_OIDC_AUDIENCE:-ai-hub-platform}
-      STANDALONE_OIDC_CLIENT_ID: ${STANDALONE_OIDC_CLIENT_ID:-ai-hub-platform}
-      STANDALONE_OIDC_CLIENT_SECRET: ${STANDALONE_OIDC_CLIENT_SECRET:?Set STANDALONE_OIDC_CLIENT_SECRET in .env}
-      STANDALONE_OIDC_REDIRECT_URI: ${STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
-      STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS:-300}
-      STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS:-3600}
-      STANDALONE_SESSION_SECRET: ${STANDALONE_SESSION_SECRET:?Set STANDALONE_SESSION_SECRET in .env}
-      STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS: ${STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS:-300}
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health/live', timeout=2).read()"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
+      PGPASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+      STANDALONE_PUBLISHER_DB_PASSWORD: ${STANDALONE_PUBLISHER_DB_PASSWORD:?Set STANDALONE_PUBLISHER_DB_PASSWORD in .env}
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./postgres/bootstrap:/opt/ai-hub/postgres-bootstrap:ro
+    restart: "no"
+
+  standalone-app:
+    <<: *standalone-app-common
+    profiles:
+      - base-access
+    environment:
+      <<: *standalone-app-environment
+      STANDALONE_INTEGRATION_CAPABILITIES: API_CLIENT
     depends_on:
       standalone-migrate:
         condition: service_completed_successfully
       platform-api:
         condition: service_healthy
-    init: true
-    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - standalone-app
+
+  standalone-app-events:
+    <<: *standalone-app-common
+    profiles:
+      - standard-events
+    environment:
+      <<: *standalone-app-environment
+      STANDALONE_INTEGRATION_CAPABILITIES: API_CLIENT,EVENT_PUBLISHER,PROJECTION_SOURCE
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+      platform-api:
+        condition: service_healthy
+      standalone-event-publisher-migrate:
+        condition: service_completed_successfully
+    networks:
+      default:
+        aliases:
+          - standalone-app
 
   authentik-server:
     profiles: *core-profiles
@@ -271,6 +320,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      authentik-server:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "ak", "healthcheck"]
       interval: 10s
@@ -304,6 +355,10 @@ services:
         condition: service_healthy
       standalone-app:
         condition: service_healthy
+        required: false
+      standalone-app-events:
+        condition: service_healthy
+        required: false
     volumes:
       - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
       - ./traefik/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
@@ -321,11 +376,11 @@ services:
       - standard-events
     image: ${RABBITMQ_IMAGE:-rabbitmq:4.2.9-management@sha256:a2751b3b5eed89e47ebbd5e776de0d6d85d924002773933ab881da49c073b85d}
     environment:
-      RABBITMQ_DEFAULT_USER: ai_hub
+      RABBITMQ_DEFAULT_USER: ai_hub_admin
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${AI_HUB_RABBITMQ_PORT:-5672}:5672"
+      - "${AI_HUB_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -333,6 +388,79 @@ services:
       retries: 12
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+
+  rabbitmq-bootstrap:
+    profiles:
+      - standard-events
+    image: ${RABBITMQ_IMAGE:-rabbitmq:4.2.9-management@sha256:a2751b3b5eed89e47ebbd5e776de0d6d85d924002773933ab881da49c073b85d}
+    command: ["sh", "/opt/ai-hub/rabbitmq/bootstrap.sh"]
+    environment:
+      RABBITMQ_ADMIN_USER: ai_hub_admin
+      RABBITMQ_ADMIN_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-ai-hub-local}
+      RABBITMQ_PUBLISHER_USER: ${RABBITMQ_PUBLISHER_USER:-standalone_publisher}
+      RABBITMQ_PUBLISHER_PASSWORD: ${RABBITMQ_PUBLISHER_PASSWORD:?Set RABBITMQ_PUBLISHER_PASSWORD in .env}
+      RABBITMQ_PROJECTION_USER: ${RABBITMQ_PROJECTION_USER:-platform_projection}
+      RABBITMQ_PROJECTION_PASSWORD: ${RABBITMQ_PROJECTION_PASSWORD:?Set RABBITMQ_PROJECTION_PASSWORD in .env}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      platform-event-registration-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./rabbitmq/bootstrap.sh:/opt/ai-hub/rabbitmq/bootstrap.sh:ro
+    restart: "no"
+
+  standalone-outbox-publisher:
+    profiles:
+      - standard-events
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["standalone-outbox-publisher"]
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_APPLICATION_ID: ${STANDALONE_APPLICATION_ID:-standalone-example}
+      STANDALONE_PUBLISHER_DATABASE_URL: postgresql+psycopg://standalone_outbox_publisher:${STANDALONE_PUBLISHER_DB_PASSWORD:?Set STANDALONE_PUBLISHER_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+      STANDALONE_RABBITMQ_URL: amqp://${RABBITMQ_PUBLISHER_USER:-standalone_publisher}:${RABBITMQ_PUBLISHER_PASSWORD:?Set RABBITMQ_PUBLISHER_PASSWORD in .env}@rabbitmq:5672/${RABBITMQ_VHOST:-ai-hub-local}
+      STANDALONE_EXCHANGE_NAME: ai-hub.events
+    depends_on:
+      standalone-event-publisher-migrate:
+        condition: service_completed_successfully
+      rabbitmq-bootstrap:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+
+  platform-projection-worker:
+    profiles:
+      - standard-events
+    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["ai-hub-projection-worker"]
+    environment:
+      AI_HUB_ENVIRONMENT: ${AI_HUB_ENVIRONMENT:-local}
+      AI_HUB_PROJECTION_DATABASE_URL: postgresql+psycopg://ai_hub_projection:${AI_HUB_PROJECTION_DB_PASSWORD:?Set AI_HUB_PROJECTION_DB_PASSWORD in .env}@postgres:5432/platform_db
+      AI_HUB_RABBITMQ_URL: amqp://${RABBITMQ_PROJECTION_USER:-platform_projection}:${RABBITMQ_PROJECTION_PASSWORD:?Set RABBITMQ_PROJECTION_PASSWORD in .env}@rabbitmq:5672/${RABBITMQ_VHOST:-ai-hub-local}
+      AI_HUB_QUEUE_NAME: ai-hub.platform.projection
+      AI_HUB_PROCESSING_DELAY_SECONDS: ${AI_HUB_PROCESSING_DELAY_SECONDS:-0}
+      AI_HUB_ACKNOWLEDGEMENT_DELAY_SECONDS: ${AI_HUB_ACKNOWLEDGEMENT_DELAY_SECONDS:-0}
+    depends_on:
+      platform-projection-migrate:
+        condition: service_completed_successfully
+      rabbitmq-bootstrap:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
 
 volumes:
   postgres-data:

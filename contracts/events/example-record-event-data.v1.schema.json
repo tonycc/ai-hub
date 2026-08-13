@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-hub.example.internal/contracts/events/example-record-event-data.v1.schema.json",
+  "title": "Business-neutral example record event data v1",
+  "$defs": {
+    "changed": {
+      "type": "object",
+      "required": ["record_id", "name", "state", "owner_subject"],
+      "properties": {
+        "record_id": {"type": "string", "format": "uuid"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "state": {"type": "string", "minLength": 1, "maxLength": 50},
+        "owner_subject": {"type": "string", "minLength": 1, "maxLength": 255}
+      },
+      "additionalProperties": false
+    },
+    "deleted": {
+      "type": "object",
+      "required": ["record_id"],
+      "properties": {
+        "record_id": {"type": "string", "format": "uuid"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

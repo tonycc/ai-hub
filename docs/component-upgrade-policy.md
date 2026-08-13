@@ -37,7 +37,7 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 | 组件 | 当前证据 | 状态 |
 | --- | --- | --- |
 | Python 3.14.7 | 精确摘要、平台与独立应用镜像中的运行版本 | 已验证 |
-| RabbitMQ 4.2.9 | 精确摘要、`standard-events` 健康检查与 diagnostic ping | 已验证 |
+| RabbitMQ 4.2.9 | 精确摘要、`standard-events` 健康检查、最小权限拓扑、发布确认、故障恢复与 DLQ | 已验证 |
 | PostgreSQL 18.4 | 精确摘要、服务端版本、全新数据卷迁移和数据库权限审计 | 已验证 |
 | Node.js 24.18.1 | 精确摘要、容器运行版本、`npm ci` 与门户生产构建 | 已验证 |
 | Nginx 1.30.4 | 精确摘要、门户运行版本和两个 profile 的健康检查 | 已验证 |
@@ -55,6 +55,7 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 7. PostgreSQL 报告的服务端版本属于 18.4。
 8. authentik 的可重复 blueprint、OIDC Discovery、用户登录和服务令牌均通过真实运行验证。
 9. Traefik 是唯一公开 HTTP 入口，且平台、门户、身份和参考应用路由及健康检查通过。
+10. RabbitMQ 中断时 Outbox 保留，恢复后自动续传；重复、乱序、消费崩溃和永久失败场景通过。
 
 本地因网络或缓存限制使用其他镜像时，必须通过显式环境变量覆盖并在验证记录中注明。兼容镜像验证不改变生产锁定，也不能替代上面的精确镜像门禁。
 
@@ -65,9 +66,10 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 - 首次核验发现原 Node.js 摘要实际运行 24.17.0，与可读标签 24.18.1 不一致；已按精确标签重新解析并把清单修正为实际运行 24.18.1 的摘要。Docker 在标签与摘要冲突时使用摘要内容，因此不能只检查可读标签。
 - PostgreSQL 18.4 首次启动暴露官方镜像的数据目录布局变化；Compose 命名卷已从旧路径 `/var/lib/postgresql/data` 调整到 18+ 要求的 `/var/lib/postgresql`，并增加静态契约测试。
 - `base-access` 已从全新数据卷完成基础迁移；平台 API、门户与独立应用健康，独立应用到平台的 API 调用成功，API-only 数据库未创建 Outbox/Inbox。
-- `standard-events` 已从另一全新数据卷完成核心、投影、基础应用、发布者和消费者五个迁移入口；全部退出码为 0，RabbitMQ 健康且 ping 成功，Outbox/Inbox 按档位存在，数据库角色边界审计通过。
+- `standard-events` 已从另一全新数据卷完成平台核心、事件登记、平台投影、参考应用基础和参考应用发布者五个迁移入口；全部退出码为 0，RabbitMQ 健康且 ping 成功，Outbox/Inbox 按档位存在，数据库角色边界审计通过。
 - 容器实际报告 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4 和 RabbitMQ 4.2.9。验证平台为 `linux/arm64`；两套临时环境的容器、网络和数据卷均已删除。
 - M1 追加验证 authentik 2026.5.6 与 Traefik 3.7.10 的精确镜像；从全新数据卷通过 OIDC/JWKS、PKCE、服务身份、权限、通知、故障降级和独立重启门禁，临时环境随后删除。
+- M2 追加验证 RabbitMQ 4.2.9 的隔离 vhost、Quorum 队列、DLQ、最小权限凭据、发布确认、代理中断恢复、手动确认和消费者崩溃窗口；并完成平台投影从空 Schema 重建及对账，临时环境随后删除。
 
 ## 4. 不可变引用规则
 

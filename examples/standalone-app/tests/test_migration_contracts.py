@@ -23,6 +23,7 @@ def test_api_client_migration_creates_reference_record_with_m1_owner() -> None:
 
     assert "CREATE TABLE app.example_record" in sql
     assert "ADD COLUMN owner_subject" in sql
+    assert "ADD COLUMN aggregate_version" in sql
     assert "M1 ownership denial record" in sql
     assert "another-user" in sql
     assert "integration_outbox" not in sql
@@ -35,7 +36,15 @@ def test_event_publisher_migration_only_creates_outbox() -> None:
 
     assert "CREATE TABLE app.integration_outbox" in sql
     assert "ix_app_outbox_dispatch" in sql
-    assert "example_record" not in sql
+    assert "CREATE TABLE app.integration_source_state" in sql
+    assert "uq_app_outbox_source_sequence" in sql
+    assert "TO standalone_outbox_publisher" in sql
+    assert (
+        "REVOKE SELECT, UPDATE, DELETE ON app.integration_outbox FROM standalone_app"
+        in sql
+    )
+    assert "CREATE TABLE app.example_record" not in sql
+    assert "ALTER TABLE app.example_record" not in sql
     assert "integration_inbox" not in sql
     assert "alembic_version_event_publisher" in sql
 

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "ai-hub-sdk",
+  "aio-pika>=9.5,<10",
   "alembic>=1.16,<2",
   "fastapi>=0.116,<1",
   "itsdangerous>=2.2,<3",
@@ -29,6 +30,8 @@ ai-hub-sdk = { workspace = true }
 
 [project.scripts]
 standalone-app = "standalone_app.cli:run"
+standalone-outbox-publisher = "standalone_app.cli:run_publisher"
+standalone-snapshot-export = "standalone_app.cli:run_snapshot_export"
 
 [build-system]
 requires = ["hatchling>=1.27"]

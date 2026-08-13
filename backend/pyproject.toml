@@ -33,6 +33,9 @@ dev = [
 
 [project.scripts]
 ai-hub-api = "ai_hub_platform.cli:run"
+ai-hub-projection-worker = "ai_hub_platform.cli:run_projection_worker_cli"
+ai-hub-projection-rebuild = "ai_hub_platform.cli:run_projection_rebuild_cli"
+ai-hub-projection-reconcile = "ai_hub_platform.cli:run_projection_reconcile_cli"
 
 [build-system]
 requires = ["hatchling>=1.27"]
