@@ -8,6 +8,7 @@ dependencies = [
   "ai-hub-sdk",
   "aio-pika>=9.5,<10",
   "alembic>=1.16,<2",
+  "cryptography>=46,<51",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "psycopg[binary]>=3.2,<4",
@@ -37,6 +38,7 @@ ai-hub-projection-worker = "ai_hub_platform.cli:run_projection_worker_cli"
 ai-hub-projection-rebuild = "ai_hub_platform.cli:run_projection_rebuild_cli"
 ai-hub-projection-reconcile = "ai_hub_platform.cli:run_projection_reconcile_cli"
 ai-hub-conformance-evidence-import = "ai_hub_platform.cli:run_conformance_evidence_import_cli"
+ai-hub-backup = "ai_hub_platform.operations.backup:main"
 
 [build-system]
 requires = ["hatchling>=1.27"]

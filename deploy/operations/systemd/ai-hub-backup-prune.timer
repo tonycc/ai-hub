@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply AI Hub backup retention daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Shanghai
+Persistent=true
+Unit=ai-hub-backup-prune.service
+
+[Install]
+WantedBy=timers.target

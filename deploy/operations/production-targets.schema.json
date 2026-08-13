@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-hub.example.internal/schemas/production-targets.v1.json",
+  "title": "AI Hub production operating targets",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timezone",
+    "service_window",
+    "deployment_tier",
+    "slo",
+    "recovery",
+    "retention",
+    "alert_routes",
+    "ha_upgrade_triggers"
+  ],
+  "properties": {
+    "$schema": { "type": "string", "minLength": 1 },
+    "schema_version": { "const": 1 },
+    "timezone": { "const": "Asia/Shanghai" },
+    "service_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days", "start", "end", "planned_maintenance_notice_hours"],
+      "properties": {
+        "days": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] }
+        },
+        "start": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+        "end": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+        "planned_maintenance_notice_hours": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "deployment_tier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "profile", "topology", "off_host_backup_required"],
+      "properties": {
+        "id": { "const": "STANDARD_SINGLE_NODE" },
+        "profile": { "enum": ["base-access", "standard-events"] },
+        "topology": { "const": "single-host-docker-compose" },
+        "off_host_backup_required": { "const": true }
+      }
+    },
+    "slo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "monthly_availability_percent",
+        "public_api_p95_ms",
+        "public_api_p99_ms",
+        "minimum_test_rps",
+        "minimum_test_requests",
+        "maximum_server_error_percent",
+        "event_backlog_warning",
+        "event_backlog_critical",
+        "event_recovery_minutes"
+      ],
+      "properties": {
+        "monthly_availability_percent": { "type": "number", "minimum": 99, "maximum": 100 },
+        "public_api_p95_ms": { "type": "integer", "minimum": 1 },
+        "public_api_p99_ms": { "type": "integer", "minimum": 1 },
+        "minimum_test_rps": { "type": "integer", "minimum": 1 },
+        "minimum_test_requests": { "type": "integer", "minimum": 100 },
+        "maximum_server_error_percent": { "type": "number", "minimum": 0, "maximum": 10 },
+        "event_backlog_warning": { "type": "integer", "minimum": 1 },
+        "event_backlog_critical": { "type": "integer", "minimum": 1 },
+        "event_recovery_minutes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rpo_minutes", "rto_minutes", "projection_rto_minutes", "backup_interval_minutes"],
+      "properties": {
+        "rpo_minutes": { "type": "integer", "minimum": 1 },
+        "rto_minutes": { "type": "integer", "minimum": 1 },
+        "projection_rto_minutes": { "type": "integer", "minimum": 1 },
+        "backup_interval_minutes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 1 },
+      "required": [
+        "audit_days",
+        "notification_days",
+        "portal_session_days_after_expiry",
+        "conformance_days_after_expiry",
+        "published_outbox_days",
+        "inbox_days",
+        "backup_hourly_count",
+        "backup_daily_days"
+      ]
+    },
+    "alert_routes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["primary", "backup", "acknowledge_minutes"],
+        "properties": {
+          "primary": { "type": "string", "minLength": 1 },
+          "backup": { "type": "string", "minLength": 1 },
+          "acknowledge_minutes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "ha_upgrade_triggers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability_percent", "rpo_minutes", "rto_minutes", "sustained_rps"],
+      "properties": {
+        "availability_percent": { "type": "number", "minimum": 99, "maximum": 100 },
+        "rpo_minutes": { "type": "integer", "minimum": 0 },
+        "rto_minutes": { "type": "integer", "minimum": 1 },
+        "sustained_rps": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

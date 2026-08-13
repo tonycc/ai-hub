@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Hub encrypted off-host logical backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=ai-hub-operator
+Group=ai-hub-operator
+WorkingDirectory=/opt/ai-hub
+EnvironmentFile=/etc/ai-hub/backup.env
+UMask=0077
+ExecStart=/opt/ai-hub/.venv/bin/ai-hub-backup create --compose-file /opt/ai-hub/deploy/compose.yaml --env-file /etc/ai-hub/runtime.env --profile standard-events --output-dir /mnt/ai-hub-off-host-backups --storage-class off-host
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/mnt/ai-hub-off-host-backups /run/docker.sock
