@@ -1,66 +1,86 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import ApiState from '../components/ApiState.vue'
 import MetricCard from '../components/MetricCard.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
-import { usePrototypeStore } from '../stores/prototype'
+import { apiRequest } from '../services/platformApi'
+import { usePortalSession } from '../stores/session'
 
 const router = useRouter()
-const store = usePrototypeStore()
-const registeredApps = computed(() => store.state.applications)
+const session = usePortalSession()
+const registeredApps = ref([])
+const applicationsLoading = ref(false)
+const applicationsError = ref(null)
+const canCreateApplication = computed(() => session.hasPermission('platform.application.write')
+  && session.principal.value?.application_scopes?.['platform.application.write'] === null)
+
+async function loadApplications() {
+  applicationsLoading.value = true
+  applicationsError.value = null
+  try {
+    registeredApps.value = (await apiRequest('applications')).items
+  } catch (error) {
+    applicationsError.value = error
+  } finally {
+    applicationsLoading.value = false
+  }
+}
 
 const milestoneTasks = [
-  { code: 'M1-01/02', name: 'authentik、Traefik 与可重复 OIDC 配置', owner: '平台运维', status: '已完成' },
-  { code: 'M1-03', name: 'Discovery、JWKS 缓存与本地验签', owner: '平台研发', status: '已完成' },
-  { code: 'M1-04/05', name: '应用登记、身份映射与权限 API', owner: '平台研发', status: '已完成' },
-  { code: 'M1-06/07', name: '版本化授权缓存与服务身份', owner: '接入工具', status: '已完成' },
-  { code: 'M1-08', name: '请求上下文、结构化日志与审计', owner: '平台研发', status: '已完成' },
-  { code: 'M1-09', name: '测试通知与可观察送达', owner: '平台研发', status: '已完成' },
-  { code: 'M1-10', name: '独立应用端到端接入认证', owner: '接入工具', status: '已完成' },
+  { code: 'M3-01', name: '管理端信息架构、角色任务与验收基线', owner: '平台产品', status: '已完成' },
+  { code: 'M3-02', name: '用户、组织、平台角色与数据范围治理', owner: '平台研发', status: '已完成' },
+  { code: 'M3-03', name: '应用、环境、scope、凭据与版本生命周期', owner: '平台研发', status: '已完成' },
+  { code: 'M3-04', name: '通知配置、测试送达与追加式审计', owner: '平台研发', status: '已完成' },
+  { code: 'M3-05', name: '公开契约、SDK、沙箱与开发者中心', owner: '接入工具', status: '已完成' },
+  { code: 'M3-06', name: '接入认证、运行证据与只读运维诊断', owner: '平台运维', status: '已完成' },
+  { code: 'M3-07', name: '四类平台角色真实环境 UAT', owner: '平台验收', status: '已完成' },
 ]
 
 const platformEntries = [
-  { name: '应用中心', description: '登记环境、入口、回调、能力和版本', path: '/applications', icon: 'Grid', color: '#416f86' },
-  { name: '用户与组织', description: '管理身份映射、组织和账号状态', path: '/platform/identity', icon: 'UserFilled', color: '#527a64' },
-  { name: '权限与安全', description: '管理角色、权限点、scope 和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84' },
-  { name: '开发者中心', description: '查看契约、SDK、沙箱和认证结果', path: '/platform/developer', icon: 'Tools', color: '#826846' },
+  { name: '应用中心', description: '登记环境、入口、回调、能力和版本', path: '/applications', icon: 'Grid', color: '#416f86', permission: 'platform.application.read' },
+  { name: '用户与组织', description: '管理身份映射、组织和账号状态', path: '/platform/identity', icon: 'UserFilled', color: '#527a64', permission: 'platform.identity.read' },
+  { name: '权限与安全', description: '管理角色、权限点、scope 和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84', permission: 'platform.authorization.read' },
+  { name: '开发者中心', description: '查看契约、SDK、沙箱和认证结果', path: '/platform/developer', icon: 'Tools', color: '#826846', permission: 'platform.developer.read' },
 ]
+const visiblePlatformEntries = computed(() => platformEntries.filter((entry) => session.hasPermission(entry.permission)))
+onMounted(loadApplications)
 </script>
 
 <template>
   <div class="page-shell portal-page">
     <PageHeader
-      eyebrow="PLATFORM IMPLEMENTATION · M2"
+      eyebrow="PLATFORM IMPLEMENTATION · M3"
       title="AI Hub 平台控制台"
       description="当前只建设平台公共能力。真实业务应用通过公开 API 和事件独立接入，不进入平台源码、数据库或发布制品。"
     >
       <template #actions>
         <el-button @click="router.push('/platform/developer')"><el-icon><Document /></el-icon>接入文档</el-button>
-        <el-button type="primary" @click="router.push('/applications')"><el-icon><Plus /></el-icon>注册应用</el-button>
+        <el-button v-if="canCreateApplication" type="primary" @click="router.push('/applications')"><el-icon><Plus /></el-icon>注册应用</el-button>
       </template>
     </PageHeader>
 
     <section class="attention-strip" aria-label="当前实施提醒">
       <span class="attention-strip__mark"><el-icon><CircleCheck /></el-icon></span>
       <div>
-        <strong>M1 已完成：身份与 API 运行时门禁已从全新环境通过</strong>
-        <small>OIDC、权限、服务身份、通知、审计和故障边界已验证；下一步进入 M2 可靠事件链路。</small>
+        <strong>M3 已完成：平台公共能力与四类角色 UAT 已通过</strong>
+        <small>管理、接入、通知、审计、凭据、运行证据和运维诊断均已验证；下一阶段进入 M4 生产准备。</small>
       </div>
       <el-button text type="primary" @click="router.push('/platform/operations')">查看运行基线<el-icon><ArrowRight /></el-icon></el-button>
     </section>
 
     <div class="metric-grid page-section">
-      <MetricCard label="当前里程碑" value="M2" hint="可靠事件纵向链路" icon="Flag" tone="blue" />
+      <MetricCard label="当前里程碑" value="M3" hint="平台公共能力已验收" icon="Flag" tone="blue" />
       <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="均为中性认证配置" icon="Grid" tone="blue" />
-      <MetricCard label="公开契约骨架" value="2" unit="份" hint="OpenAPI · AsyncAPI" icon="Document" tone="green" />
-      <MetricCard label="M1 任务" value="10" unit="项" hint="运行时验收通过" icon="CircleCheck" tone="green" />
+      <MetricCard label="开发者资产" value="5" unit="份" hint="契约 · SDK · 文档 · 示例" icon="Document" tone="green" />
+      <MetricCard label="M3 任务" value="7" unit="项" hint="角色 UAT 与门禁通过" icon="CircleCheck" tone="green" />
     </div>
 
     <div class="work-grid page-section">
       <section class="surface-panel milestone-panel">
         <header class="panel-header">
-          <div><h2>M1 实施门禁</h2><p>正式身份、API 与独立应用故障边界均已验证</p></div>
+          <div><h2>M3 实施门禁</h2><p>平台公共能力、接入认证与角色边界均已验证</p></div>
           <el-button text @click="router.push('/platform')">能力路线<el-icon><ArrowRight /></el-icon></el-button>
         </header>
         <div class="milestone-list">
@@ -90,7 +110,7 @@ const platformEntries = [
         <el-button text @click="router.push('/platform')">查看能力总览<el-icon><ArrowRight /></el-icon></el-button>
       </div>
       <div class="platform-service-grid">
-        <button v-for="entry in platformEntries" :key="entry.path" type="button" @click="router.push(entry.path)">
+        <button v-for="entry in visiblePlatformEntries" :key="entry.path" type="button" @click="router.push(entry.path)">
           <span :style="{ '--entry-color': entry.color }"><el-icon><component :is="entry.icon" /></el-icon></span>
           <div><strong>{{ entry.name }}</strong><small>{{ entry.description }}</small></div>
           <el-icon><ArrowRight /></el-icon>
@@ -104,11 +124,13 @@ const platformEntries = [
         <el-button text @click="router.push('/applications')">应用中心<el-icon><ArrowRight /></el-icon></el-button>
       </div>
       <div class="application-grid">
-        <article v-for="app in registeredApps" :key="app.code" class="surface-panel application-card">
-          <span :style="{ '--app-color': app.color }"><el-icon><component :is="app.icon" /></el-icon></span>
-          <div><strong>{{ app.name }}</strong><small>{{ app.description }}</small><code>{{ app.code }}</code></div>
+        <ApiState :loading="applicationsLoading" :error="applicationsError" :empty="!registeredApps.length" empty-text="当前权限范围内暂无应用" @retry="loadApplications">
+        <article v-for="app in registeredApps" :key="app.application_id" class="surface-panel application-card">
+          <span style="--app-color: #416f86"><el-icon><Connection /></el-icon></span>
+          <div><strong>{{ app.name }}</strong><small>{{ app.description }}</small><code>{{ app.application_id }}</code></div>
           <StatusTag :status="app.status" />
         </article>
+        </ApiState>
       </div>
     </section>
   </div>
@@ -145,6 +167,7 @@ const platformEntries = [
 .platform-service-grid strong { color: var(--ink-900); font-size: 13px; }
 .platform-service-grid small { color: var(--ink-500); font-size: 10px; line-height: 1.5; }
 .application-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.application-grid > :deep(.el-result), .application-grid > :deep(.el-empty), .application-grid > :deep(.api-state) { grid-column: 1 / -1; }
 .application-card { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 15px; }
 .application-card > span { display: grid; width: 42px; height: 42px; border-radius: 9px; color: var(--app-color); background: color-mix(in srgb, var(--app-color) 10%, white); font-size: 19px; place-items: center; }
 .application-card > div { display: grid; min-width: 0; gap: 4px; }

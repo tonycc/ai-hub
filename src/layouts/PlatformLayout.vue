@@ -1,12 +1,15 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { platformCapabilityGroups, platformServices } from '../data/platformCapabilities'
 import { usePrototypeStore } from '../stores/prototype'
+import { usePortalSession } from '../stores/session'
 
 const route = useRoute()
 const router = useRouter()
 const store = usePrototypeStore()
+const session = usePortalSession()
 const collapsed = ref(false)
 const mobileMenuVisible = ref(false)
 const searchVisible = ref(false)
@@ -18,7 +21,7 @@ const navGroups = [
     items: [
       { label: '平台首页', path: '/', icon: 'HomeFilled' },
       { label: '应用中心', path: '/applications', icon: 'Grid' },
-      { label: '通知中心', path: '/platform/notifications', icon: 'Bell', badge: () => 2 },
+      { label: '通知中心', path: '/platform/notifications', icon: 'Bell', badge: true },
     ],
   },
   {
@@ -47,6 +50,31 @@ const navGroups = [
     ],
   },
 ]
+
+const routePermissions = {
+  '/applications': 'platform.application.read',
+  '/platform/notifications': 'platform.notification.read',
+  '/platform/identity': 'platform.identity.read',
+  '/platform/permissions': 'platform.authorization.read',
+  '/platform/integrations': 'platform.application.read',
+  '/platform/audit': 'platform.audit.read',
+  '/platform/operations': 'platform.operations.read',
+  '/platform/developer': 'platform.developer.read',
+}
+
+const visibleNavGroups = computed(() => navGroups.map((group) => ({
+  ...group,
+  items: group.items.filter((item) => {
+    const permission = routePermissions[item.path]
+    return !permission || session.hasPermission(permission)
+  }),
+})).filter((group) => group.items.length))
+
+const canViewIdentity = computed(() => session.hasPermission('platform.identity.read'))
+const canViewPermissions = computed(() => session.hasPermission('platform.authorization.read'))
+
+const userInitial = computed(() => session.principal.value?.display_name?.slice(0, 1) || '访')
+const unreadCount = ref(0)
 
 const breadcrumbItems = computed(() => {
   if (route.name === 'platform-service') {
@@ -85,9 +113,17 @@ function navigate(path) {
   router.push(path)
 }
 
-function handleUserCommand(command) {
+async function handleUserCommand(command) {
   if (command === 'permissions') navigate('/platform/permissions')
   if (command === 'profile') navigate('/platform/identity')
+  if (command === 'logout') {
+    try {
+      await session.logout()
+      window.location.assign('/auth/login')
+    } catch (error) {
+      ElMessage.error(error.message || '退出登录失败')
+    }
+  }
 }
 
 function handleGlobalShortcut(event) {
@@ -97,7 +133,18 @@ function handleGlobalShortcut(event) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', handleGlobalShortcut))
+onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalShortcut)
+  try {
+    await session.loadSession()
+  } catch (error) {
+    if (error.status === 401) {
+      window.location.assign(`/auth/login?return_to=${encodeURIComponent(route.fullPath)}`)
+      return
+    }
+    ElMessage.error(error.message || '平台会话加载失败')
+  }
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut))
 </script>
 
@@ -113,7 +160,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
       </div>
 
       <nav class="main-nav" aria-label="主导航">
-        <div v-for="group in navGroups" :key="group.title" class="nav-group">
+        <div v-for="group in visibleNavGroups" :key="group.title" class="nav-group">
           <span v-if="!collapsed" class="nav-group__title">{{ group.title }}</span>
           <el-tooltip
             v-for="item in group.items"
@@ -130,7 +177,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
             >
               <el-icon><component :is="item.icon" /></el-icon>
               <span v-if="!collapsed">{{ item.label }}</span>
-              <em v-if="!collapsed && item.badge && item.badge()">{{ item.badge() }}</em>
+              <em v-if="!collapsed && item.badge && unreadCount">{{ unreadCount }}</em>
             </button>
           </el-tooltip>
         </div>
@@ -141,7 +188,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
           <el-icon><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
           <span v-if="!collapsed">收起导航</span>
         </button>
-        <div v-if="!collapsed" class="environment-label"><i /> 平台实施 · M0</div>
+        <div v-if="!collapsed" class="environment-label"><i /> 平台实施 · M3</div>
       </div>
     </el-aside>
 
@@ -169,21 +216,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
             <el-icon class="plant-selector__arrow"><ArrowDown /></el-icon>
           </button>
           <el-tooltip content="消息中心" placement="bottom">
-            <el-badge :value="2" :max="9">
+          <el-badge :value="unreadCount" :max="9" :hidden="!unreadCount">
               <button type="button" class="icon-button" @click="navigate('/platform/notifications')"><el-icon><Bell /></el-icon></button>
             </el-badge>
           </el-tooltip>
           <el-dropdown @command="handleUserCommand">
             <button type="button" class="user-button">
-              <el-avatar :size="30">管</el-avatar>
-              <span>平台管理员</span>
+              <el-avatar :size="30">{{ userInitial }}</el-avatar>
+              <span>{{ session.principal.value?.display_name || '正在加载' }}</span>
               <el-icon><ArrowDown /></el-icon>
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">个人与身份</el-dropdown-item>
-                <el-dropdown-item command="permissions">权限与安全</el-dropdown-item>
-                <el-dropdown-item divided>退出登录</el-dropdown-item>
+                <el-dropdown-item v-if="canViewIdentity" command="profile">个人与身份</el-dropdown-item>
+                <el-dropdown-item v-if="canViewPermissions" command="permissions">权限与安全</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -197,7 +244,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
 
     <el-drawer v-model="mobileMenuVisible" direction="ltr" size="280px" title="导航">
       <nav class="mobile-nav">
-        <div v-for="group in navGroups" :key="group.title">
+        <div v-for="group in visibleNavGroups" :key="group.title">
           <span>{{ group.title }}</span>
           <button v-for="item in group.items" :key="item.path" type="button" @click="navigate(item.path)">
             <el-icon><component :is="item.icon" /></el-icon>{{ item.label }}

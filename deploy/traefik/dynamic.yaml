@@ -17,7 +17,7 @@ http:
       middlewares: [common-security, request-limit]
     platform-api:
       entryPoints: [web]
-      rule: Host(`platform.localhost`) && (PathPrefix(`/platform-api/`) || PathPrefix(`/health/`))
+      rule: Host(`platform.localhost`) && (PathPrefix(`/platform-api/`) || PathPrefix(`/portal-api/`) || PathPrefix(`/auth/`) || PathPrefix(`/health/`))
       priority: 100
       service: platform-api
       middlewares: [common-security, request-limit]

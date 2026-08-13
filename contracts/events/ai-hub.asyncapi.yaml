@@ -41,6 +41,22 @@ channels:
     messages:
       exampleRecordEvent:
         $ref: "#/components/messages/ExampleRecordEvent"
+  standaloneReferenceConsumerQueue:
+    address: ai-hub.standalone.reference-consumer
+    description: >-
+      Reference application consumer queue used to certify transactional Inbox,
+      post-commit acknowledgement, duplicate handling, and dead-letter behavior.
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: ai-hub.standalone.reference-consumer
+          durable: true
+          exclusive: false
+          autoDelete: false
+    messages:
+      exampleRecordEvent:
+        $ref: "#/components/messages/ExampleRecordEvent"
 operations:
   publishExampleRecordEvent:
     action: send
@@ -54,6 +70,12 @@ operations:
       $ref: "#/channels/platformProjectionQueue"
     messages:
       - $ref: "#/channels/platformProjectionQueue/messages/exampleRecordEvent"
+  consumeExampleRecordEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/standaloneReferenceConsumerQueue"
+    messages:
+      - $ref: "#/channels/standaloneReferenceConsumerQueue/messages/exampleRecordEvent"
 components:
   messages:
     ExampleRecordEvent:

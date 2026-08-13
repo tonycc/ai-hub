@@ -5,7 +5,7 @@ from functools import lru_cache
 from typing import Literal, Self
 from urllib.parse import SplitResult, unquote, urlsplit
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "test", "integration", "uat", "production"]
@@ -59,9 +59,7 @@ def _has_placeholder_secret(secret: str) -> bool:
 
 def _validate_application_id(application_id: str) -> None:
     if _APPLICATION_ID_PATTERN.fullmatch(application_id) is None:
-        raise ValueError(
-            "application_id must contain 3-63 lowercase letters, numbers, or hyphens"
-        )
+        raise ValueError("application_id must contain 3-63 lowercase letters, numbers, or hyphens")
 
 
 def _validate_database_url(
@@ -85,20 +83,41 @@ def _validate_database_url(
         raise ValueError(f"{field_name} cannot use a placeholder password outside local/test")
 
 
-def _validate_oidc_issuer(value: str, *, strict: bool) -> None:
+def _validate_oidc_issuer(
+    value: str,
+    *,
+    field_name: str = "oidc_issuer",
+    strict: bool,
+) -> None:
     parsed = _parse_url(
         value,
-        field_name="oidc_issuer",
+        field_name=field_name,
         allowed_schemes={"http", "https"},
     )
     if parsed.username is not None or parsed.password is not None:
-        raise ValueError("oidc_issuer cannot include credentials")
+        raise ValueError(f"{field_name} cannot include credentials")
     if parsed.query or parsed.fragment:
-        raise ValueError("oidc_issuer cannot include a query or fragment")
+        raise ValueError(f"{field_name} cannot include a query or fragment")
     if strict and parsed.scheme != "https":
-        raise ValueError("oidc_issuer must use https outside local/test")
+        raise ValueError(f"{field_name} must use https outside local/test")
     if strict and _is_local_hostname(parsed.hostname or ""):
-        raise ValueError("oidc_issuer cannot use a local hostname outside local/test")
+        raise ValueError(f"{field_name} cannot use a local hostname outside local/test")
+
+
+def _validate_redirect_uri(value: str, *, field_name: str, strict: bool) -> None:
+    parsed = _parse_url(
+        value,
+        field_name=field_name,
+        allowed_schemes={"http", "https"},
+    )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"{field_name} cannot include credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"{field_name} cannot include a query or fragment")
+    if strict and parsed.scheme != "https":
+        raise ValueError(f"{field_name} must use https outside local/test")
+    if strict and _is_local_hostname(parsed.hostname or ""):
+        raise ValueError(f"{field_name} cannot use a local hostname outside local/test")
 
 
 def _validate_rabbitmq_url(value: str, *, strict: bool) -> None:
@@ -144,6 +163,28 @@ class Settings(_PlatformSettings):
     oidc_jwks_cache_ttl_seconds: int = 300
     oidc_jwks_stale_ttl_seconds: int = 3600
     authorization_cache_ttl_seconds: int = 60
+    portal_oidc_issuer: str = "http://localhost:9000/application/o/ai-hub-portal/"
+    portal_oidc_audience: str = "ai-hub-portal"
+    portal_oidc_client_id: str = "ai-hub-portal"
+    portal_oidc_client_secret: SecretStr = SecretStr("local-only-portal-oidc-client-secret")
+    portal_oidc_redirect_uri: str = "http://platform.localhost:8088/auth/callback"
+    portal_session_ttl_seconds: int = 900
+    portal_login_ttl_seconds: int = 300
+    portal_session_cookie_name: str = "ai_hub_portal_session"
+    portal_csrf_cookie_name: str = "ai_hub_portal_csrf"
+    authentik_api_url: str = "http://localhost:9000/api/v3"
+    authentik_external_url: str = "http://auth.localhost:8088"
+    authentik_api_token: SecretStr = SecretStr("local-only-authentik-automation-api-token")
+    authentik_provider_template_client_id: str = "ai-hub-platform"
+    public_asset_root: str = "/workspace/public-assets"
+    public_platform_base_url: str = "http://platform.localhost:8088"
+    public_identity_base_url: str = "http://auth.localhost:8088"
+    sandbox_application_id: str = "standalone-example"
+    sandbox_user_subject: str = "ai-hub-demo-user"
+    operations_rabbitmq_management_url: str | None = None
+    operations_rabbitmq_vhost: str = "ai-hub-local"
+    operations_rabbitmq_username: str | None = None
+    operations_rabbitmq_password: SecretStr | None = None
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -155,6 +196,34 @@ class Settings(_PlatformSettings):
             strict=strict,
         )
         _validate_oidc_issuer(self.oidc_issuer, strict=strict)
+        _validate_oidc_issuer(
+            self.portal_oidc_issuer,
+            field_name="portal_oidc_issuer",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.portal_oidc_redirect_uri,
+            field_name="portal_oidc_redirect_uri",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.authentik_api_url,
+            field_name="authentik_api_url",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.authentik_external_url,
+            field_name="authentik_external_url",
+            strict=strict,
+        )
+        if strict and _has_placeholder_secret(self.portal_oidc_client_secret.get_secret_value()):
+            raise ValueError(
+                "portal_oidc_client_secret cannot use a placeholder outside local/test"
+            )
+        if strict and _has_placeholder_secret(self.authentik_api_token.get_secret_value()):
+            raise ValueError("authentik_api_token cannot use a placeholder outside local/test")
+        if not self.portal_oidc_client_id.strip():
+            raise ValueError("portal_oidc_client_id cannot be empty")
         if self.oidc_jwks_cache_ttl_seconds < 1:
             raise ValueError("oidc_jwks_cache_ttl_seconds must be positive")
         if self.oidc_jwks_stale_ttl_seconds < self.oidc_jwks_cache_ttl_seconds:
@@ -163,6 +232,55 @@ class Settings(_PlatformSettings):
             )
         if not 1 <= self.authorization_cache_ttl_seconds <= 300:
             raise ValueError("authorization_cache_ttl_seconds must be between 1 and 300")
+        if not 60 <= self.portal_session_ttl_seconds <= 3600:
+            raise ValueError("portal_session_ttl_seconds must be between 60 and 3600")
+        if not 60 <= self.portal_login_ttl_seconds <= 600:
+            raise ValueError("portal_login_ttl_seconds must be between 60 and 600")
+        if not self.portal_session_cookie_name.strip():
+            raise ValueError("portal_session_cookie_name cannot be empty")
+        if not self.portal_csrf_cookie_name.strip():
+            raise ValueError("portal_csrf_cookie_name cannot be empty")
+        if self.portal_session_cookie_name == self.portal_csrf_cookie_name:
+            raise ValueError("portal session and CSRF cookie names must be different")
+        if not self.authentik_provider_template_client_id.strip():
+            raise ValueError("authentik_provider_template_client_id cannot be empty")
+        _validate_redirect_uri(
+            self.public_platform_base_url,
+            field_name="public_platform_base_url",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.public_identity_base_url,
+            field_name="public_identity_base_url",
+            strict=strict,
+        )
+        _validate_application_id(self.sandbox_application_id)
+        if not self.sandbox_user_subject.strip():
+            raise ValueError("sandbox_user_subject cannot be empty")
+        operations_values = (
+            self.operations_rabbitmq_management_url,
+            self.operations_rabbitmq_username,
+            self.operations_rabbitmq_password,
+        )
+        if any(value is not None for value in operations_values) and not all(
+            value is not None for value in operations_values
+        ):
+            raise ValueError(
+                "RabbitMQ operations URL, username, and password must be configured together"
+            )
+        if self.operations_rabbitmq_management_url is not None:
+            _validate_redirect_uri(
+                self.operations_rabbitmq_management_url,
+                field_name="operations_rabbitmq_management_url",
+                strict=strict,
+            )
+            if not self.operations_rabbitmq_vhost.strip():
+                raise ValueError("operations_rabbitmq_vhost cannot be empty")
+            if strict and self.operations_rabbitmq_password is not None:
+                if _has_placeholder_secret(self.operations_rabbitmq_password.get_secret_value()):
+                    raise ValueError(
+                        "operations_rabbitmq_password cannot use a placeholder outside local/test"
+                    )
         return self
 
 

@@ -206,6 +206,7 @@ class Settings(_StandaloneSettings):
             "EVENT_PUBLISHER",
             "EVENT_CONSUMER",
             "PROJECTION_SOURCE",
+            "PROJECTION_READER",
         }
         if unknown_capabilities:
             raise ValueError("integration_capabilities contains an unsupported capability")
@@ -270,6 +271,44 @@ class EventPublisherSettings(_StandaloneSettings):
         return self
 
 
+class EventConsumerSettings(_StandaloneSettings):
+    consumer_id: str = "standalone-reference-consumer"
+    consumer_database_url: str = (
+        "postgresql+psycopg://standalone_event_consumer:"
+        "local-only-standalone-consumer-password@"
+        "localhost:5433/standalone_app_db"
+    )
+    rabbitmq_url: str = (
+        "amqp://standalone_consumer:local-only-rabbitmq-consumer-password@"
+        "localhost:5672/ai-hub-local"
+    )
+    queue_name: str = "ai-hub.standalone.reference-consumer"
+    prefetch_count: int = 20
+    max_redeliveries: int = 5
+    connection_timeout_seconds: float = 10.0
+
+    @model_validator(mode="after")
+    def validate_configuration(self) -> Self:
+        strict = _is_strict_environment(self.environment)
+        _validate_database_url(
+            self.consumer_database_url,
+            field_name="consumer_database_url",
+            strict=strict,
+        )
+        _validate_rabbitmq_url(self.rabbitmq_url, strict=strict)
+        if not self.consumer_id.strip():
+            raise ValueError("consumer_id cannot be empty")
+        if self.queue_name != "ai-hub.standalone.reference-consumer":
+            raise ValueError("queue_name must use the registered reference consumer queue")
+        if not 1 <= self.prefetch_count <= 500:
+            raise ValueError("prefetch_count must be between 1 and 500")
+        if not 1 <= self.max_redeliveries <= 20:
+            raise ValueError("max_redeliveries must be between 1 and 20")
+        if self.connection_timeout_seconds <= 0:
+            raise ValueError("connection_timeout_seconds must be positive")
+        return self
+
+
 class MigrationSettings(_StandaloneSettings):
     migration_database_url: str = (
         "postgresql+psycopg://standalone_app_migrator:"
@@ -299,3 +338,8 @@ def get_migration_settings() -> MigrationSettings:
 @lru_cache
 def get_event_publisher_settings() -> EventPublisherSettings:
     return EventPublisherSettings()
+
+
+@lru_cache
+def get_event_consumer_settings() -> EventConsumerSettings:
+    return EventConsumerSettings()

@@ -292,7 +292,7 @@ components:
         status: {type: string}
         capabilities:
           type: array
-          items: {type: string, enum: [API_CLIENT, EVENT_PUBLISHER, EVENT_CONSUMER, PROJECTION_SOURCE]}
+          items: {type: string, enum: [API_CLIENT, EVENT_PUBLISHER, EVENT_CONSUMER, PROJECTION_SOURCE, PROJECTION_READER]}
         environments:
           type: array
           items: {$ref: "#/components/schemas/ApplicationEnvironment"}

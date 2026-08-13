@@ -34,7 +34,39 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("consumer_id", "event_id"),
         schema="app",
     )
+    op.create_table(
+        "integration_consumer_effect",
+        sa.Column("event_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("event_type", sa.String(length=200), nullable=False),
+        sa.Column("source_application_id", sa.String(length=63), nullable=False),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column(
+            "applied_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.PrimaryKeyConstraint("event_id"),
+        schema="app",
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE ON app.integration_inbox "
+        "TO standalone_event_consumer"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT ON app.integration_consumer_effect "
+        "TO standalone_event_consumer"
+    )
+    op.execute(
+        "REVOKE SELECT, INSERT, UPDATE, DELETE ON app.integration_inbox "
+        "FROM standalone_app"
+    )
+    op.execute(
+        "REVOKE SELECT, INSERT, UPDATE, DELETE ON app.integration_consumer_effect "
+        "FROM standalone_app"
+    )
 
 
 def downgrade() -> None:
+    op.drop_table("integration_consumer_effect", schema="app")
     op.drop_table("integration_inbox", schema="app")

@@ -150,6 +150,25 @@ services:
       AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS: ${AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS:-60}
       AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS: ${AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS:-300}
       AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS: ${AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS:-3600}
+      AI_HUB_PORTAL_OIDC_ISSUER: ${AI_HUB_PORTAL_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub-portal/}
+      AI_HUB_PORTAL_OIDC_AUDIENCE: ${AI_HUB_PORTAL_OIDC_AUDIENCE:-ai-hub-portal}
+      AI_HUB_PORTAL_OIDC_CLIENT_ID: ${AI_HUB_PORTAL_OIDC_CLIENT_ID:-ai-hub-portal}
+      AI_HUB_PORTAL_OIDC_CLIENT_SECRET: ${AI_HUB_PORTAL_OIDC_CLIENT_SECRET:?Set AI_HUB_PORTAL_OIDC_CLIENT_SECRET in .env}
+      AI_HUB_PORTAL_OIDC_REDIRECT_URI: ${AI_HUB_PORTAL_OIDC_REDIRECT_URI:-http://platform.localhost:8088/auth/callback}
+      AI_HUB_PORTAL_SESSION_TTL_SECONDS: ${AI_HUB_PORTAL_SESSION_TTL_SECONDS:-900}
+      AI_HUB_AUTHENTIK_API_URL: ${AI_HUB_AUTHENTIK_API_URL:-http://authentik-server:9000/api/v3}
+      AI_HUB_AUTHENTIK_EXTERNAL_URL: ${AI_HUB_AUTHENTIK_EXTERNAL_URL:-http://auth.localhost:8088}
+      AI_HUB_AUTHENTIK_API_TOKEN: ${AI_HUB_AUTHENTIK_API_TOKEN:?Set AI_HUB_AUTHENTIK_API_TOKEN in .env}
+      AI_HUB_AUTHENTIK_PROVIDER_TEMPLATE_CLIENT_ID: ${AI_HUB_AUTHENTIK_PROVIDER_TEMPLATE_CLIENT_ID:-ai-hub-platform}
+      AI_HUB_PUBLIC_ASSET_ROOT: ${AI_HUB_PUBLIC_ASSET_ROOT:-/workspace/public-assets}
+      AI_HUB_PUBLIC_PLATFORM_BASE_URL: ${AI_HUB_PUBLIC_PLATFORM_BASE_URL:-http://platform.localhost:8088}
+      AI_HUB_PUBLIC_IDENTITY_BASE_URL: ${AI_HUB_PUBLIC_IDENTITY_BASE_URL:-http://auth.localhost:8088}
+      AI_HUB_SANDBOX_APPLICATION_ID: ${AI_HUB_SANDBOX_APPLICATION_ID:-standalone-example}
+      AI_HUB_SANDBOX_USER_SUBJECT: ${AI_HUB_SANDBOX_USER_SUBJECT:-ai-hub-demo-user}
+      AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL: ${AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL:-}
+      AI_HUB_OPERATIONS_RABBITMQ_VHOST: ${RABBITMQ_VHOST:-ai-hub-local}
+      AI_HUB_OPERATIONS_RABBITMQ_USERNAME: ${RABBITMQ_OBSERVER_USER:-}
+      AI_HUB_OPERATIONS_RABBITMQ_PASSWORD: ${RABBITMQ_OBSERVER_PASSWORD:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
       interval: 5s
@@ -228,6 +247,32 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  standalone-event-consumer-migrate:
+    profiles:
+      - standard-events
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command:
+      - alembic
+      - -c
+      - /workspace/examples/standalone-app/alembic-event-consumer.ini
+      - upgrade
+      - head
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_MIGRATION_DATABASE_URL: postgresql+psycopg://standalone_app_migrator:${STANDALONE_MIGRATOR_DB_PASSWORD:?Set STANDALONE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+      standalone-consumer-db-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+
   standalone-publisher-db-bootstrap:
     profiles:
       - standard-events
@@ -244,6 +289,29 @@ services:
       STANDALONE_PUBLISHER_DB_PASSWORD: ${STANDALONE_PUBLISHER_DB_PASSWORD:?Set STANDALONE_PUBLISHER_DB_PASSWORD in .env}
     depends_on:
       standalone-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./postgres/bootstrap:/opt/ai-hub/postgres-bootstrap:ro
+    restart: "no"
+
+  standalone-consumer-db-bootstrap:
+    profiles:
+      - standard-events
+    image: ${POSTGRES_IMAGE:-postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15}
+    command:
+      - psql
+      - --host=postgres
+      - --username=postgres
+      - --dbname=standalone_app_db
+      - --set=ON_ERROR_STOP=1
+      - --file=/opt/ai-hub/postgres-bootstrap/enable-event-consumer.sql
+    environment:
+      PGPASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+      STANDALONE_CONSUMER_DB_PASSWORD: ${STANDALONE_CONSUMER_DB_PASSWORD:?Set STANDALONE_CONSUMER_DB_PASSWORD in .env}
+    depends_on:
+      standalone-migrate:
+        condition: service_completed_successfully
+      standalone-publisher-db-bootstrap:
         condition: service_completed_successfully
     volumes:
       - ./postgres/bootstrap:/opt/ai-hub/postgres-bootstrap:ro
@@ -272,13 +340,15 @@ services:
       - standard-events
     environment:
       <<: *standalone-app-environment
-      STANDALONE_INTEGRATION_CAPABILITIES: API_CLIENT,EVENT_PUBLISHER,PROJECTION_SOURCE
+      STANDALONE_INTEGRATION_CAPABILITIES: API_CLIENT,EVENT_PUBLISHER,EVENT_CONSUMER,PROJECTION_SOURCE
     depends_on:
       standalone-migrate:
         condition: service_completed_successfully
       platform-api:
         condition: service_healthy
       standalone-event-publisher-migrate:
+        condition: service_completed_successfully
+      standalone-event-consumer-migrate:
         condition: service_completed_successfully
     networks:
       default:
@@ -315,6 +385,10 @@ services:
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?Set AUTHENTIK_BOOTSTRAP_PASSWORD in .env}
       AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
       AI_HUB_DEMO_USER_PASSWORD: ${AI_HUB_DEMO_USER_PASSWORD:?Set AI_HUB_DEMO_USER_PASSWORD in .env}
+      AI_HUB_UAT_USER_PASSWORD: ${AI_HUB_UAT_USER_PASSWORD:?Set AI_HUB_UAT_USER_PASSWORD in .env}
+      AI_HUB_PORTAL_OIDC_CLIENT_SECRET: ${AI_HUB_PORTAL_OIDC_CLIENT_SECRET:?Set AI_HUB_PORTAL_OIDC_CLIENT_SECRET in .env}
+      AI_HUB_PORTAL_OIDC_REDIRECT_URI: ${AI_HUB_PORTAL_OIDC_REDIRECT_URI:-http://platform.localhost:8088/auth/callback}
+      AI_HUB_AUTHENTIK_API_TOKEN: ${AI_HUB_AUTHENTIK_API_TOKEN:?Set AI_HUB_AUTHENTIK_API_TOKEN in .env}
       STANDALONE_OIDC_REDIRECT_URI: ${STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
       AI_HUB_PORTAL_EXTERNAL_URL: ${AI_HUB_PORTAL_EXTERNAL_URL:-http://platform.localhost:8088}
     depends_on:
@@ -402,6 +476,10 @@ services:
       RABBITMQ_PUBLISHER_PASSWORD: ${RABBITMQ_PUBLISHER_PASSWORD:?Set RABBITMQ_PUBLISHER_PASSWORD in .env}
       RABBITMQ_PROJECTION_USER: ${RABBITMQ_PROJECTION_USER:-platform_projection}
       RABBITMQ_PROJECTION_PASSWORD: ${RABBITMQ_PROJECTION_PASSWORD:?Set RABBITMQ_PROJECTION_PASSWORD in .env}
+      RABBITMQ_CONSUMER_USER: ${RABBITMQ_CONSUMER_USER:-standalone_consumer}
+      RABBITMQ_CONSUMER_PASSWORD: ${RABBITMQ_CONSUMER_PASSWORD:?Set RABBITMQ_CONSUMER_PASSWORD in .env}
+      RABBITMQ_OBSERVER_USER: ${RABBITMQ_OBSERVER_USER:-platform_observer}
+      RABBITMQ_OBSERVER_PASSWORD: ${RABBITMQ_OBSERVER_PASSWORD:?Set RABBITMQ_OBSERVER_PASSWORD in .env}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -430,6 +508,31 @@ services:
       STANDALONE_EXCHANGE_NAME: ai-hub.events
     depends_on:
       standalone-event-publisher-migrate:
+        condition: service_completed_successfully
+      rabbitmq-bootstrap:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+
+  standalone-event-consumer:
+    profiles:
+      - standard-events
+    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: examples/standalone-app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.14.7-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc}
+        UV_VERSION: ${UV_VERSION:-0.9.8}
+    command: ["standalone-event-consumer"]
+    environment:
+      STANDALONE_ENVIRONMENT: ${STANDALONE_ENVIRONMENT:-local}
+      STANDALONE_CONSUMER_ID: standalone-reference-consumer
+      STANDALONE_CONSUMER_DATABASE_URL: postgresql+psycopg://standalone_event_consumer:${STANDALONE_CONSUMER_DB_PASSWORD:?Set STANDALONE_CONSUMER_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
+      STANDALONE_RABBITMQ_URL: amqp://${RABBITMQ_CONSUMER_USER:-standalone_consumer}:${RABBITMQ_CONSUMER_PASSWORD:?Set RABBITMQ_CONSUMER_PASSWORD in .env}@rabbitmq:5672/${RABBITMQ_VHOST:-ai-hub-local}
+      STANDALONE_QUEUE_NAME: ai-hub.standalone.reference-consumer
+    depends_on:
+      standalone-event-consumer-migrate:
         condition: service_completed_successfully
       rabbitmq-bootstrap:
         condition: service_completed_successfully

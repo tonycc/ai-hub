@@ -30,7 +30,8 @@ BEGIN
             'ai_hub_projection',
             'standalone_app_migrator',
             'standalone_app',
-            'standalone_outbox_publisher'
+            'standalone_outbox_publisher',
+            'standalone_event_consumer'
         ])
           AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
     ) THEN
@@ -100,6 +101,18 @@ BEGIN
             'standalone_outbox_publisher', 'platform_db', 'CONNECT'
         ) THEN
             RAISE EXCEPTION 'Outbox publisher can connect outside its application database';
+        END IF;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = 'standalone_event_consumer'
+    ) THEN
+        IF has_database_privilege(
+            'standalone_event_consumer', 'authentik_db', 'CONNECT'
+        ) OR has_database_privilege(
+            'standalone_event_consumer', 'platform_db', 'CONNECT'
+        ) THEN
+            RAISE EXCEPTION 'event consumer can connect outside its application database';
         END IF;
     END IF;
 END
@@ -180,10 +193,14 @@ BEGIN
 
     IF NOT has_table_privilege(
         'ai_hub_platform', 'platform_core.audit_event', 'INSERT'
+    ) OR NOT has_table_privilege(
+        'ai_hub_platform', 'platform_core.audit_event', 'SELECT'
     ) OR has_table_privilege(
-        'ai_hub_platform', 'platform_core.audit_event', 'SELECT,UPDATE,DELETE'
+        'ai_hub_platform', 'platform_core.audit_event', 'UPDATE'
+    ) OR has_table_privilege(
+        'ai_hub_platform', 'platform_core.audit_event', 'DELETE'
     ) THEN
-        RAISE EXCEPTION 'platform audit table is not append-only for runtime';
+        RAISE EXCEPTION 'platform audit table is not append-only and queryable for runtime';
     END IF;
 
     IF has_schema_privilege('ai_hub_projection', 'platform_core', 'USAGE')
@@ -341,6 +358,50 @@ BEGIN
             'standalone_app', 'app.integration_source_state', 'current_sequence', 'UPDATE'
         ) THEN
             RAISE EXCEPTION 'standalone API can modify event delivery state';
+        END IF;
+    END IF;
+
+    IF to_regclass('app.integration_inbox') IS NULL THEN
+        IF EXISTS (
+            SELECT 1 FROM pg_roles WHERE rolname = 'standalone_event_consumer'
+        ) THEN
+            RAISE EXCEPTION 'non-consumer database enables the event consumer role';
+        END IF;
+    ELSE
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_roles WHERE rolname = 'standalone_event_consumer'
+        ) OR NOT has_database_privilege(
+            'standalone_event_consumer', 'standalone_app_db', 'CONNECT'
+        ) OR NOT has_schema_privilege(
+            'standalone_event_consumer', 'app', 'USAGE'
+        ) OR has_schema_privilege(
+            'standalone_event_consumer', 'app', 'CREATE'
+        ) OR NOT has_table_privilege(
+            'standalone_event_consumer', 'app.integration_inbox',
+            'SELECT,INSERT,UPDATE'
+        ) OR has_table_privilege(
+            'standalone_event_consumer', 'app.integration_inbox', 'DELETE'
+        ) OR NOT has_table_privilege(
+            'standalone_event_consumer', 'app.integration_consumer_effect',
+            'SELECT,INSERT'
+        ) OR has_table_privilege(
+            'standalone_event_consumer', 'app.integration_consumer_effect',
+            'UPDATE,DELETE'
+        ) OR has_table_privilege(
+            'standalone_event_consumer', 'app.example_record',
+            'SELECT,INSERT,UPDATE,DELETE'
+        ) THEN
+            RAISE EXCEPTION 'event consumer database privilege is broader than its duties';
+        END IF;
+
+        IF has_table_privilege(
+            'standalone_app', 'app.integration_inbox',
+            'SELECT,INSERT,UPDATE,DELETE'
+        ) OR has_table_privilege(
+            'standalone_app', 'app.integration_consumer_effect',
+            'SELECT,INSERT,UPDATE,DELETE'
+        ) THEN
+            RAISE EXCEPTION 'standalone API can access event consumer state';
         END IF;
     END IF;
 END

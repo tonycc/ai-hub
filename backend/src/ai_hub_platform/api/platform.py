@@ -33,7 +33,9 @@ from ai_hub_platform.modules.identity.service import (
     IdentityUser,
 )
 from ai_hub_platform.modules.notification.service import (
+    NotificationConfigurationDisabledError,
     NotificationNotFoundError,
+    NotificationRecipientNotFoundError,
     NotificationRecord,
     NotificationService,
 )
@@ -112,9 +114,7 @@ async def me(
         Depends(principal_dependency("platform.me.read", actor_types=("user",))),
     ],
 ) -> CurrentUser:
-    user = await resolve_user_or_error(
-        request, session, principal, action="platform.me.read"
-    )
+    user = await resolve_user_or_error(request, session, principal, action="platform.me.read")
     await AuditService().append(
         session,
         AuditRecord(
@@ -223,9 +223,7 @@ async def authorization_decision(
     session: SessionDependency,
     principal: Annotated[
         Principal,
-        Depends(
-            principal_dependency("platform.authorization.decide", actor_types=("user",))
-        ),
+        Depends(principal_dependency("platform.authorization.decide", actor_types=("user",))),
     ],
 ) -> AuthorizationDecision:
     user = await resolve_user_or_error(
@@ -374,9 +372,7 @@ async def application_health_check(
     principal: Annotated[
         Principal,
         Depends(
-            principal_dependency(
-                "platform.application.health.write", actor_types=("service",)
-            )
+            principal_dependency("platform.application.health.write", actor_types=("service",))
         ),
     ],
 ) -> dict[str, str]:
@@ -524,15 +520,20 @@ async def create_notification(
         principal,
         action="platform.notification.request",
     )
-    record = await NotificationService().create(
-        session,
-        application_id=application_id,
-        recipient_user_id=payload.recipient_user_id,
-        subject=payload.subject,
-        body=payload.body,
-        payload=payload.payload,
-        idempotency_key=payload.idempotency_key,
-    )
+    try:
+        record = await NotificationService().create(
+            session,
+            application_id=application_id,
+            recipient_user_id=payload.recipient_user_id,
+            subject=payload.subject,
+            body=payload.body,
+            payload=payload.payload,
+            idempotency_key=payload.idempotency_key,
+        )
+    except NotificationConfigurationDisabledError as error:
+        raise ApiError(409, "notification_channel_disabled", str(error)) from error
+    except NotificationRecipientNotFoundError as error:
+        raise ApiError(404, "notification_recipient_not_found", str(error)) from error
     await AuditService().append(
         session,
         AuditRecord(

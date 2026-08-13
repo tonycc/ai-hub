@@ -31,7 +31,17 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "CREATE TABLE platform_core.notification" in sql
     assert "CREATE TABLE platform_core.audit_event" in sql
     assert "REVOKE SELECT, UPDATE, DELETE ON platform_core.audit_event" in sql
+    assert "CREATE TABLE platform_core.platform_role_definition" in sql
+    assert "CREATE TABLE platform_core.authorization_role" in sql
+    assert "CREATE TABLE platform_core.application_credential" in sql
+    assert "service_subject VARCHAR(255) NOT NULL" in sql
+    assert "UNIQUE (service_subject)" in sql
+    assert "CREATE TABLE platform_core.portal_session" in sql
+    assert "CREATE TABLE platform_core.conformance_run" in sql
+    assert "GRANT SELECT ON platform_core.audit_event TO ai_hub_platform" in sql
+    assert "REVOKE UPDATE, DELETE ON platform_core.audit_event" in sql
     assert "REVOKE ALL ON platform_core.alembic_version FROM ai_hub_platform" in sql
+    assert "('SECURITY_AUDITOR', 'platform.notification.read')" in sql
     assert "platform_projection" not in sql
     assert "integration_outbox" not in sql
     assert "integration_inbox" not in sql
