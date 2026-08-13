@@ -20,6 +20,10 @@ export AI_HUB_EDGE_PORT="${M2_EDGE_PORT}"
 export AI_HUB_POSTGRES_PORT="${M2_POSTGRES_PORT}"
 export AI_HUB_RABBITMQ_PORT="${M2_RABBITMQ_PORT}"
 export AI_HUB_RABBITMQ_MANAGEMENT_PORT="${M2_RABBITMQ_MANAGEMENT_PORT}"
+export AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL="http://rabbitmq:15672"
+export AI_HUB_OPERATIONS_RABBITMQ_USERNAME="platform_observer"
+export AI_HUB_OPERATIONS_RABBITMQ_PASSWORD="local-only-rabbitmq-observer-password"
+export RABBITMQ_OBSERVER_PASSWORD="local-only-rabbitmq-observer-password"
 m2_compose() {
   docker compose \
     --project-name "${M2_PROJECT_NAME}" \
@@ -283,6 +287,58 @@ m2_copy_snapshot_to_platform() {
   docker cp "${m2_source_path}" "${m2_container_id}:/tmp/m2-snapshot.json"
 }
 
+m2_import_runtime_evidence() {
+  m2_evidence_path="${M2_WORK_DIR}/conformance-evidence.json"
+  m2_verified_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  jq -n \
+    --arg application_id "${M2_SOURCE_APPLICATION}" \
+    --arg verified_at "${m2_verified_at}" \
+    --arg publisher_event_id "${m2_outage_event_id}" \
+    --arg consumer_event_id "${m2_outage_event_id}" \
+    --arg projection_event_id "${m2_incremental_version}" \
+    '{
+      application_id: $application_id,
+      environment: "local",
+      contract_version: "m3-conformance-0.2.0",
+      source: "scripts/ci/m2-runtime.sh",
+      verified_at: $verified_at,
+      profiles: {
+        EVENT_PUBLISHER: {
+          status: "PASSED",
+          evidence: {
+            outbox_transaction_rollback: true,
+            broker_outage_recovery: true,
+            publisher_confirmed_event_id: $publisher_event_id
+          }
+        },
+        EVENT_CONSUMER: {
+          status: "PASSED",
+          evidence: {
+            application_inbox_atomic: true,
+            duplicate_effect_count: 1,
+            processed_event_id: $consumer_event_id
+          }
+        },
+        PROJECTION_READER: {
+          status: "PASSED",
+          evidence: {
+            duplicate_safe: true,
+            gap_recovery: true,
+            empty_schema_rebuild: true,
+            incremental_version: $projection_event_id
+          }
+        }
+      }
+    }' >"${m2_evidence_path}"
+  m2_api_container_id="$(m2_compose ps -q platform-api)"
+  docker cp "${m2_evidence_path}" \
+    "${m2_api_container_id}:/tmp/m3-conformance-evidence.json"
+  m2_compose exec -T platform-api \
+    ai-hub-conformance-evidence-import /tmp/m3-conformance-evidence.json \
+    | jq --exit-status \
+      '.imported == true and (.profiles | length == 3)' >/dev/null
+}
+
 for m2_command in awk curl docker jq sed; do
   m2_require_command "${m2_command}"
 done
@@ -292,9 +348,11 @@ cd "${M2_PROJECT_ROOT}"
 m2_note "verifying the API-only profile excludes every event dependency"
 m2_base_services="$(m2_base_compose config --services)"
 for m2_forbidden in rabbitmq rabbitmq-bootstrap standalone-outbox-publisher \
-  platform-projection-worker standalone-event-publisher-migrate \
+  standalone-event-consumer platform-projection-worker \
+  standalone-event-publisher-migrate standalone-event-consumer-migrate \
   standalone-publisher-db-bootstrap platform-projection-migrate \
-  platform-event-registration-migrate standalone-app-events; do
+  standalone-consumer-db-bootstrap platform-event-registration-migrate \
+  standalone-app-events; do
   if grep -Fxq "${m2_forbidden}" <<<"${m2_base_services}"; then
     m2_fail "base-access unexpectedly includes ${m2_forbidden}"
   fi
@@ -309,7 +367,8 @@ fi
 
 for m2_migration in platform-core-migrate platform-event-registration-migrate \
   platform-projection-migrate standalone-migrate standalone-publisher-db-bootstrap \
-  standalone-event-publisher-migrate; do
+  standalone-consumer-db-bootstrap standalone-event-publisher-migrate \
+  standalone-event-consumer-migrate; do
   m2_container_id="$(m2_compose ps -a -q "${m2_migration}")"
   [[ -n "${m2_container_id}" ]] || m2_fail "migration container is missing: ${m2_migration}"
   m2_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "${m2_container_id}")"
@@ -317,13 +376,16 @@ for m2_migration in platform-core-migrate platform-event-registration-migrate \
 done
 m2_wait_service standalone-app-events "event-enabled standalone reference API"
 m2_wait_service standalone-outbox-publisher "Outbox publisher"
+m2_wait_service standalone-event-consumer "reference event consumer"
 m2_wait_service platform-projection-worker "platform projection Worker"
 
 m2_note "verifying capability-specific schemas, topology, and least-privilege identities"
 m2_source_psql -Atc "SELECT to_regclass('app.integration_outbox') IS NOT NULL;" \
   | grep -Fxq t || m2_fail "EVENT_PUBLISHER Outbox is missing"
-m2_source_psql -Atc "SELECT to_regclass('app.integration_inbox') IS NULL;" \
-  | grep -Fxq t || m2_fail "publisher-only application unexpectedly has an Inbox"
+m2_source_psql -Atc "SELECT to_regclass('app.integration_inbox') IS NOT NULL;" \
+  | grep -Fxq t || m2_fail "EVENT_CONSUMER Inbox is missing"
+m2_source_psql -Atc "SELECT to_regclass('app.integration_consumer_effect') IS NOT NULL;" \
+  | grep -Fxq t || m2_fail "EVENT_CONSUMER effect table is missing"
 m2_platform_psql -Atc \
   "SELECT capabilities::text FROM platform_core.application WHERE application_id = '${M2_SOURCE_APPLICATION}';" \
   | grep -Fq EVENT_PUBLISHER || m2_fail "event capability registration is missing"
@@ -345,7 +407,11 @@ grep -Eq '^standalone_publisher[[:space:]]+\^\$[[:space:]]+\^ai-hub\\\.events\$[
   <<<"${m2_permissions}" || m2_fail "publisher permission is broader or different than registered"
 grep -Eq '^platform_projection[[:space:]]+\^\$[[:space:]]+\^\$[[:space:]]+\^ai-hub\\\.platform\\\.projection\$' \
   <<<"${m2_permissions}" || m2_fail "projection permission is broader or different than registered"
+grep -Eq '^standalone_consumer[[:space:]]+\^\$[[:space:]]+\^\$[[:space:]]+\^ai-hub\\\.standalone\\\.reference-consumer\$' \
+  <<<"${m2_permissions}" || m2_fail "consumer permission is broader or different than registered"
 m2_wait_queue ai-hub.platform.projection messages 0 "initial projection queue drain"
+m2_wait_queue ai-hub.standalone.reference-consumer messages 0 \
+  "initial consumer queue drain"
 m2_wait_sql platform \
   "SELECT count(*) FROM platform_projection.example_record_projection WHERE producer_application_id = '${M2_SOURCE_APPLICATION}';" \
   2 "initial snapshot-equivalent events were not projected"
@@ -375,6 +441,12 @@ m2_wait_sql source \
 m2_wait_sql platform \
   "SELECT name || ':' || aggregate_version FROM platform_projection.example_record_projection WHERE record_id = '${M2_RECORD_ID}';" \
   "M2 broker outage retained:${m2_outage_version}" "projection did not recover after broker outage"
+m2_wait_sql source \
+  "SELECT count(*) FROM app.integration_inbox WHERE event_id = '${m2_outage_event_id}' AND processed_at IS NOT NULL;" \
+  1 "application consumer did not commit its Inbox"
+m2_wait_sql source \
+  "SELECT count(*) FROM app.integration_consumer_effect WHERE event_id = '${m2_outage_event_id}';" \
+  1 "application consumer did not commit its local effect"
 
 m2_note "verifying duplicate delivery is Inbox-idempotent"
 m2_inbox_before="$(m2_platform_psql -Atc "SELECT count(*) FROM platform_projection.integration_inbox WHERE event_id = '${m2_outage_event_id}';")"
@@ -385,10 +457,16 @@ m2_wait_sql source \
   "SELECT status FROM app.integration_outbox WHERE event_id = '${m2_outage_event_id}';" \
   PUBLISHED "duplicate Outbox row was not republished"
 m2_wait_queue ai-hub.platform.projection messages 0 "duplicate delivery was not consumed"
+m2_wait_queue ai-hub.standalone.reference-consumer messages 0 \
+  "duplicate delivery was not consumed by reference consumer"
 [[ "$(m2_platform_psql -Atc "SELECT count(*) FROM platform_projection.integration_inbox WHERE event_id = '${m2_outage_event_id}';")" == "${m2_inbox_before}" ]] \
   || m2_fail "duplicate delivery created another Inbox record"
 [[ "$(m2_platform_psql -Atc "SELECT aggregate_version FROM platform_projection.example_record_projection WHERE record_id = '${M2_RECORD_ID}';")" == "${m2_outage_version}" ]] \
   || m2_fail "duplicate delivery changed projection state"
+[[ "$(m2_source_psql -Atc "SELECT count(*) FROM app.integration_inbox WHERE event_id = '${m2_outage_event_id}';")" == "1" ]] \
+  || m2_fail "duplicate delivery created another application Inbox record"
+[[ "$(m2_source_psql -Atc "SELECT count(*) FROM app.integration_consumer_effect WHERE event_id = '${m2_outage_event_id}';")" == "1" ]] \
+  || m2_fail "duplicate delivery repeated the application consumer effect"
 
 m2_note "verifying a crash before database commit causes redelivery"
 m2_compose stop platform-projection-worker >/dev/null
@@ -535,5 +613,11 @@ grep -Fq '"metrics"' <<<"${m2_publisher_logs}" \
 m2_projection_logs="$(m2_compose logs --no-color platform-projection-worker)"
 grep -Fq '"metrics"' <<<"${m2_projection_logs}" \
   || m2_fail "projection Worker metrics are not observable"
+
+m2_note "recording digest-addressed runtime evidence for the M3 conformance service"
+m2_import_runtime_evidence
+m2_platform_psql -Atc \
+  "SELECT count(*) FROM platform_core.conformance_runtime_evidence WHERE application_id = '${M2_SOURCE_APPLICATION}' AND environment = 'local' AND status = 'PASSED' AND expires_at > CURRENT_TIMESTAMP;" \
+  | grep -Fxq 3 || m2_fail "runtime conformance evidence was not persisted"
 
 m2_note "all reliable-event, failure, capability, and rebuild scenarios passed"

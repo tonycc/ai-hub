@@ -32,7 +32,37 @@ const routes = [
         meta: { title: '平台统一能力', breadcrumb: ['平台能力', '能力总览'] },
       },
       {
-        path: 'platform/:service(identity|permissions|settings|audit|operations|developer)',
+        path: 'platform/identity',
+        name: 'identity',
+        component: () => import('../views/IdentityManagementView.vue'),
+        meta: { title: '用户与组织', breadcrumb: ['平台治理', '用户与组织'] },
+      },
+      {
+        path: 'platform/permissions',
+        name: 'permissions',
+        component: () => import('../views/PermissionManagementView.vue'),
+        meta: { title: '权限与安全', breadcrumb: ['平台治理', '权限与安全'] },
+      },
+      {
+        path: 'platform/audit',
+        name: 'audit',
+        component: () => import('../views/AuditCenterView.vue'),
+        meta: { title: '审计中心', breadcrumb: ['平台治理', '审计中心'] },
+      },
+      {
+        path: 'platform/developer',
+        name: 'developer',
+        component: () => import('../views/DeveloperCenterView.vue'),
+        meta: { title: '开发者中心', breadcrumb: ['运行与研发', '开发者中心'] },
+      },
+      {
+        path: 'platform/operations',
+        name: 'operations',
+        component: () => import('../views/OperationsCenterView.vue'),
+        meta: { title: '运维中心', breadcrumb: ['运行与研发', '运维中心'] },
+      },
+      {
+        path: 'platform/:service(settings)',
         name: 'platform-service',
         component: () => import('../views/PlatformServiceView.vue'),
         meta: { title: '公共服务', breadcrumb: ['平台能力', '公共服务'] },

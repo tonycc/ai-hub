@@ -71,3 +71,72 @@ class AuditService:
             except BaseException:
                 await session.rollback()
                 raise
+
+    async def query(
+        self,
+        session: AsyncSession,
+        *,
+        application_ids: frozenset[str] | None,
+        actor_id: str | None,
+        action: str | None,
+        result: str | None,
+        request_id: str | None,
+        occurred_from: datetime | None,
+        occurred_to: datetime | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        parameters = {
+            "application_ids": (sorted(application_ids) if application_ids is not None else None),
+            "actor_id": actor_id,
+            "action": action,
+            "result": result,
+            "request_id": request_id,
+            "occurred_from": occurred_from,
+            "occurred_to": occurred_to,
+            "limit": limit,
+            "offset": offset,
+        }
+        where_clause = """
+            (CAST(:application_ids AS varchar[]) IS NULL
+             OR application_id = ANY(CAST(:application_ids AS varchar[])))
+            AND (CAST(:actor_id AS varchar) IS NULL OR actor_id = :actor_id)
+            AND (CAST(:action AS varchar) IS NULL OR action = :action)
+            AND (CAST(:result AS varchar) IS NULL OR result = :result)
+            AND (CAST(:request_id AS varchar) IS NULL OR request_id = :request_id)
+            AND (CAST(:occurred_from AS timestamptz) IS NULL
+                 OR occurred_at >= :occurred_from)
+            AND (CAST(:occurred_to AS timestamptz) IS NULL
+                 OR occurred_at < :occurred_to)
+        """
+        total = await session.scalar(
+            sa.text(
+                f"""
+                SELECT COUNT(*) FROM platform_core.audit_event
+                WHERE {where_clause}
+                """  # noqa: S608 - static SQL fragment
+            ),
+            parameters,
+        )
+        rows = (
+            (
+                await session.execute(
+                    sa.text(
+                        f"""
+                    SELECT audit_id, occurred_at, request_id, trace_id,
+                           application_id, actor_type, actor_id, action,
+                           target_type, target_id, result, error_code,
+                           authorization_version, metadata
+                    FROM platform_core.audit_event
+                    WHERE {where_clause}
+                    ORDER BY occurred_at DESC, audit_id DESC
+                    LIMIT :limit OFFSET :offset
+                    """  # noqa: S608 - static SQL fragment
+                    ),
+                    parameters,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows], int(total or 0)

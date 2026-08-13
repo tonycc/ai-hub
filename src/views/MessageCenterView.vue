@@ -1,124 +1,106 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
+import ApiState from '../components/ApiState.vue'
 import PageHeader from '../components/PageHeader.vue'
-import { messageItems } from '../data/platformCapabilities'
+import StatusTag from '../components/StatusTag.vue'
+import { apiRequest, queryString } from '../services/platformApi'
+import { usePortalSession } from '../stores/session'
 
-const router = useRouter()
-const activeCategory = ref('全部消息')
-const messages = ref(structuredClone(messageItems))
-const selectedId = ref(messages.value[0]?.id)
+const session = usePortalSession()
+const activeTab = ref('messages')
+const loading = ref(false)
+const error = ref(null)
+const messages = ref([])
+const configurations = ref([])
+const applications = ref([])
+const users = ref([])
+const statusFilter = ref('')
+const configVisible = ref(false)
+const testVisible = ref(false)
+const saving = ref(false)
+const configForm = reactive({ application_id: '', enabled: true, sender_name: '' })
+const testForm = reactive({ application_id: '', recipient_user_id: '', subject: '', body: '', idempotency_key: '' })
+const canWriteAny = computed(() => session.hasPermission('platform.notification.write'))
 
-const categories = computed(() => ['全部消息', ...new Set(messages.value.map((item) => item.category))].map((name) => ({
-  name,
-  count: name === '全部消息' ? messages.value.length : messages.value.filter((item) => item.category === name).length,
-})))
+function formatTime(value) { return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—' }
 
-const filteredMessages = computed(() => activeCategory.value === '全部消息' ? messages.value : messages.value.filter((item) => item.category === activeCategory.value))
-const selectedMessage = computed(() => messages.value.find((item) => item.id === selectedId.value) || filteredMessages.value[0])
-const unreadCount = computed(() => messages.value.filter((item) => item.unread).length)
-
-function selectMessage(item) {
-  selectedId.value = item.id
-  item.unread = false
+async function loadAll() {
+  loading.value = true; error.value = null
+  try {
+    const [messageResponse, configResponse, appResponse] = await Promise.all([
+      apiRequest(`notifications${queryString({ status: statusFilter.value })}`),
+      apiRequest('notification-configurations'), apiRequest('applications'),
+    ])
+    messages.value = messageResponse.items
+    configurations.value = configResponse.items
+    applications.value = appResponse.items
+  } catch (caught) { error.value = caught } finally { loading.value = false }
 }
 
-function markAllRead() {
-  messages.value.forEach((item) => { item.unread = false })
-  ElMessage.success('全部消息已标记为已读')
+async function loadRecipients(applicationId) {
+  if (!applicationId || !session.hasPermission('platform.notification.write', applicationId)) {
+    users.value = []
+    return
+  }
+  try { users.value = (await apiRequest(`applications/${applicationId}/notification-recipients`)).items } catch { users.value = [] }
 }
+
+function openConfig(row = null) {
+  Object.assign(configForm, row ? { application_id: row.application_id, enabled: row.enabled, sender_name: row.sender_name } : { application_id: applications.value[0]?.application_id || '', enabled: true, sender_name: 'AI Hub Platform' })
+  configVisible.value = true
+}
+
+async function saveConfig() {
+  saving.value = true
+  try {
+    await apiRequest(`applications/${configForm.application_id}/notification-configurations/IN_APP`, {
+      method: 'PUT', body: { enabled: configForm.enabled, sender_name: configForm.sender_name, configuration: { delivery_mode: 'LOCAL_REFERENCE' } },
+    })
+    configVisible.value = false; ElMessage.success('通知配置已保存'); await loadAll()
+  } catch (caught) { ElMessage.error(caught.message) } finally { saving.value = false }
+}
+
+async function openTest() {
+  const applicationId = applications.value.find((item) => session.hasPermission('platform.notification.write', item.application_id))?.application_id || ''
+  await loadRecipients(applicationId)
+  Object.assign(testForm, { application_id: applicationId, recipient_user_id: users.value[0]?.user_id || '', subject: '平台接入测试通知', body: '用于验证站内通知配置与审计链路。', idempotency_key: crypto.randomUUID() })
+  testVisible.value = true
+}
+
+async function changeTestApplication(applicationId) {
+  await loadRecipients(applicationId)
+  testForm.recipient_user_id = users.value[0]?.user_id || ''
+}
+
+async function sendTest() {
+  saving.value = true
+  try {
+    await apiRequest(`applications/${testForm.application_id}/notifications/test`, {
+      method: 'POST', body: { recipient_user_id: testForm.recipient_user_id, subject: testForm.subject, body: testForm.body, idempotency_key: testForm.idempotency_key, payload: { source: 'portal-uat' } },
+    })
+    testVisible.value = false; ElMessage.success('测试通知已送达'); await loadAll()
+  } catch (caught) { ElMessage.error(caught.message) } finally { saving.value = false }
+}
+
+onMounted(loadAll)
 </script>
 
 <template>
-  <div class="page-shell message-page">
-    <PageHeader title="通知中心" description="集中查看平台实施、安全、接入认证和运行状态通知。">
-      <template #tabs>
-        <div class="message-category-tabs">
-          <button v-for="category in categories" :key="category.name" type="button" :class="{ active: activeCategory === category.name }" @click="activeCategory = category.name">
-            {{ category.name }}<em>{{ category.count }}</em>
-          </button>
-        </div>
-      </template>
-      <span class="toolbar-count">{{ unreadCount }} 条未读</span>
-      <template #actions><el-button @click="markAllRead"><el-icon><CircleCheck /></el-icon>全部已读</el-button><el-button type="primary"><el-icon><Setting /></el-icon>通知偏好</el-button></template>
+  <div class="page-shell">
+    <PageHeader title="通知中心" description="配置站内通知、执行真实测试送达，并查询公共通知调用状态。">
+      <template #tabs><div class="management-tabs"><button :class="{ active: activeTab === 'messages' }" @click="activeTab = 'messages'">送达记录 <em>{{ messages.length }}</em></button><button :class="{ active: activeTab === 'configurations' }" @click="activeTab = 'configurations'">渠道配置 <em>{{ configurations.length }}</em></button></div></template>
+      <el-select v-if="activeTab === 'messages'" v-model="statusFilter" clearable placeholder="全部状态" style="width: 145px" @change="loadAll"><el-option v-for="item in ['PENDING','DELIVERED','FAILED']" :key="item" :value="item" /></el-select>
+      <template #actions><el-button @click="loadAll"><el-icon><Refresh /></el-icon>刷新</el-button><el-button v-if="canWriteAny && activeTab === 'configurations'" @click="openConfig()"><el-icon><Setting /></el-icon>新增配置</el-button><el-button v-if="canWriteAny" type="primary" :disabled="!applications.some((item) => session.hasPermission('platform.notification.write', item.application_id))" @click="openTest"><el-icon><Promotion /></el-icon>发送测试通知</el-button></template>
     </PageHeader>
+    <section class="surface-panel page-section list-panel"><ApiState :loading="loading" :error="error" :empty="activeTab === 'messages' ? !messages.length : !configurations.length" :empty-text="activeTab === 'messages' ? '暂无通知记录' : '暂无通知配置'" @retry="loadAll">
+      <el-table v-if="activeTab === 'messages'" :data="messages" style="width: 100%"><el-table-column prop="subject" label="主题" min-width="240" /><el-table-column prop="application_name" label="应用" min-width="160"><template #default="scope">{{ scope.row.application_name || scope.row.application_id }}</template></el-table-column><el-table-column prop="recipient_name" label="收件人" min-width="150"><template #default="scope">{{ scope.row.recipient_name || scope.row.recipient_user_id }}</template></el-table-column><el-table-column prop="requested_at" label="请求时间" width="175"><template #default="scope">{{ formatTime(scope.row.requested_at) }}</template></el-table-column><el-table-column prop="status" label="状态" width="115"><template #default="scope"><StatusTag :status="scope.row.status" /></template></el-table-column><el-table-column prop="failure_reason" label="失败原因" min-width="180"><template #default="scope">{{ scope.row.failure_reason || '—' }}</template></el-table-column></el-table>
+      <el-table v-else :data="configurations" style="width: 100%"><el-table-column prop="application_name" label="应用" min-width="200"><template #default="scope"><strong>{{ scope.row.application_name || scope.row.application_id }}</strong><small class="subline mono">{{ scope.row.application_id }}</small></template></el-table-column><el-table-column prop="channel" label="渠道" width="120" /><el-table-column prop="sender_name" label="发送方名称" min-width="180" /><el-table-column label="状态" width="120"><template #default="scope"><StatusTag :status="scope.row.enabled ? 'ACTIVE' : 'DISABLED'" /></template></el-table-column><el-table-column prop="updated_at" label="更新时间" width="175"><template #default="scope">{{ formatTime(scope.row.updated_at) }}</template></el-table-column><el-table-column v-if="canWriteAny" label="操作" width="90" fixed="right"><template #default="scope"><el-button v-if="session.hasPermission('platform.notification.write', scope.row.application_id)" type="primary" link @click="openConfig(scope.row)">编辑</el-button></template></el-table-column></el-table>
+    </ApiState></section>
 
-    <div class="message-layout page-section surface-panel">
-      <section class="message-list">
-        <div class="message-list__header"><strong>{{ activeCategory }}</strong><span>{{ filteredMessages.length }} 条</span></div>
-        <button v-for="item in filteredMessages" :key="item.id" type="button" :class="{ active: selectedId === item.id, unread: item.unread }" @click="selectMessage(item)">
-          <span class="message-icon" :class="`message-icon--${item.tone}`"><el-icon><component :is="item.icon" /></el-icon></span>
-          <span class="message-copy"><strong>{{ item.title }}</strong><small>{{ item.summary }}</small><em>{{ item.app }} · {{ item.category }}</em></span>
-          <span class="message-time">{{ item.time }}</span><i v-if="item.unread" />
-        </button>
-        <el-empty v-if="!filteredMessages.length" description="当前分类没有消息" :image-size="64" />
-      </section>
-
-      <main v-if="selectedMessage" class="message-detail">
-        <header><div><span>{{ selectedMessage.category }}</span><h2>{{ selectedMessage.title }}</h2><small>{{ selectedMessage.app }} · {{ selectedMessage.time }}</small></div><el-button text circle><el-icon><MoreFilled /></el-icon></el-button></header>
-        <div class="message-detail__body">
-          <p>{{ selectedMessage.summary }}</p>
-          <div class="message-context-card">
-            <span><el-icon><Document /></el-icon></span>
-            <div><small>关联平台对象</small><strong>{{ selectedMessage.context }}</strong><em>当前内容仅用于平台原型验证</em></div>
-          </div>
-          <div class="delivery-evidence"><span>消息送达记录</span><dl><div><dt>发送渠道</dt><dd>站内消息</dd></div><div><dt>消息模板</dt><dd class="mono">platform.notification.v2</dd></div><div><dt>送达状态</dt><dd>已送达</dd></div><div><dt>读取时间</dt><dd>刚刚</dd></div></dl></div>
-        </div>
-        <footer><el-button @click="ElMessage.success('消息已归档')">归档</el-button><el-button type="primary" @click="router.push(selectedMessage.route)">查看平台对象<el-icon><ArrowRight /></el-icon></el-button></footer>
-      </main>
-    </div>
+    <el-dialog v-model="configVisible" title="配置站内通知" width="520px"><el-form label-position="top"><el-form-item label="应用" required><el-select v-model="configForm.application_id" style="width: 100%"><el-option v-for="item in applications.filter((app) => session.hasPermission('platform.notification.write', app.application_id))" :key="item.application_id" :label="item.name" :value="item.application_id" /></el-select></el-form-item><el-form-item label="发送方名称" required><el-input v-model="configForm.sender_name" /></el-form-item><el-form-item label="启用渠道"><el-switch v-model="configForm.enabled" /></el-form-item></el-form><template #footer><el-button @click="configVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveConfig">保存</el-button></template></el-dialog>
+    <el-dialog v-model="testVisible" title="发送测试通知" width="560px"><el-form label-position="top"><el-form-item label="应用" required><el-select v-model="testForm.application_id" style="width: 100%" @change="changeTestApplication"><el-option v-for="item in applications.filter((app) => session.hasPermission('platform.notification.write', app.application_id))" :key="item.application_id" :label="item.name" :value="item.application_id" /></el-select></el-form-item><el-form-item label="收件人" required><el-select v-model="testForm.recipient_user_id" filterable style="width: 100%"><el-option v-for="item in users" :key="item.user_id" :label="`${item.display_name} · ${item.subject}`" :value="item.user_id" /></el-select></el-form-item><el-form-item label="主题" required><el-input v-model="testForm.subject" /></el-form-item><el-form-item label="正文" required><el-input v-model="testForm.body" type="textarea" :rows="4" /></el-form-item><el-form-item label="幂等键"><el-input v-model="testForm.idempotency_key" disabled /></el-form-item></el-form><template #footer><el-button @click="testVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!testForm.recipient_user_id" @click="sendTest">发送测试</el-button></template></el-dialog>
   </div>
 </template>
 
-<style scoped>
-.message-category-tabs { display: flex; flex: 1 1 100%; width: 100%; min-width: 0; flex-wrap: wrap; gap: 0 24px; overflow: visible; }
-.message-category-tabs button { position: relative; flex: none; height: 46px; padding: 0 1px; border: 0; color: var(--ink-500); background: transparent; font-size: 16px; cursor: pointer; }
-.message-category-tabs button:hover { color: var(--ink-900); }
-.message-category-tabs button.active { color: var(--ink-900); font-weight: 650; }
-.message-category-tabs button.active::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-500); content: ""; }
-.message-category-tabs em { margin-left: 5px; color: #89959d; font-size: 11px; font-style: normal; }
-.toolbar-count { flex: none; color: var(--ink-500); font-size: 11px; white-space: nowrap; }
-.message-layout { display: grid; grid-template-columns: minmax(300px, 0.85fr) minmax(340px, 1.15fr); min-height: 650px; overflow: hidden; }
-.message-list { border-right: 1px solid var(--line); overflow-y: auto; }
-.message-list__header { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 14px; border-bottom: 1px solid var(--line); }
-.message-list__header strong { color: var(--ink-900); font-size: 13px; }
-.message-list__header span { color: var(--ink-500); font-size: 11px; }
-.message-list > button { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: start; width: 100%; gap: 10px; padding: 13px; border: 0; border-bottom: 1px solid #edf0f2; color: var(--ink-500); background: #fff; text-align: left; cursor: pointer; }
-.message-list > button:hover, .message-list > button.active { background: #f7f9fa; }
-.message-list > button.active { box-shadow: inset 3px 0 var(--accent-500); }
-.message-list > button.unread .message-copy strong { color: var(--ink-900); font-weight: 700; }
-.message-list > button > i { position: absolute; top: 20px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-500); }
-.message-icon { display: grid; width: 34px; height: 34px; border-radius: 7px; place-items: center; }
-.message-icon--danger { color: #b54942; background: #faeceb; }
-.message-icon--primary { color: #416f86; background: #eaf1f4; }
-.message-icon--info { color: #6e7780; background: #eef1f3; }
-.message-icon--success { color: #438167; background: #eaf4ef; }
-.message-copy { display: grid; min-width: 0; gap: 4px; }
-.message-copy strong { overflow: hidden; color: #4b5b66; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.message-copy small { display: -webkit-box; overflow: hidden; color: var(--ink-500); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.message-copy em { color: #929da4; font-size: 10px; font-style: normal; }
-.message-time { padding-right: 7px; color: #939da4; font-size: 10px; white-space: nowrap; }
-.message-detail { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
-.message-detail > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
-.message-detail header div { display: grid; gap: 5px; }
-.message-detail header span { color: var(--accent-600); font-size: 11px; font-weight: 700; }
-.message-detail h2 { margin: 0; color: var(--ink-900); font-size: 16px; line-height: 1.45; }
-.message-detail header small { color: var(--ink-500); font-size: 11px; }
-.message-detail__body { padding: 20px; }
-.message-detail__body > p { margin: 0; color: #465762; font-size: 13px; line-height: 1.8; }
-.message-context-card { display: grid; grid-template-columns: 38px 1fr; align-items: center; gap: 10px; margin-top: 20px; padding: 12px; border: 1px solid #dee5e8; border-radius: 7px; background: #f8fafb; }
-.message-context-card > span { display: grid; width: 36px; height: 36px; border-radius: 7px; color: #416f86; background: #e8f0f3; place-items: center; }
-.message-context-card > div { display: grid; gap: 3px; }
-.message-context-card small, .message-context-card em { color: var(--ink-500); font-size: 10px; font-style: normal; }
-.message-context-card strong { color: var(--ink-900); font-size: 12px; }
-.delivery-evidence { margin-top: 24px; }
-.delivery-evidence > span { color: var(--ink-500); font-size: 11px; font-weight: 700; }
-.delivery-evidence dl { margin-top: 8px; border-top: 1px solid #e8ecee; }
-.delivery-evidence dl div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #edf0f2; }
-.delivery-evidence dt, .delivery-evidence dd { margin: 0; color: var(--ink-500); font-size: 11px; }
-.delivery-evidence dd { color: var(--ink-700); }
-.message-detail > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line); }
-@media (max-width: 1000px) { .message-layout { grid-template-columns: 1fr; } .message-detail { display: none; } }
-@media (max-width: 650px) { .message-category-tabs { gap: 0 12px; } .message-category-tabs button { flex: none; } .message-layout { grid-template-columns: 1fr; } }
-</style>
+<style scoped>.management-tabs{display:flex;gap:24px}.management-tabs button{position:relative;height:46px;padding:0;border:0;color:var(--ink-500);background:transparent;font-size:15px;cursor:pointer}.management-tabs button.active{color:var(--ink-900);font-weight:650}.management-tabs button.active::after{position:absolute;right:0;bottom:0;left:0;height:2px;background:var(--accent-500);content:''}.management-tabs em{margin-left:5px;color:#89959d;font-size:11px;font-style:normal}.list-panel{min-height:520px;overflow:hidden}.subline{display:block;margin-top:4px;color:var(--ink-500);font-size:11px}</style>

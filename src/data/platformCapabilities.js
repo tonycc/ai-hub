@@ -10,7 +10,7 @@ export const platformCapabilityGroups = [
       { code: 'APP-REGISTRY', name: '应用注册', description: '登记环境、入口、回调、健康、版本和接入能力', route: '/applications', phase: 'V0.1', status: '已具备' },
       { code: 'PORTAL-APP', name: '平台门户', description: '按权限展示应用入口和平台治理入口', route: '/', phase: 'V0.1', status: '已具备' },
       { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、scope、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
-      { code: 'EVENT-KIT', name: '按需事件接入', description: 'RabbitMQ、Outbox、Inbox、幂等和投影重建模板', route: '/platform/integrations', phase: 'V0.1', status: '进行中' },
+      { code: 'EVENT-KIT', name: '按需事件接入', description: 'RabbitMQ、Outbox、Inbox、幂等和投影重建模板', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
     ],
   },
   {
@@ -20,11 +20,11 @@ export const platformCapabilityGroups = [
     icon: 'Lock',
     color: '#527a64',
     items: [
-      { code: 'IAM-IDENTITY', name: '用户与组织', description: 'authentik 身份映射、组织和账号生命周期', route: '/platform/identity', phase: 'V0.5', status: '进行中' },
-      { code: 'IAM-RBAC', name: '角色与权限点', description: '角色、权限注册、授权版本和访问复核', route: '/platform/permissions', phase: 'V0.5', status: '进行中' },
-      { code: 'IAM-SCOPE', name: '数据范围', description: '应用级数据范围契约与本地对象级校验边界', route: '/platform/permissions', phase: 'V0.5', status: '进行中' },
-      { code: 'APP-CREDENTIAL', name: '应用凭据', description: '服务身份、scope、轮换、撤销和紧急停用', route: '/platform/integrations', phase: 'V0.5', status: '进行中' },
-      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、凭据和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '进行中' },
+      { code: 'IAM-IDENTITY', name: '用户与组织', description: 'authentik 身份映射、组织和账号生命周期', route: '/platform/identity', phase: 'V0.5', status: '已具备' },
+      { code: 'IAM-RBAC', name: '角色与权限点', description: '角色、权限注册、授权版本和访问复核', route: '/platform/permissions', phase: 'V0.5', status: '已具备' },
+      { code: 'IAM-SCOPE', name: '数据范围', description: '应用级数据范围契约与本地对象级校验边界', route: '/platform/permissions', phase: 'V0.5', status: '已具备' },
+      { code: 'APP-CREDENTIAL', name: '应用凭据', description: '服务身份、scope、轮换、撤销和紧急停用', route: '/applications', phase: 'V0.5', status: '已具备' },
+      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、凭据和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '已具备' },
     ],
   },
   {
@@ -34,9 +34,9 @@ export const platformCapabilityGroups = [
     icon: 'Grid',
     color: '#836b48',
     items: [
-      { code: 'MSG-NOTIFY', name: '消息通知', description: '通知请求、测试送达、状态查询和失败原因', route: '/platform/notifications', phase: 'V0.5', status: '进行中' },
+      { code: 'MSG-NOTIFY', name: '消息通知', description: '通知请求、测试送达、状态查询和失败原因', route: '/platform/notifications', phase: 'V0.5', status: '已具备' },
       { code: 'XAPP-CATALOG', name: '契约目录', description: 'OpenAPI、AsyncAPI、能力、版本和消费方登记', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
-      { code: 'PROJECTION', name: '只读投影', description: '字段白名单、版本水位、对账和从空库重建', route: '/platform/integrations', phase: 'V0.5', status: '待实施' },
+      { code: 'PROJECTION', name: '只读投影', description: '字段白名单、版本水位、对账和从空库重建', route: '/platform/operations', phase: 'V0.5', status: '已具备' },
       { code: 'PLATFORM-CONFIG', name: '平台配置', description: '平台功能开关、配额、保留策略和配置版本', route: '/platform/settings', phase: 'V1.0', status: '待实施' },
     ],
   },
@@ -47,10 +47,10 @@ export const platformCapabilityGroups = [
     icon: 'SetUp',
     color: '#58667b',
     items: [
-      { code: 'OBS-CENTER', name: '运行监控', description: '健康、日志、指标、事件积压、配额和告警', route: '/platform/operations', phase: 'V1.0', status: '待实施' },
+      { code: 'OBS-CENTER', name: '运行诊断', description: '应用入口、事件积压和投影新鲜度的只读诊断', route: '/platform/operations', phase: 'V0.5', status: '已具备' },
       { code: 'BACKUP-RECOVERY', name: '备份恢复', description: '备份、恢复演练、RPO、RTO 和运行手册', route: '/platform/operations', phase: 'V1.0', status: '待实施' },
-      { code: 'DEV-CONTRACT', name: '开发者中心', description: '公开契约、SDK、沙箱、本地替身和接入文档', route: '/platform/developer', phase: 'V0.5', status: '进行中' },
-      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与按需事件配置的一致性测试', route: '/platform/developer', phase: 'V0.5', status: '已具备' },
+      { code: 'DEV-CONTRACT', name: '开发者中心', description: '公开契约、SDK、沙箱、本地替身和接入文档', route: '/platform/developer', phase: 'V0.5', status: '已具备' },
+      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与按需事件配置的一致性测试', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
     ],
   },
   {
@@ -276,8 +276,8 @@ export const platformServices = {
     tone: '#4d6b73',
     primaryAction: '运行基线检查',
     metrics: [
-      { label: '当前里程碑', value: 'M2', hint: '可靠事件纵向链路', icon: 'Flag', tone: 'blue' },
-      { label: 'M1 检查', value: '10', unit: '项', hint: '运行时门禁通过', icon: 'CircleCheck', tone: 'green' },
+      { label: '当前里程碑', value: 'M3', hint: '平台公共能力已验收', icon: 'Flag', tone: 'blue' },
+      { label: 'M3 任务', value: '7', unit: '项', hint: '角色 UAT 与门禁通过', icon: 'CircleCheck', tone: 'green' },
       { label: 'PostgreSQL 服务', value: '1', unit: '个', hint: '三个逻辑库已隔离', icon: 'Coin', tone: 'green' },
       { label: '生产 SLO', value: '—', hint: 'V1.0 前确认', icon: 'DataLine', tone: 'blue' },
     ],
@@ -387,8 +387,8 @@ export const platformServices = {
 }
 
 export const messageItems = [
-  { id: 'msg-1', category: '实施进度', title: 'M1 身份与 API 已完成', summary: '全新环境已通过 OIDC、权限、服务身份、通知、审计、故障降级和独立重启门禁。', app: '平台实施', time: '刚刚', unread: true, icon: 'CircleCheck', tone: 'success', route: '/platform/operations', context: 'M1-10 · completed' },
+  { id: 'msg-1', category: '实施进度', title: 'M3 平台公共能力已完成', summary: '四类角色已通过真实 OIDC、管理任务、接入认证、通知、凭据和运维诊断 UAT。', app: '平台实施', time: '刚刚', unread: true, icon: 'CircleCheck', tone: 'success', route: '/platform/operations', context: 'M3-07 · completed' },
   { id: 'msg-2', category: '安全提醒', title: '本地示例密码不得用于生产环境', summary: '生产凭据需要进入密钥管理并完成轮换、撤销与泄露响应演练。', app: '安全治理', time: '今天', unread: true, icon: 'Lock', tone: 'danger', route: '/platform/settings', context: 'SEC-CONFIG · 密钥与配置边界' },
-  { id: 'msg-3', category: '接入结果', title: '中性参考应用 API-only 认证通过', summary: 'OIDC、权限、对象级拒绝、服务身份通知和故障边界均已验证；事件接入进入 M2。', app: '开发者中心', time: '今天', unread: false, icon: 'CircleCheck', tone: 'success', route: '/platform/developer', context: 'standalone-reference · API_CLIENT' },
+  { id: 'msg-3', category: '接入结果', title: '中性参考应用接入认证通过', summary: 'API-only 认证和可靠事件运行门禁均已通过，事件能力仍按需启用。', app: '开发者中心', time: '今天', unread: false, icon: 'CircleCheck', tone: 'success', route: '/platform/integrations', context: 'standalone-example · conformance passed' },
   { id: 'msg-4', category: '平台公告', title: '平台建设范围已收敛', summary: '真实业务应用不属于平台交付物，历史领域演示代码已从平台制品中移除。', app: '平台产品', time: '今天', unread: false, icon: 'Bell', tone: 'info', route: '/', context: 'PLATFORM-SCOPE · 平台公共能力' },
 ]

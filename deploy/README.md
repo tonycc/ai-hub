@@ -25,7 +25,7 @@ Compose 提供两个显式 profile。直接运行不带 `--profile` 的 `docker 
 
 仓库根 `.env.example` 只包含 Compose 的部署模式、容器内服务地址、镜像/端口参数和本地启动密钥，不再同时承担宿主机 Python 进程配置。复制得到的 `.env` 不提交版本库；其中 `local-only` 值只用于本地开发。
 
-平台 API、平台核心/事件登记迁移、平台投影迁移、独立应用 API、独立应用迁移、Outbox 发布器和投影 Worker 分别使用进程专属 Settings。基础接入的 API 进程不读取 RabbitMQ 地址。宿主机 Python 进程的完整示例分别位于：
+平台 API、平台核心/事件登记迁移、平台投影迁移、独立应用 API、独立应用迁移、Outbox 发布器和投影 Worker 分别使用进程专属 Settings。基础接入的 API 进程不读取 AMQP 地址；当平台库不存在启用中的事件契约时，运维诊断也不会访问 RabbitMQ Management API。标准事件档位使用 `RABBITMQ_OBSERVER_USER` / `RABBITMQ_OBSERVER_PASSWORD` 对应的只读账号采集队列积压和消费者数，不使用发布或消费账号。宿主机 Python 进程的完整示例分别位于：
 
 - `backend/.env.example`
 - `examples/standalone-app/.env.example`

@@ -44,17 +44,21 @@ class ServiceIdentityRevokedError(PermissionError):
 class AppRegistryService:
     async def get(self, session: AsyncSession, application_id: str) -> ApplicationRecord:
         application = (
-            await session.execute(
-                sa.text(
-                    """
+            (
+                await session.execute(
+                    sa.text(
+                        """
                     SELECT application_id, name, description, owner, status, capabilities
                     FROM platform_core.application
                     WHERE application_id = :application_id
                     """
-                ),
-                {"application_id": application_id},
+                    ),
+                    {"application_id": application_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if application is None:
             raise ApplicationNotFoundError("Application registration was not found")
         rows = (
@@ -107,10 +111,20 @@ class AppRegistryService:
             sa.text(
                 """
                 SELECT EXISTS (
-                    SELECT 1 FROM platform_core.application
-                    WHERE application_id = :application_id
-                      AND service_subject = :subject
-                      AND status = 'ACTIVE'
+                    SELECT 1
+                    FROM platform_core.application AS a
+                    JOIN platform_core.application_credential AS c
+                      ON c.application_id = a.application_id
+                    JOIN platform_core.application_environment AS e
+                      ON e.application_id = c.application_id
+                     AND e.environment = c.environment
+                    WHERE a.application_id = :application_id
+                      AND c.service_subject = :subject
+                      AND a.status = 'ACTIVE'
+                      AND e.status = 'ACTIVE'
+                      AND c.status = 'ACTIVE'
+                      AND (c.expires_at IS NULL
+                           OR c.expires_at > CURRENT_TIMESTAMP)
                 )
                 """
             ),
@@ -150,7 +164,7 @@ class AppRegistryService:
                 payload_status = cast(dict[str, Any], payload).get("status")
             if response.is_success and payload_status == "ok":
                 health_status = "HEALTHY"
-        except (httpx.HTTPError, ValueError):
+        except httpx.HTTPError, ValueError:
             pass
         await session.execute(
             sa.text(

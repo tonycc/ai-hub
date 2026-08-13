@@ -31,6 +31,7 @@ ai-hub-sdk = { workspace = true }
 [project.scripts]
 standalone-app = "standalone_app.cli:run"
 standalone-outbox-publisher = "standalone_app.cli:run_publisher"
+standalone-event-consumer = "standalone_app.cli:run_consumer"
 standalone-snapshot-export = "standalone_app.cli:run_snapshot_export"
 
 [build-system]

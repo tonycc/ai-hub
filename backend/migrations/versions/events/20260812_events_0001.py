@@ -32,9 +32,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.CheckConstraint(
-            "event_version >= 1", name="ck_event_contract_registration_version"
-        ),
+        sa.CheckConstraint("event_version >= 1", name="ck_event_contract_registration_version"),
         sa.CheckConstraint(
             "status IN ('ACTIVE', 'DEPRECATED', 'REVOKED')",
             name="ck_event_contract_registration_status",
@@ -50,7 +48,10 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE platform_core.application
-        SET capabilities = ARRAY['API_CLIENT', 'EVENT_PUBLISHER', 'PROJECTION_SOURCE'],
+        SET capabilities = ARRAY[
+                'API_CLIENT', 'EVENT_PUBLISHER', 'EVENT_CONSUMER',
+                'PROJECTION_SOURCE'
+            ],
             updated_at = CURRENT_TIMESTAMP
         WHERE application_id = 'standalone-example'
         """
@@ -77,9 +78,7 @@ def upgrade() -> None:
             status = EXCLUDED.status
         """
     )
-    op.execute(
-        "REVOKE ALL ON platform_core.alembic_version_events FROM ai_hub_platform"
-    )
+    op.execute("REVOKE ALL ON platform_core.alembic_version_events FROM ai_hub_platform")
 
 
 def downgrade() -> None:

@@ -30,9 +30,7 @@ def test_traefik_is_only_ingress_and_routes_every_public_host() -> None:
     static = load_yaml("deploy/traefik/traefik.yaml")
     dynamic = load_yaml("deploy/traefik/dynamic.yaml")
 
-    assert static["providers"] == {
-        "file": {"filename": "/etc/traefik/dynamic.yaml", "watch": True}
-    }
+    assert static["providers"] == {"file": {"filename": "/etc/traefik/dynamic.yaml", "watch": True}}
     assert static["api"]["dashboard"] is False
     assert set(dynamic["http"]["routers"]) == {
         "authentik",
@@ -40,9 +38,10 @@ def test_traefik_is_only_ingress_and_routes_every_public_host() -> None:
         "platform-portal",
         "standalone-app",
     }
-    assert dynamic["http"]["services"]["authentik"]["loadBalancer"]["healthCheck"][
-        "path"
-    ] == "/-/health/ready/"
+    assert (
+        dynamic["http"]["services"]["authentik"]["loadBalancer"]["healthCheck"]["path"]
+        == "/-/health/ready/"
+    )
 
 
 def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
@@ -67,9 +66,7 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
 
 
 def test_standalone_image_build_does_not_copy_platform_source() -> None:
-    dockerfile = (PROJECT_ROOT / "examples/standalone-app/Dockerfile").read_text(
-        encoding="utf-8"
-    )
+    dockerfile = (PROJECT_ROOT / "examples/standalone-app/Dockerfile").read_text(encoding="utf-8")
 
     assert "COPY backend/src" not in dockerfile
     assert "COPY sdk/python/src" in dockerfile
@@ -82,14 +79,46 @@ def test_event_profile_uses_a_dedicated_outbox_relay_database_role() -> None:
     event_application = compose["services"]["standalone-app-events"]
 
     assert "STANDALONE_PUBLISHER_DATABASE_URL" in publisher["environment"]
-    assert "standalone_outbox_publisher" in publisher["environment"][
-        "STANDALONE_PUBLISHER_DATABASE_URL"
-    ]
+    assert (
+        "standalone_outbox_publisher"
+        in publisher["environment"]["STANDALONE_PUBLISHER_DATABASE_URL"]
+    )
     assert "STANDALONE_DATABASE_URL" in application["environment"]
     assert "standalone_app:" in application["environment"]["STANDALONE_DATABASE_URL"]
     assert application["profiles"] == ["base-access"]
     assert event_application["profiles"] == ["standard-events"]
     assert application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == "API_CLIENT"
     assert event_application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == (
-        "API_CLIENT,EVENT_PUBLISHER,PROJECTION_SOURCE"
+        "API_CLIENT,EVENT_PUBLISHER,EVENT_CONSUMER,PROJECTION_SOURCE"
     )
+
+
+def test_event_database_role_bootstraps_are_serialized() -> None:
+    compose = load_yaml("deploy/compose.yaml")
+    services = compose["services"]
+
+    assert services["standalone-consumer-db-bootstrap"]["depends_on"][
+        "standalone-publisher-db-bootstrap"
+    ] == {"condition": "service_completed_successfully"}
+
+
+def test_platform_operations_uses_the_read_only_rabbitmq_observer() -> None:
+    compose = load_yaml("deploy/compose.yaml")
+    environment = compose["services"]["platform-api"]["environment"]
+
+    assert environment["AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL"] == (
+        "${AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL:-}"
+    )
+    assert environment["AI_HUB_OPERATIONS_RABBITMQ_USERNAME"] == (
+        "${RABBITMQ_OBSERVER_USER:-}"
+    )
+    assert environment["AI_HUB_OPERATIONS_RABBITMQ_PASSWORD"] == (
+        "${RABBITMQ_OBSERVER_PASSWORD:-}"
+    )
+
+    local_environment = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL=http://rabbitmq:15672" in (
+        local_environment
+    )
+    assert "RABBITMQ_OBSERVER_USER=platform_observer" in local_environment
+    assert "RABBITMQ_OBSERVER_PASSWORD=" in local_environment

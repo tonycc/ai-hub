@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -12,6 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_hub_platform.api.errors import ApiError
 from ai_hub_platform.modules.audit.service import AuditRecord, AuditService
+from ai_hub_platform.modules.portal.service import (
+    PortalPrincipal,
+    PortalSessionNotFoundError,
+    PortalSessionService,
+    secret_hash,
+)
 from ai_hub_platform.shared.database import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -89,9 +96,7 @@ def principal_dependency(
         database: Annotated[Database, Depends(get_database)],
         validator: Annotated[OidcTokenValidator, Depends(get_token_validator)],
         authorization: Annotated[str | None, Header()] = None,
-        application_header: Annotated[
-            str | None, Header(alias="X-Application-ID")
-        ] = None,
+        application_header: Annotated[str | None, Header(alias="X-Application-ID")] = None,
     ) -> Principal:
         try:
             bearer_token = _bearer_token(authorization)
@@ -126,3 +131,121 @@ def principal_dependency(
 
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
+
+
+async def portal_principal(
+    request: Request,
+    session: SessionDependency,
+) -> PortalPrincipal:
+    settings = request.app.state.settings
+    cookie_value = request.cookies.get(settings.portal_session_cookie_name)
+    try:
+        principal = await PortalSessionService().resolve_session(
+            session,
+            session_token=cookie_value or "",
+        )
+        request.state.portal_principal = principal
+        return principal
+    except PortalSessionNotFoundError as error:
+        await _audit_portal_denial(
+            get_database(request),
+            request,
+            error_code="portal_session_invalid",
+            actor_id=None,
+        )
+        raise ApiError(401, "portal_session_invalid", str(error)) from error
+
+
+async def _audit_portal_denial(
+    database: Database,
+    request: Request,
+    *,
+    error_code: str,
+    actor_id: str | None,
+    application_id: str | None = None,
+) -> None:
+    try:
+        await AuditService().append_committed(
+            database,
+            AuditRecord(
+                request_id=str(request.state.request_id),
+                trace_id=getattr(request.state, "trace_id", None),
+                action="platform.portal.authorize",
+                result="DENIED",
+                actor_type="user" if actor_id else "anonymous",
+                actor_id=actor_id,
+                application_id=application_id,
+                target_type="api_path",
+                target_id=request.url.path,
+                error_code=error_code,
+            ),
+        )
+    except Exception:
+        LOGGER.exception(
+            "portal authorization denial audit failed",
+            extra={"request_id": str(request.state.request_id)},
+        )
+
+
+def portal_permission_dependency(
+    permission_code: str,
+    *,
+    application_parameter: str | None = "application_id",
+    require_global: bool = False,
+    require_csrf: bool = False,
+):
+    async def dependency(
+        request: Request,
+        principal: Annotated[PortalPrincipal, Depends(portal_principal)],
+        csrf_header: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+    ) -> PortalPrincipal:
+        application_id: str | None = None
+        if application_parameter is not None:
+            raw_application_id = request.path_params.get(application_parameter)
+            if isinstance(raw_application_id, str):
+                application_id = raw_application_id
+        if not principal.allows(
+            permission_code,
+            application_id=application_id,
+            require_global=require_global,
+        ):
+            await _audit_portal_denial(
+                get_database(request),
+                request,
+                error_code="platform_permission_denied",
+                actor_id=principal.subject,
+                application_id=application_id,
+            )
+            raise ApiError(
+                403,
+                "platform_permission_denied",
+                "Platform role does not permit this operation for the requested resource",
+            )
+        if require_csrf:
+            settings = request.app.state.settings
+            csrf_cookie = request.cookies.get(settings.portal_csrf_cookie_name)
+            csrf_valid = bool(
+                csrf_header
+                and csrf_cookie
+                and hmac.compare_digest(csrf_header, csrf_cookie)
+                and hmac.compare_digest(secret_hash(csrf_header), principal.csrf_hash)
+            )
+            if not csrf_valid:
+                await _audit_portal_denial(
+                    get_database(request),
+                    request,
+                    error_code="csrf_validation_failed",
+                    actor_id=principal.subject,
+                    application_id=application_id,
+                )
+                raise ApiError(
+                    403,
+                    "csrf_validation_failed",
+                    "A matching portal CSRF token is required",
+                )
+        return principal
+
+    return dependency
+
+
+PortalPrincipalDependency = Annotated[PortalPrincipal, Depends(portal_principal)]

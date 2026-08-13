@@ -8,7 +8,12 @@ import uvicorn
 from ai_hub_sdk import json_log_config
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from standalone_app.config import get_event_publisher_settings, get_settings
+from standalone_app.config import (
+    get_event_consumer_settings,
+    get_event_publisher_settings,
+    get_settings,
+)
+from standalone_app.consumer import run_reference_consumer
 from standalone_app.events import export_snapshot, run_outbox_publisher
 
 
@@ -25,6 +30,11 @@ def run() -> None:
 def run_publisher() -> None:
     logging.config.dictConfig(json_log_config())
     asyncio.run(run_outbox_publisher(get_event_publisher_settings()))
+
+
+def run_consumer() -> None:
+    logging.config.dictConfig(json_log_config())
+    asyncio.run(run_reference_consumer(get_event_consumer_settings()))
 
 
 async def _snapshot_json() -> str:

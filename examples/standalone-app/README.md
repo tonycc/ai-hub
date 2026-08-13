@@ -10,7 +10,7 @@
 | `EVENT_PUBLISHER`（可选） | `alembic-event-publisher.ini` | `app.integration_outbox` 及发布索引 |
 | `EVENT_CONSUMER`（可选） | `alembic-event-consumer.ini` | `app.integration_inbox` |
 
-M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、用户和权限查询、版本化授权缓存、对象级最终校验、服务身份测试通知与故障边界认证。M2 已实现 `EVENT_PUBLISHER` 与 `PROJECTION_SOURCE`：记录变化和 Outbox 在同一事务提交，独立发布器使用专用数据库角色、RabbitMQ 发布确认和有限重试，快照导出包含一致水位与校验和。应用 API 只能插入 Outbox，发布器只能读取 Outbox 并更新投递状态，不能访问业务表。参考应用没有需要由事件驱动的本地持久化副作用，因此当前运行档位不登记 `EVENT_CONSUMER`，但迁移模板继续保留给未来消费方。
+M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、用户和权限查询、版本化授权缓存、对象级最终校验、服务身份测试通知与故障边界认证。M2 已实现 `EVENT_PUBLISHER`、`EVENT_CONSUMER` 与 `PROJECTION_SOURCE`：记录变化和 Outbox 在同一事务提交，独立发布器使用专用数据库角色、RabbitMQ 发布确认和有限重试，快照导出包含一致水位与校验和。独立消费者使用专用消息与数据库身份，在同一数据库事务中写入 Inbox 和业务中性的认证副作用，并在事务提交后才确认消息。应用 API 只能插入 Outbox，发布器只能读取 Outbox 并更新投递状态，消费者只能访问自己的 Inbox 与认证副作用表，三者均不能越权访问或修改业务表。
 
 ~~~bash
 cp .env.example .env
@@ -44,7 +44,7 @@ uv run --env-file examples/standalone-app/.env \
 docker compose -f deploy/compose.yaml --profile base-access up -d --build
 ~~~
 
-`base-access` 只执行基础迁移，默认能力为 `API_CLIENT`。`standard-events` 把参考应用能力设置为 `API_CLIENT,EVENT_PUBLISHER,PROJECTION_SOURCE`，执行发布者迁移，并启动 RabbitMQ、Outbox 发布器和平台投影 Worker；不会创建应用侧 Inbox。
+`base-access` 只执行基础迁移，默认能力为 `API_CLIENT`。`standard-events` 把参考应用能力设置为 `API_CLIENT,EVENT_PUBLISHER,EVENT_CONSUMER,PROJECTION_SOURCE`，执行按能力隔离的事件迁移，并启动 RabbitMQ、Outbox 发布器、应用事件消费者和平台投影 Worker。应用侧 Inbox 属于独立应用数据库，平台只接收运行门禁生成的摘要与 SHA-256 证据，不读取该数据库。
 
 - 应用健康检查：`GET http://app.localhost:8088/health/live`
 - 登录入口：`GET http://app.localhost:8088/auth/login`

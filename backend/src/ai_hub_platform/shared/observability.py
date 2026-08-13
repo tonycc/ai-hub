@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import cast
 from uuid import uuid4
 
 from fastapi import Request, Response
@@ -38,4 +39,46 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 separators=(",", ":"),
             )
         )
+        return response
+
+
+class PortalAuditMiddleware(BaseHTTPMiddleware):
+    """Persist successful portal API calls without reading request bodies or secrets."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        if not request.url.path.startswith("/portal-api/") or response.status_code >= 400:
+            return response
+        principal = getattr(request.state, "portal_principal", None)
+        database = getattr(request.app.state, "database", None)
+        if principal is None or database is None:
+            return response
+        from ai_hub_platform.modules.audit.service import AuditRecord, AuditService
+        from ai_hub_platform.modules.portal.service import PortalPrincipal
+        from ai_hub_platform.shared.database import Database
+
+        typed_principal = cast(PortalPrincipal, principal)
+        application_id = request.path_params.get("application_id")
+        try:
+            await AuditService().append_committed(
+                cast(Database, database),
+                AuditRecord(
+                    request_id=str(request.state.request_id),
+                    trace_id=getattr(request.state, "trace_id", None),
+                    action="platform.portal.api.call",
+                    result="SUCCESS",
+                    actor_type="user",
+                    actor_id=typed_principal.subject,
+                    application_id=(application_id if isinstance(application_id, str) else None),
+                    target_type="management_api_path",
+                    target_id=request.url.path,
+                    authorization_version=typed_principal.authorization_version,
+                    metadata={"method": request.method},
+                ),
+            )
+        except Exception:
+            LOGGER.exception(
+                "portal API audit failed",
+                extra={"request_id": str(request.state.request_id)},
+            )
         return response

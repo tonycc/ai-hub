@@ -9,6 +9,8 @@
 - [生产组件锁定与升级策略](docs/component-upgrade-policy.md)
 - [前端原型设计与复用说明](docs/frontend-prototype-design.md)
 - [管理端前端页面设计规范](docs/admin-frontend-design-spec.md)
+- [M3 平台公共能力基线](docs/m3-platform-management-design.md)
+- [M3 UAT 报告](docs/m3-uat-report.md)
 
 总体文档定义产品范围、平台与应用边界、模块和数据库设计、接口与事件规范、安全要求，以及从接入骨架到生产治理的版本路线；独立实施计划按 M0 至 M6 给出任务、依赖、产物、验证和回滚要求。当前只建设平台本身，不把任何真实业务应用作为交付物；优先保证稳定、可靠、可审计和简单部署，不以互联网用户规模驱动微服务或高可用设计。
 
@@ -43,7 +45,7 @@ docker compose -f deploy/compose.yaml --profile base-access up -d --build
 docker compose -f deploy/compose.yaml --profile standard-events up -d --build
 ~~~
 
-当前 Compose 使用单 PostgreSQL 服务承载三个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成身份与 API 纵向链路；M2 已完成按能力登记的 RabbitMQ 最小权限拓扑、CloudEvents/AsyncAPI 契约、同事务 Outbox、带确认的发布器、平台 Inbox/只读投影、乱序与死信处理，以及带水位快照重建。两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。API-only 应用不会被强制安装事件表、RabbitMQ 凭据或 Worker。
+当前 Compose 使用单 PostgreSQL 服务承载三个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成身份与 API 纵向链路；M2 已完成可靠事件与可重建只读投影；M3 已完成用户组织、角色权限、应用和凭据生命周期、通知、审计、开发者资产、接入认证、只读运维诊断及四类角色 UAT。两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。API-only 应用不会被强制安装事件表、RabbitMQ 凭据或 Worker。
 
 完整 M1 容器验收会从全新数据卷验证身份、权限、通知、故障降级和独立重启：
 

@@ -55,6 +55,9 @@ COPY backend/alembic.ini ./backend/alembic.ini
 COPY backend/alembic-events.ini ./backend/alembic-events.ini
 COPY backend/alembic-projection.ini ./backend/alembic-projection.ini
 COPY backend/migrations ./backend/migrations
+COPY contracts ./public-assets/contracts
+COPY docs/developer-integration-guide.md ./public-assets/docs/developer-integration-guide.md
+COPY examples/sdk ./public-assets/examples/sdk
 
 USER ai-hub
 

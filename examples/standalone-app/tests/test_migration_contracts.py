@@ -53,6 +53,8 @@ def test_event_consumer_migration_only_creates_inbox() -> None:
     sql = render_upgrade_sql("alembic-event-consumer.ini")
 
     assert "CREATE TABLE app.integration_inbox" in sql
+    assert "CREATE TABLE app.integration_consumer_effect" in sql
+    assert "TO standalone_event_consumer" in sql
     assert "example_record" not in sql
     assert "integration_outbox" not in sql
     assert "alembic_version_event_consumer" in sql

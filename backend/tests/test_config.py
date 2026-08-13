@@ -4,7 +4,7 @@ from ai_hub_platform.config import (
     ProjectionMigrationSettings,
     Settings,
 )
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 
 def test_local_runtime_defaults_are_valid() -> None:
@@ -28,6 +28,14 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
             "platform-db.internal:5432/platform_db"
         ),
         oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+        portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+        portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+        portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+        authentik_api_url="https://identity.example.org/api/v3",
+        authentik_external_url="https://identity.example.org",
+        authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+        public_platform_base_url="https://platform.example.org",
+        public_identity_base_url="https://identity.example.org",
     )
 
     assert settings.environment == "production"
@@ -38,8 +46,7 @@ def test_database_url_requires_credentials() -> None:
         Settings(
             environment="test",
             database_url=(
-                "postgresql+psycopg://ai_hub_platform:@platform-db.test:5432/"
-                "platform_db"
+                "postgresql+psycopg://ai_hub_platform:@platform-db.test:5432/platform_db"
             ),
         )
 
@@ -53,6 +60,12 @@ def test_production_requires_https_oidc_issuer() -> None:
                 "platform-db.internal:5432/platform_db"
             ),
             oidc_issuer="http://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="https://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
         )
 
 
@@ -67,9 +80,57 @@ def test_validation_error_does_not_expose_database_password() -> None:
                 "platform-db.internal:5432/platform_db"
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="https://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
         )
 
     assert exposed_password not in str(error.value)
+
+
+def test_production_rejects_placeholder_portal_client_secret() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="portal_oidc_client_secret cannot use a placeholder",
+    ):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("local-only-portal-secret"),
+            authentik_api_url="https://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+        )
+
+
+def test_production_rejects_placeholder_authentik_api_token() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="authentik_api_token cannot use a placeholder",
+    ):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="https://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("local-only-authentik-token"),
+        )
 
 
 def test_migration_processes_validate_only_their_own_database_url() -> None:
@@ -90,3 +151,37 @@ def test_migration_processes_validate_only_their_own_database_url() -> None:
 
     assert core.environment == "production"
     assert projection.environment == "production"
+
+
+def test_operations_rabbitmq_observer_configuration_is_all_or_nothing() -> None:
+    with pytest.raises(ValidationError, match="must be configured together"):
+        Settings(
+            environment="test",
+            operations_rabbitmq_management_url="http://rabbitmq.test:15672",
+        )
+
+
+def test_production_rejects_placeholder_operations_observer_password() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="operations_rabbitmq_password cannot use a placeholder",
+    ):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="https://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+            public_platform_base_url="https://platform.example.org",
+            public_identity_base_url="https://identity.example.org",
+            operations_rabbitmq_management_url="https://rabbitmq.example.org",
+            operations_rabbitmq_username="platform_observer",
+            operations_rabbitmq_password=SecretStr("local-only-observer-password"),
+        )

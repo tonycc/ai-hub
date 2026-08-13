@@ -9,6 +9,10 @@ set -eu
 : "${RABBITMQ_PUBLISHER_PASSWORD:?Set RABBITMQ_PUBLISHER_PASSWORD}"
 : "${RABBITMQ_PROJECTION_USER:?Set RABBITMQ_PROJECTION_USER}"
 : "${RABBITMQ_PROJECTION_PASSWORD:?Set RABBITMQ_PROJECTION_PASSWORD}"
+: "${RABBITMQ_CONSUMER_USER:?Set RABBITMQ_CONSUMER_USER}"
+: "${RABBITMQ_CONSUMER_PASSWORD:?Set RABBITMQ_CONSUMER_PASSWORD}"
+: "${RABBITMQ_OBSERVER_USER:?Set RABBITMQ_OBSERVER_USER}"
+: "${RABBITMQ_OBSERVER_PASSWORD:?Set RABBITMQ_OBSERVER_PASSWORD}"
 
 admin() {
   rabbitmqadmin \
@@ -41,6 +45,12 @@ admin declare user \
 admin declare user \
   --name "${RABBITMQ_PROJECTION_USER}" \
   --password "${RABBITMQ_PROJECTION_PASSWORD}"
+admin declare user \
+  --name "${RABBITMQ_CONSUMER_USER}" \
+  --password "${RABBITMQ_CONSUMER_PASSWORD}"
+admin declare user \
+  --name "${RABBITMQ_OBSERVER_USER}" \
+  --password "${RABBITMQ_OBSERVER_PASSWORD}" --tags monitoring
 
 admin declare permissions --vhost "${RABBITMQ_VHOST}" \
   --username "${RABBITMQ_PUBLISHER_USER}" \
@@ -48,11 +58,21 @@ admin declare permissions --vhost "${RABBITMQ_VHOST}" \
 admin declare permissions --vhost "${RABBITMQ_VHOST}" \
   --username "${RABBITMQ_PROJECTION_USER}" \
   --configure '^$' --read '^ai-hub\.platform\.projection$' --write '^$'
+admin declare permissions --vhost "${RABBITMQ_VHOST}" \
+  --username "${RABBITMQ_CONSUMER_USER}" \
+  --configure '^$' --read '^ai-hub\.standalone\.reference-consumer$' --write '^$'
+admin declare permissions --vhost "${RABBITMQ_VHOST}" \
+  --username "${RABBITMQ_OBSERVER_USER}" \
+  --configure '^$' --read '^$' --write '^$'
 
 admin declare user_limit \
   --username "${RABBITMQ_PUBLISHER_USER}" --name max-connections --value 4
 admin declare user_limit \
   --username "${RABBITMQ_PROJECTION_USER}" --name max-connections --value 4
+admin declare user_limit \
+  --username "${RABBITMQ_CONSUMER_USER}" --name max-connections --value 4
+admin declare user_limit \
+  --username "${RABBITMQ_OBSERVER_USER}" --name max-connections --value 2
 admin declare vhost_limit \
   --vhost "${RABBITMQ_VHOST}" --name max-connections --value 20
 admin declare vhost_limit \
@@ -69,6 +89,13 @@ admin declare queue --vhost "${RABBITMQ_VHOST}" \
 admin declare queue --vhost "${RABBITMQ_VHOST}" \
   --name ai-hub.platform.projection.dlq --type quorum --durable true --auto-delete false \
   --arguments '{"x-max-length":10000,"x-overflow":"reject-publish"}'
+admin declare queue --vhost "${RABBITMQ_VHOST}" \
+  --name ai-hub.standalone.reference-consumer --type quorum --durable true \
+  --auto-delete false \
+  --arguments '{"x-dead-letter-exchange":"ai-hub.dead-letter","x-dead-letter-routing-key":"standalone.reference-consumer.failed","x-max-length":100000,"x-overflow":"reject-publish"}'
+admin declare queue --vhost "${RABBITMQ_VHOST}" \
+  --name ai-hub.standalone.reference-consumer.dlq --type quorum --durable true \
+  --auto-delete false --arguments '{"x-max-length":10000,"x-overflow":"reject-publish"}'
 
 admin declare binding --vhost "${RABBITMQ_VHOST}" \
   --source ai-hub.events --destination-type queue \
@@ -78,10 +105,23 @@ admin declare binding --vhost "${RABBITMQ_VHOST}" \
   --source ai-hub.dead-letter --destination-type queue \
   --destination ai-hub.platform.projection.dlq \
   --routing-key 'platform.projection.failed'
+admin declare binding --vhost "${RABBITMQ_VHOST}" \
+  --source ai-hub.events --destination-type queue \
+  --destination ai-hub.standalone.reference-consumer \
+  --routing-key 'company.example.record.*.v1'
+admin declare binding --vhost "${RABBITMQ_VHOST}" \
+  --source ai-hub.dead-letter --destination-type queue \
+  --destination ai-hub.standalone.reference-consumer.dlq \
+  --routing-key 'standalone.reference-consumer.failed'
 
 admin declare policy --vhost "${RABBITMQ_VHOST}" \
   --name ai-hub-platform-projection-delivery-limit \
   --pattern '^ai-hub\.platform\.projection$' \
+  --apply-to quorum_queues --priority 10 \
+  --definition '{"delivery-limit":5,"dead-letter-strategy":"at-least-once"}'
+admin declare policy --vhost "${RABBITMQ_VHOST}" \
+  --name ai-hub-reference-consumer-delivery-limit \
+  --pattern '^ai-hub\.standalone\.reference-consumer$' \
   --apply-to quorum_queues --priority 10 \
   --definition '{"delivery-limit":5,"dead-letter-strategy":"at-least-once"}'
 
