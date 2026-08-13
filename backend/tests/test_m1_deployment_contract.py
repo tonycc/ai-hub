@@ -26,6 +26,29 @@ def test_both_profiles_include_authentik_and_traefik_without_docker_socket() -> 
     assert "./authentik/ai-hub-blueprint.yaml:/blueprints/" in serialized
 
 
+def test_authentik_file_storage_is_initialized_as_persistent_real_directories() -> None:
+    compose = load_yaml("deploy/compose.yaml")
+    services = compose["services"]
+
+    initializer = services["authentik-storage-init"]
+    assert initializer["profiles"] == ["base-access", "standard-events"]
+    assert initializer["user"] == "0:0"
+    assert "media.is_symlink()" in initializer["command"][0]
+    assert "media.mkdir" in initializer["command"][0]
+    assert "os.chown(data, 1000, 1000)" in initializer["command"][0]
+    for service_name in ("authentik-storage-init", "authentik-server", "authentik-worker"):
+        data_mount = services[service_name]["volumes"][0]
+        assert data_mount == {
+            "type": "volume",
+            "source": "authentik-data",
+            "target": "/data",
+            "volume": {"nocopy": True},
+        }
+    assert services["authentik-server"]["depends_on"]["authentik-storage-init"] == {
+        "condition": "service_completed_successfully"
+    }
+
+
 def test_traefik_is_only_ingress_and_routes_every_public_host() -> None:
     static = load_yaml("deploy/traefik/traefik.yaml")
     dynamic = load_yaml("deploy/traefik/dynamic.yaml")

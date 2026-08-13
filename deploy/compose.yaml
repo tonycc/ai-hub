@@ -355,6 +355,33 @@ services:
         aliases:
           - standalone-app
 
+  authentik-storage-init:
+    profiles: *core-profiles
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2026.5.6@sha256:ed120caf710ccf82ef0026f0bc74e51615bc95ebff228a7a2d6fc60c441c3868}
+    user: "0:0"
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import os
+        from pathlib import Path
+
+        data = Path("/data")
+        media = Path("/data/media")
+        if media.is_symlink():
+            if media.readlink() != Path("/media"):
+                raise RuntimeError("refusing to replace an unexpected /data/media link")
+            media.unlink()
+        media.mkdir(parents=True, exist_ok=True)
+        os.chown(data, 1000, 1000)
+        os.chown(media, 1000, 1000)
+    volumes:
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
+    restart: "no"
+
   authentik-server:
     profiles: *core-profiles
     image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2026.5.6@sha256:ed120caf710ccf82ef0026f0bc74e51615bc95ebff228a7a2d6fc60c441c3868}
@@ -364,6 +391,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      authentik-storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "ak", "healthcheck"]
       interval: 10s
@@ -371,7 +400,11 @@ services:
       retries: 30
       start_period: 30s
     volumes:
-      - authentik-data:/data
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
     shm_size: 512mb
     restart: unless-stopped
 
@@ -403,7 +436,11 @@ services:
       retries: 30
       start_period: 30s
     volumes:
-      - authentik-data:/data
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
       - ./authentik/ai-hub-blueprint.yaml:/blueprints/ai-hub/ai-hub-blueprint.yaml:ro
     shm_size: 512mb
     restart: unless-stopped

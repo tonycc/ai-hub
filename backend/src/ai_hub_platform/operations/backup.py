@@ -24,6 +24,7 @@ NONCE_BYTES = 12
 TAG_BYTES = 16
 CHUNK_BYTES = 1024 * 1024
 DATABASES = ("authentik_db", "platform_db", "standalone_app_db")
+AUTHENTIK_DATA_ARCHIVE = "authentik-data.tar"
 BASE_REQUIRED_ROLES = (
     "authentik",
     "ai_hub_platform_migrator",
@@ -233,6 +234,96 @@ def _database_dump(target: ComposeTarget, database: str, destination: Path) -> N
         raise BackupError(f"pg_dump failed for {database}: {detail}")
 
 
+def _authentik_data_snapshot(target: ComposeTarget, destination: Path) -> None:
+    snapshot_program = """
+import sys
+import tarfile
+from pathlib import Path
+
+root = Path('/data')
+with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise RuntimeError(f'unsupported authentik data entry: {path}')
+        archive.add(path, arcname=str(path.relative_to(root)), recursive=False)
+"""
+    command = target.command(
+        "run",
+        "--rm",
+        "-T",
+        "--no-deps",
+        "--entrypoint",
+        "python",
+        "authentik-server",
+        "-c",
+        snapshot_program,
+    )
+    with destination.open("wb") as output_file:
+        result = subprocess.run(  # noqa: S603
+            command,
+            stdout=output_file,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    if result.returncode != 0:
+        destination.unlink(missing_ok=True)
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise BackupError(f"authentik data snapshot failed: {detail}")
+
+
+def _validate_authentik_data_snapshot(path: Path) -> None:
+    with tarfile.open(path, "r") as archive:
+        for member in archive.getmembers():
+            if not (member.isfile() or member.isdir()):
+                raise BackupError("authentik data snapshot contains an unsupported entry")
+            member_path = (Path("/data") / member.name).resolve()
+            if Path("/data") not in member_path.parents:
+                raise BackupError("authentik data snapshot contains an unsafe path")
+
+
+def _restore_authentik_data(target: ComposeTarget, source: Path) -> None:
+    _validate_authentik_data_snapshot(source)
+    restore_program = """
+import shutil
+import sys
+import tarfile
+from pathlib import Path
+
+root = Path('/data')
+root.mkdir(parents=True, exist_ok=True)
+for child in root.iterdir():
+    if child.is_symlink() or child.is_file():
+        child.unlink()
+    elif child.is_dir():
+        shutil.rmtree(child)
+    else:
+        raise RuntimeError(f'unsupported authentik data entry: {child}')
+with tarfile.open(fileobj=sys.stdin.buffer, mode='r|*') as archive:
+    archive.extractall(root, filter='data')
+"""
+    command = target.command(
+        "run",
+        "--rm",
+        "-T",
+        "--no-deps",
+        "--entrypoint",
+        "python",
+        "authentik-server",
+        "-c",
+        restore_program,
+    )
+    with source.open("rb") as input_file:
+        result = subprocess.run(  # noqa: S603
+            command,
+            stdin=input_file,
+            capture_output=True,
+            check=False,
+        )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise BackupError(f"authentik data restore failed: {detail}")
+
+
 def role_names_for_profile(profile: str) -> tuple[str, ...]:
     if profile == "standard-events":
         return (*BASE_REQUIRED_ROLES, *EVENT_REQUIRED_ROLES)
@@ -305,7 +396,8 @@ def create_backup(args: argparse.Namespace) -> dict[str, object]:
             "--no-role-passwords",
         )
         (staging / globals_name).write_bytes(globals_bytes)
-        included_files = [*dump_names, globals_name]
+        _authentik_data_snapshot(target, staging / AUTHENTIK_DATA_ARCHIVE)
+        included_files = [*dump_names, globals_name, AUTHENTIK_DATA_ARCHIVE]
         manifest = {
             "schema_version": 1,
             "backup_id": backup_id,
@@ -317,7 +409,12 @@ def create_backup(args: argparse.Namespace) -> dict[str, object]:
             "migration_versions": _migration_versions(target),
             "files": _manifest_files(staging, included_files),
             "recovery_model": {
-                "authoritative": ["authentik_db", "platform_db", "standalone_app_db"],
+                "authoritative": [
+                    "authentik_db",
+                    "authentik-data",
+                    "platform_db",
+                    "standalone_app_db",
+                ],
                 "rebuildable": ["RabbitMQ queues", "platform_projection"],
             },
         }
@@ -377,7 +474,11 @@ def _read_bundle(archive_path: Path, key: bytes, destination: Path) -> dict[str,
     if not isinstance(raw_files, dict):
         raise BackupError("Backup manifest file inventory is invalid")
     files = cast(dict[str, Any], raw_files)
-    expected_files = {"globals.sql", *(f"{database}.dump" for database in DATABASES)}
+    expected_files = {
+        "globals.sql",
+        AUTHENTIK_DATA_ARCHIVE,
+        *(f"{database}.dump" for database in DATABASES),
+    }
     if set(files) != expected_files:
         raise BackupError("Backup manifest file inventory is incomplete or unexpected")
     for filename, raw_metadata_value in files.items():
@@ -491,6 +592,7 @@ def restore_backup(args: argparse.Namespace) -> dict[str, object]:
             extracted = Path(str(manifest.pop("_extracted_path")))
             for database in DATABASES:
                 _restore_dump(target, extracted / f"{database}.dump")
+            _restore_authentik_data(target, extracted / AUTHENTIK_DATA_ARCHIVE)
             actual_versions = _migration_versions(target)
             if actual_versions != manifest["migration_versions"]:
                 raise BackupError("Restored migration versions do not match the backup manifest")
