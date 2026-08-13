@@ -122,3 +122,10 @@ def test_platform_operations_uses_the_read_only_rabbitmq_observer() -> None:
     )
     assert "RABBITMQ_OBSERVER_USER=platform_observer" in local_environment
     assert "RABBITMQ_OBSERVER_PASSWORD=" in local_environment
+
+
+def test_m1_revokes_the_authoritative_application_credential() -> None:
+    runtime_gate = (PROJECT_ROOT / "scripts/ci/m1-runtime.sh").read_text(encoding="utf-8")
+
+    assert "UPDATE platform_core.application_credential SET status = 'REVOKED'" in runtime_gate
+    assert "UPDATE platform_core.application SET service_subject = NULL" not in runtime_gate

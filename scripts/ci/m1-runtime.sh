@@ -312,7 +312,7 @@ m1_assert_audit m1-missing-scope \
   "result = 'DENIED' AND error_code = 'insufficient_scope'"
 
 m1_psql -c \
-  "UPDATE platform_core.application SET service_subject = NULL WHERE application_id = 'standalone-example';" \
+  "UPDATE platform_core.application_credential SET status = 'REVOKED', revoked_at = CURRENT_TIMESTAMP WHERE application_id = 'standalone-example' AND environment = 'local';" \
   >/dev/null
 m1_revoked_code="$(curl --silent --show-error --max-time 15 \
   --header "Authorization: Bearer ${m1_full_service_token}" \
@@ -323,7 +323,7 @@ m1_revoked_code="$(curl --silent --show-error --max-time 15 \
   --write-out '%{http_code}' \
   "${M1_PLATFORM_BASE}/platform-api/v1/notifications")"
 m1_psql -c \
-  "UPDATE platform_core.application SET service_subject = 'ak-ai-hub-platform-client_credentials' WHERE application_id = 'standalone-example';" \
+  "UPDATE platform_core.application_credential SET status = 'ACTIVE', revoked_at = NULL WHERE application_id = 'standalone-example' AND environment = 'local';" \
   >/dev/null
 m1_expect_code 403 "${m1_revoked_code}" "revoked service binding"
 jq --exit-status \
