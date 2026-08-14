@@ -2,18 +2,19 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { platformCapabilityGroups, platformServices } from '../data/platformCapabilities'
-import { usePrototypeStore } from '../stores/prototype'
+import { platformCapabilityGroups } from '../data/platformCapabilities'
+import { apiRequest } from '../services/platformApi'
 import { usePortalSession } from '../stores/session'
 
 const route = useRoute()
 const router = useRouter()
-const store = usePrototypeStore()
 const session = usePortalSession()
 const collapsed = ref(false)
 const mobileMenuVisible = ref(false)
 const searchVisible = ref(false)
 const searchText = ref('')
+const registeredApplications = ref([])
+const applicationSearchUnavailable = ref(false)
 
 const navGroups = [
   {
@@ -42,13 +43,6 @@ const navGroups = [
       { label: '开发者中心', path: '/platform/developer', icon: 'Tools' },
     ],
   },
-  {
-    title: '后续治理',
-    items: [
-      { label: '企业语义中心', path: '/semantics', icon: 'Share' },
-      { label: 'AI 治理中心', path: '/ai-center', icon: 'MagicStick' },
-    ],
-  },
 ]
 
 const routePermissions = {
@@ -59,6 +53,7 @@ const routePermissions = {
   '/platform/integrations': 'platform.application.read',
   '/platform/audit': 'platform.audit.read',
   '/platform/operations': 'platform.operations.read',
+  '/platform/settings': 'platform.operations.read',
   '/platform/developer': 'platform.developer.read',
 }
 
@@ -76,23 +71,18 @@ const canViewPermissions = computed(() => session.hasPermission('platform.author
 const userInitial = computed(() => session.principal.value?.display_name?.slice(0, 1) || '访')
 const unreadCount = ref(0)
 
-const breadcrumbItems = computed(() => {
-  if (route.name === 'platform-service') {
-    return ['平台能力', platformServices[route.params.service]?.title || '公共服务']
-  }
-  return route.meta.breadcrumb || []
-})
+const breadcrumbItems = computed(() => route.meta.breadcrumb || [])
 
 const activeMenu = computed(() => route.path)
 
 const searchResults = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
-  const appResults = store.state.applications.map((item) => ({
+  const appResults = registeredApplications.value.map((item) => ({
     type: '应用',
     title: item.name,
-    subtitle: item.description,
-    path: item.route,
-    icon: item.icon,
+    subtitle: item.description || item.application_id,
+    path: '/applications',
+    icon: 'Grid',
   }))
   const capabilityResults = platformCapabilityGroups.flatMap((group) => group.items).map((item) => ({
     type: '平台能力',
@@ -133,10 +123,20 @@ function handleGlobalShortcut(event) {
   }
 }
 
+async function loadSearchApplications() {
+  if (!session.hasPermission('platform.application.read')) return
+  try {
+    registeredApplications.value = (await apiRequest('applications')).items
+  } catch {
+    applicationSearchUnavailable.value = true
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalShortcut)
   try {
     await session.loadSession()
+    await loadSearchApplications()
   } catch (error) {
     if (error.status === 401) {
       window.location.assign(`/auth/login?return_to=${encodeURIComponent(route.fullPath)}`)
@@ -188,7 +188,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
           <el-icon><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
           <span v-if="!collapsed">收起导航</span>
         </button>
-        <div v-if="!collapsed" class="environment-label"><i /> 平台实施 · M3</div>
+        <div v-if="!collapsed" class="environment-label"><i /> 平台基线 · M4</div>
       </div>
     </el-aside>
 
@@ -261,6 +261,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
       </template>
       <div class="search-results">
         <p>{{ searchText ? '搜索结果' : '最近访问' }}</p>
+        <small v-if="applicationSearchUnavailable" class="search-results__notice">应用索引暂不可用，平台能力仍可搜索</small>
         <button v-for="item in searchResults" :key="`${item.type}-${item.title}`" type="button" @click="navigate(item.path)">
           <span class="search-result__icon"><el-icon><component :is="item.icon" /></el-icon></span>
           <span class="search-result__copy"><strong>{{ item.title }}</strong><small>{{ item.subtitle }}</small></span>
@@ -636,6 +637,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
+}
+
+.search-results__notice {
+  display: block;
+  margin: -2px 8px 8px;
+  color: var(--warning);
+  font-size: 11px;
 }
 
 .search-results > button {

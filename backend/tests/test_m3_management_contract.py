@@ -63,6 +63,7 @@ def test_m3_management_openapi_exposes_required_server_authorized_resources() ->
         "/portal-api/v1/conformance-runs": {"get"},
         "/portal-api/v1/conformance-runs/{run_id}": {"get"},
         "/portal-api/v1/applications/{application_id}/conformance-runs": {"post"},
+        "/portal-api/v1/operations/targets": {"get"},
         "/portal-api/v1/operations/summary": {"get"},
     }
     for path, methods in expected_methods.items():
@@ -216,14 +217,12 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
                     for item in requests
                 )
                 return httpx.Response(
-                        200,
-                        json={
-                            "results": (
-                                [{"pk": 42, "client_id": "sample-app__uat__v1"}]
-                                if created
-                                else []
-                            )
-                        },
+                    200,
+                    json={
+                        "results": (
+                            [{"pk": 42, "client_id": "sample-app__uat__v1"}] if created else []
+                        )
+                    },
                 )
             return httpx.Response(200, json={"results": []})
         if request.method == "GET" and request.url.path.endswith(

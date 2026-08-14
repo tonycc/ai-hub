@@ -45,7 +45,7 @@ M4 没有未关闭的 P0/P1 缺陷或整改项。
 bash scripts/ci/all.sh
 ```
 
-结果：133 项 Python 测试通过，Ruff、Pyright strict、import-linter、Vue 生产构建及 `base-access`/`standard-events` Compose 配置校验全部通过。
+结果：140 项 Python 测试通过，Ruff、Pyright strict、import-linter、Vue 生产构建及 `base-access`/`standard-events` Compose 配置校验全部通过。
 
 真实运行证据由以下门禁分别产生：
 
@@ -67,6 +67,18 @@ bash scripts/ci/all.sh
 4. 在目标主机重跑完整 CI、韧性门禁、备份恢复、发布回滚和凭据轮换抽验。
 5. 记录目标主机规格和首轮容量结果，确认不存在与 ADR-031 不一致的 SLO、合规或 7×24 要求。
 
-## 7. 后续
+## 7. M4.1 产品收尾补充
+
+M4 验收后又完成了不改变生产目标的产品收尾：
+
+- 新增受 `platform.operations.read` 权限保护的 `/portal-api/v1/operations/targets`，只返回经过完整类型和安全约束校验的非敏感生产目标。
+- 平台配置页面改为只读“配置即代码”视图，数据唯一来自 `deploy/operations/production-targets.json`，不提供绕过代码评审的在线写入口。
+- 门户、能力总览和导航统一到 M4 基线；备份恢复与平台配置状态反映实际交付结果。
+- 删除模拟 Store、领域演示记录、原型服务页和伪成功操作；M5/M6 页面只说明未启用状态与启动条件。
+- 明确当前通知只实现 `IN_APP`/`LOCAL_REFERENCE` 站内测试通道；`DELIVERED` 表示本地测试记录成功，不表示邮件、短信、Teams、企业微信等外部渠道已经投递。
+
+该补充不改变本报告的“生产准备基线通过”结论，也不替代目标环境上线检查。
+
+## 8. 后续
 
 M4 完成后，平台可按实际接入需求进入 M5 多消费方治理；语义和 AI 能力继续遵循既定门禁，不反向改变已验收的独立项目、API/事件、数据所有权和权限边界。

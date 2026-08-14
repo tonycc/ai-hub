@@ -58,10 +58,6 @@ function openCapability(item) {
       <el-select v-model="statusFilter" style="width: 130px">
         <el-option v-for="item in ['全部状态', '已具备', '进行中', '待实施', '未启用']" :key="item" :label="item" :value="item" />
       </el-select>
-      <template #actions>
-        <el-button><el-icon><Download /></el-icon>导出能力清单</el-button>
-        <el-button type="primary"><el-icon><Plus /></el-icon>登记能力需求</el-button>
-      </template>
     </PageHeader>
 
     <section class="capability-hero page-section">
