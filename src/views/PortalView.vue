@@ -29,13 +29,12 @@ async function loadApplications() {
 }
 
 const milestoneTasks = [
-  { code: 'M3-01', name: '管理端信息架构、角色任务与验收基线', owner: '平台产品', status: '已完成' },
-  { code: 'M3-02', name: '用户、组织、平台角色与数据范围治理', owner: '平台研发', status: '已完成' },
-  { code: 'M3-03', name: '应用、环境、scope、凭据与版本生命周期', owner: '平台研发', status: '已完成' },
-  { code: 'M3-04', name: '通知配置、测试送达与追加式审计', owner: '平台研发', status: '已完成' },
-  { code: 'M3-05', name: '公开契约、SDK、沙箱与开发者中心', owner: '接入工具', status: '已完成' },
-  { code: 'M3-06', name: '接入认证、运行证据与只读运维诊断', owner: '平台运维', status: '已完成' },
-  { code: 'M3-07', name: '四类平台角色真实环境 UAT', owner: '平台验收', status: '已完成' },
+  { code: 'M4-01', name: '运行目标、数据保留、责任路由与唯一权威配置', owner: '平台运行', status: '已完成' },
+  { code: 'M4-02', name: '加密备份、异机保留与完整恢复演练', owner: '数据恢复', status: '已完成' },
+  { code: 'M4-03', name: '指标、告警、恢复通知与责任升级', owner: '平台运维', status: '已完成' },
+  { code: 'M4-04', name: '兼容迁移、灰度回滚与服务凭据轮换', owner: '平台发布', status: '已完成' },
+  { code: 'M4-05', name: '性能、安全、积压与公共依赖故障演练', owner: '平台验收', status: '已完成' },
+  { code: 'M4-06', name: '容量结论与高可用部署档位决策', owner: '架构治理', status: '已完成' },
 ]
 
 const platformEntries = [
@@ -51,7 +50,7 @@ onMounted(loadApplications)
 <template>
   <div class="page-shell portal-page">
     <PageHeader
-      eyebrow="PLATFORM IMPLEMENTATION · M3"
+      eyebrow="PLATFORM BASELINE · M4"
       title="AI Hub 平台控制台"
       description="当前只建设平台公共能力。真实业务应用通过公开 API 和事件独立接入，不进入平台源码、数据库或发布制品。"
     >
@@ -64,23 +63,23 @@ onMounted(loadApplications)
     <section class="attention-strip" aria-label="当前实施提醒">
       <span class="attention-strip__mark"><el-icon><CircleCheck /></el-icon></span>
       <div>
-        <strong>M3 已完成：平台公共能力与四类角色 UAT 已通过</strong>
-        <small>管理、接入、通知、审计、凭据、运行证据和运维诊断均已验证；下一阶段进入 M4 生产准备。</small>
+        <strong>M4 已完成：生产运行基线与综合故障演练已通过</strong>
+        <small>代码与运行基线已具备部署条件；具体环境仍须完成密钥、HTTPS、异机备份、责任路由和目标主机门禁。</small>
       </div>
-      <el-button text type="primary" @click="router.push('/platform/operations')">查看运行基线<el-icon><ArrowRight /></el-icon></el-button>
+      <el-button text type="primary" @click="router.push('/platform/settings')">查看生产配置<el-icon><ArrowRight /></el-icon></el-button>
     </section>
 
     <div class="metric-grid page-section">
-      <MetricCard label="当前里程碑" value="M3" hint="平台公共能力已验收" icon="Flag" tone="blue" />
+      <MetricCard label="当前里程碑" value="M4" hint="生产准备基线已验收" icon="Flag" tone="blue" />
       <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="均为中性认证配置" icon="Grid" tone="blue" />
       <MetricCard label="开发者资产" value="5" unit="份" hint="契约 · SDK · 文档 · 示例" icon="Document" tone="green" />
-      <MetricCard label="M3 任务" value="7" unit="项" hint="角色 UAT 与门禁通过" icon="CircleCheck" tone="green" />
+      <MetricCard label="M4 任务" value="6" unit="项" hint="生产与韧性门禁通过" icon="CircleCheck" tone="green" />
     </div>
 
     <div class="work-grid page-section">
       <section class="surface-panel milestone-panel">
         <header class="panel-header">
-          <div><h2>M3 实施门禁</h2><p>平台公共能力、接入认证与角色边界均已验证</p></div>
+          <div><h2>M4 生产准备门禁</h2><p>运行、恢复、发布、性能与故障边界均已验证</p></div>
           <el-button text @click="router.push('/platform')">能力路线<el-icon><ArrowRight /></el-icon></el-button>
         </header>
         <div class="milestone-list">

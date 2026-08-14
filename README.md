@@ -7,7 +7,7 @@
 - [产品设计与实施文档](docs/unified-internal-app-platform-product-and-implementation.md)
 - [方案实施计划](docs/implementation-plan.md)
 - [生产组件锁定与升级策略](docs/component-upgrade-policy.md)
-- [前端原型设计与复用说明](docs/frontend-prototype-design.md)
+- [平台前端设计与复用说明](docs/frontend-prototype-design.md)
 - [管理端前端页面设计规范](docs/admin-frontend-design-spec.md)
 - [M3 平台公共能力基线](docs/m3-platform-management-design.md)
 - [M3 UAT 报告](docs/m3-uat-report.md)
@@ -45,7 +45,7 @@ docker compose -f deploy/compose.yaml --profile base-access up -d --build
 docker compose -f deploy/compose.yaml --profile standard-events up -d --build
 ~~~
 
-当前 Compose 使用单 PostgreSQL 服务承载三个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成身份与 API 纵向链路；M2 已完成可靠事件与可重建只读投影；M3 已完成用户组织、角色权限、应用和凭据生命周期、通知、审计、开发者资产、接入认证、只读运维诊断及四类角色 UAT。两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。API-only 应用不会被强制安装事件表、RabbitMQ 凭据或 Worker。
+当前 Compose 使用单 PostgreSQL 服务承载三个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成身份与 API 纵向链路；M2 已完成可靠事件与可重建只读投影；M3 已完成平台公共能力；M4 已完成生产运行、恢复、发布、性能和故障韧性验收；M4.1 已完成只读生产配置、门户状态和通知边界收尾。两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。API-only 应用不会被强制安装事件表、RabbitMQ 凭据或 Worker。
 
 完整 M1 容器验收会从全新数据卷验证身份、权限、通知、故障降级和独立重启：
 
@@ -59,13 +59,13 @@ bash scripts/ci/m1-runtime.sh
 bash scripts/ci/m2-runtime.sh
 ~~~
 
-## 前端原型
+## 平台前端
 
 目标平台前端使用 Vue 3、Vue Router 和 Element Plus，覆盖平台门户、应用中心、用户组织、权限安全、消息通知、接入治理、审计、运维和开发者中心；企业语义与 AI 治理按后续获批需求启用。
 
 历史领域演示路由、视图、Store 和模拟数据已从平台制品中移除。未来业务应用作为独立项目通过 `STANDALONE_APP` 模式接入，默认只启用 `API_CLIENT`；需要可靠发布、消费或平台投影时再按需启用事件能力并建设对应 Outbox/Inbox。
 
-正式页面范围、角色任务、权限边界、版本计划和历史原型处置见[前端原型设计与复用说明](docs/frontend-prototype-design.md)。
+正式页面范围、角色任务、权限边界、版本计划和历史原型处置见[平台前端设计与复用说明](docs/frontend-prototype-design.md)。
 
 ~~~bash
 npm install

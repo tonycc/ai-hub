@@ -1,6 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import PlatformLayout from '../layouts/PlatformLayout.vue'
-import { platformServices } from '../data/platformCapabilities'
 
 const routes = [
   {
@@ -62,10 +61,10 @@ const routes = [
         meta: { title: '运维中心', breadcrumb: ['运行与研发', '运维中心'] },
       },
       {
-        path: 'platform/:service(settings)',
-        name: 'platform-service',
-        component: () => import('../views/PlatformServiceView.vue'),
-        meta: { title: '公共服务', breadcrumb: ['平台能力', '公共服务'] },
+        path: 'platform/settings',
+        name: 'platform-settings',
+        component: () => import('../views/PlatformSettingsView.vue'),
+        meta: { title: '平台配置', breadcrumb: ['运行与研发', '平台配置'] },
       },
       {
         path: 'platform/integrations',
@@ -76,14 +75,14 @@ const routes = [
       {
         path: 'semantics',
         name: 'semantics',
-        component: () => import('../views/SemanticCenterView.vue'),
+        component: () => import('../views/PlannedCapabilityView.vue'),
         meta: { title: '企业语义中心', breadcrumb: ['平台能力', '企业语义中心'] },
       },
       {
         path: 'ai-center',
         name: 'ai-center',
-        component: () => import('../views/AiCenterView.vue'),
-        meta: { title: 'AI 员工中心', breadcrumb: ['平台能力', 'AI 员工中心'] },
+        component: () => import('../views/PlannedCapabilityView.vue'),
+        meta: { title: 'AI 治理中心', breadcrumb: ['平台能力', 'AI 治理中心'] },
       },
     ],
   },
@@ -100,8 +99,7 @@ const router = createRouter({
 })
 
 router.afterEach((to) => {
-  const serviceTitle = to.name === 'platform-service' ? platformServices[to.params.service]?.title : null
-  document.title = `${serviceTitle || to.meta.title || 'AI Hub'} · AI Hub`
+  document.title = `${to.meta.title || 'AI Hub'} · AI Hub`
 })
 
 export default router

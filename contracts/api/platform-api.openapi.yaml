@@ -137,7 +137,7 @@ paths:
             schema: {$ref: "#/components/schemas/NotificationRequest"}
       responses:
         "201":
-          description: Idempotent notification request and observable delivery result.
+          description: Idempotent local IN_APP test notification result. DELIVERED does not represent delivery by an external email, SMS, or collaboration provider.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/NotificationResult"}
@@ -156,7 +156,7 @@ paths:
           schema: {type: string, format: uuid}
       responses:
         "200":
-          description: Notification delivery result visible only to its calling application.
+          description: Local IN_APP test-channel result visible only to its calling application.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/NotificationResult"}
@@ -308,6 +308,7 @@ components:
         payload: {type: object, additionalProperties: true, default: {}}
     NotificationResult:
       type: object
+      description: Current delivery results are produced only by the local IN_APP test channel; external providers are not enabled.
       additionalProperties: false
       required: [notification_id, application_id, recipient_user_id, subject, status, requested_at]
       properties:
