@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-hub.example.internal/schemas/release-manifest.v1.json",
+  "title": "AI Hub immutable production release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "release_id",
+    "status",
+    "created_at",
+    "source",
+    "deployment",
+    "images",
+    "component_lock",
+    "migrations",
+    "contracts",
+    "backup",
+    "gates",
+    "approval",
+    "rollback"
+  ],
+  "properties": {
+    "$schema": { "type": "string", "minLength": 1 },
+    "schema_version": { "const": 1 },
+    "release_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,79}$" },
+    "status": { "enum": ["CANDIDATE", "APPROVED", "DEPLOYED", "ROLLED_BACK"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_sha", "dirty"],
+      "properties": {
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "tier", "profile"],
+      "properties": {
+        "environment": {
+          "enum": ["local", "test", "integration", "uat", "production"]
+        },
+        "tier": { "const": "STANDARD_SINGLE_NODE" },
+        "profile": { "enum": ["base-access", "standard-events"] }
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "portal"],
+      "properties": {
+        "platform": { "$ref": "#/$defs/imageReference" },
+        "portal": { "$ref": "#/$defs/imageReference" }
+      }
+    },
+    "component_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lock_id", "sha256"],
+      "properties": {
+        "lock_id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "migrations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core", "events", "projection"],
+      "properties": {
+        "core": { "$ref": "#/$defs/migrationTransition" },
+        "events": { "$ref": "#/$defs/migrationTransition" },
+        "projection": { "$ref": "#/$defs/migrationTransition" }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contracts/api/platform-api.openapi.yaml",
+        "contracts/events/ai-hub.asyncapi.yaml",
+        "contracts/events/cloud-event.schema.json"
+      ],
+      "properties": {
+        "contracts/api/platform-api.openapi.yaml": { "$ref": "#/$defs/sha256" },
+        "contracts/events/ai-hub.asyncapi.yaml": { "$ref": "#/$defs/sha256" },
+        "contracts/events/cloud-event.schema.json": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backup_id",
+        "receipt",
+        "archive_sha256",
+        "created_at",
+        "verified_at",
+        "storage_class",
+        "profile"
+      ],
+      "properties": {
+        "backup_id": { "type": "string", "minLength": 1 },
+        "receipt": { "type": "string", "minLength": 1 },
+        "archive_sha256": { "$ref": "#/$defs/sha256" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "verified_at": { "type": "string", "format": "date-time" },
+        "storage_class": { "enum": ["off-host", "local-drill"] },
+        "profile": { "enum": ["base-access", "standard-events"] }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidence", "evidence_sha256"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+          "status": { "const": "PASSED" },
+          "evidence": { "type": "string", "minLength": 1 },
+          "evidence_sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved_by", "approved_at", "remaining_risks"],
+      "properties": {
+        "approved_by": { "type": "string", "minLength": 1 },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "remaining_risks": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "previous_release_id",
+        "previous_manifest",
+        "previous_manifest_sha256",
+        "schema_compatible",
+        "live_data_check_required",
+        "live_data_condition"
+      ],
+      "properties": {
+        "previous_release_id": { "type": "string", "minLength": 1 },
+        "previous_manifest": { "type": "string", "minLength": 1 },
+        "previous_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "schema_compatible": { "type": "boolean" },
+        "live_data_check_required": { "const": true },
+        "live_data_condition": {
+          "const": "no_environment_has_multiple_credential_rows"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "imageReference": { "type": "string", "minLength": 1 },
+    "migrationTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component",
+        "previous_head",
+        "target_head",
+        "revisions",
+        "phases",
+        "rollback_schema_compatible"
+      ],
+      "properties": {
+        "component": { "enum": ["core", "events", "projection"] },
+        "previous_head": { "type": "string", "minLength": 1 },
+        "target_head": { "type": "string", "minLength": 1 },
+        "revisions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "phases": {
+          "type": "array",
+          "items": { "enum": ["expand", "contract"] }
+        },
+        "rollback_schema_compatible": { "type": "boolean" }
+      }
+    }
+  }
+}

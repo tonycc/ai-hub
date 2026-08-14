@@ -122,7 +122,7 @@ class AppRegistryService:
                       AND c.service_subject = :subject
                       AND a.status = 'ACTIVE'
                       AND e.status = 'ACTIVE'
-                      AND c.status = 'ACTIVE'
+                      AND c.status IN ('ACTIVE', 'DRAINING')
                       AND (c.expires_at IS NULL
                            OR c.expires_at > CURRENT_TIMESTAMP)
                 )

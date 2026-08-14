@@ -188,19 +188,28 @@ async function loadScopeOptions() {
   }
 }
 
-async function credentialAction(environment, action) {
+async function credentialAction(environment, action, credential = null) {
   const verb = action === 'create' ? '创建' : action === 'rotate' ? '轮换' : '吊销'
   if (action === 'revoke') {
-    await ElMessageBox.confirm(`吊销 ${environment.environment} 环境凭据后，已签发服务身份将立即失效。`, '确认吊销凭据', {
+    await ElMessageBox.confirm(`吊销 ${environment.environment} 环境凭据 ${credential?.client_id || ''} 后，旧密钥不能再获取令牌，平台也会立即拒绝该凭据已签发的服务令牌。`, '确认吊销凭据', {
       confirmButtonText: '确认吊销', cancelButtonText: '取消', type: 'warning',
     })
+  } else if (action === 'rotate') {
+    await ElMessageBox.confirm(
+      `平台将创建一套新凭据，并把当前凭据保留到过渡窗口结束。请先验证并切换调用方，再吊销旧凭据。`,
+      '开始无中断轮换',
+      { confirmButtonText: '创建新凭据', cancelButtonText: '取消', type: 'warning' },
+    )
   }
   saving.value = true
   try {
     const suffix = action === 'create' ? '' : `/${action}`
     const response = await apiRequest(
       `applications/${selected.value.application_id}/environments/${environment.environment}/credentials${suffix}`,
-      { method: 'POST' },
+      {
+        method: 'POST',
+        body: action === 'revoke' ? { credential_id: credential?.credential_id, force: false } : undefined,
+      },
     )
     if (response.client_secret) {
       oneTimeSecret.value = response
@@ -295,12 +304,12 @@ onMounted(async () => {
           <div class="detail-heading"><div><code>{{ selected.application_id }}</code><p>{{ selected.description }}</p></div><el-button v-if="canEditSelected" @click="openEdit">编辑应用</el-button></div>
           <el-descriptions :column="3" border><el-descriptions-item label="负责人">{{ selected.owner }}</el-descriptions-item><el-descriptions-item label="状态"><StatusTag :status="selected.status" /></el-descriptions-item><el-descriptions-item label="更新时间">{{ formatTime(selected.updated_at) }}</el-descriptions-item></el-descriptions>
 
-          <div class="drawer-section"><div class="section-heading"><div><h3>环境与凭据</h3><p>凭据明文仅在创建或轮换后展示一次。</p></div><el-button v-if="canEditSelected" @click="openEnvironment()">新增环境</el-button></div>
+          <div class="drawer-section"><div class="section-heading"><div><h3>环境与凭据</h3><p>轮换先创建新凭据；旧凭据在过渡窗口内保持可用，验证并切换调用方后再吊销。</p></div><el-button v-if="canEditSelected" @click="openEnvironment()">新增环境</el-button></div>
             <el-table :data="selected.environments" style="width: 100%">
               <el-table-column prop="environment" label="环境" width="95" />
               <el-table-column label="入口" min-width="220"><template #default="scope"><a :href="scope.row.portal_url" target="_blank" class="entry-link">{{ scope.row.portal_url }}</a><small class="subline">{{ scope.row.version }}</small></template></el-table-column>
-              <el-table-column label="凭据" min-width="160"><template #default="scope"><template v-if="scope.row.credential"><span class="mono">{{ scope.row.credential.client_id }}</span><small class="subline">v{{ scope.row.credential.version }} · {{ scope.row.credential.status }}</small></template><span v-else class="muted">未创建</span></template></el-table-column>
-              <el-table-column label="操作" width="260" fixed="right"><template #default="scope"><el-button v-if="canEditSelected" link @click="openEnvironment(scope.row)">配置</el-button><el-button v-if="canEditSelected" link @click="openRelease(scope.row)">发布</el-button><el-button v-if="canRotateSelected && !scope.row.credential" type="primary" link @click="credentialAction(scope.row, 'create')">创建凭据</el-button><el-button v-if="canRotateSelected && scope.row.credential?.status === 'ACTIVE'" type="primary" link @click="credentialAction(scope.row, 'rotate')">轮换</el-button><el-button v-if="canRevokeSelected && scope.row.credential?.status === 'ACTIVE'" type="danger" link @click="credentialAction(scope.row, 'revoke')">吊销</el-button></template></el-table-column>
+              <el-table-column label="凭据" min-width="250"><template #default="scope"><template v-if="scope.row.credentials?.length"><div v-for="item in scope.row.credentials" :key="item.credential_id" class="credential-row"><span class="mono">{{ item.client_id }}</span><div class="credential-meta"><StatusTag :status="item.status" /><small>v{{ item.version }}<template v-if="item.revoke_after"> · {{ formatTime(item.revoke_after) }} 后可吊销</template></small></div><el-button v-if="canRevokeSelected && item.status === 'DRAINING'" type="danger" link size="small" @click="credentialAction(scope.row, 'revoke', item)">吊销旧凭据</el-button></div></template><span v-else class="muted">未创建</span></template></el-table-column>
+              <el-table-column label="操作" width="220" fixed="right"><template #default="scope"><el-button v-if="canEditSelected" link @click="openEnvironment(scope.row)">配置</el-button><el-button v-if="canEditSelected" link @click="openRelease(scope.row)">发布</el-button><el-button v-if="canRotateSelected && !scope.row.credential" type="primary" link @click="credentialAction(scope.row, 'create')">创建凭据</el-button><el-button v-if="canRotateSelected && scope.row.credential?.status === 'ACTIVE' && !scope.row.credentials?.some((item) => item.status === 'DRAINING')" type="primary" link @click="credentialAction(scope.row, 'rotate')">开始轮换</el-button></template></el-table-column>
             </el-table>
           </div>
 
@@ -336,5 +345,7 @@ onMounted(async () => {
 .entry-link { color: var(--accent-600); word-break: break-all; }
 .secret-details { margin-top: 18px; }
 .secret-value { user-select: all; word-break: break-all; }
+.credential-row + .credential-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.credential-meta { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--ink-500); }
 @media (max-width: 650px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

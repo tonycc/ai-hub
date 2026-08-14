@@ -40,6 +40,7 @@ ai-hub-projection-reconcile = "ai_hub_platform.cli:run_projection_reconcile_cli"
 ai-hub-conformance-evidence-import = "ai_hub_platform.cli:run_conformance_evidence_import_cli"
 ai-hub-backup = "ai_hub_platform.operations.backup:main"
 ai-hub-monitor = "ai_hub_platform.operations.monitor:main"
+ai-hub-release = "ai_hub_platform.operations.release:main"
 
 [build-system]
 requires = ["hatchling>=1.27"]

@@ -31,7 +31,7 @@ x-standalone-app-environment: &standalone-app-environment
   STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS: ${STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS:-300}
 
 x-standalone-app-common: &standalone-app-common
-  image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+  image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
   build:
     context: ..
     dockerfile: examples/standalone-app/Dockerfile
@@ -78,7 +78,7 @@ services:
 
   platform-core-migrate:
     profiles: *core-profiles
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -97,7 +97,7 @@ services:
   platform-projection-migrate:
     profiles:
       - standard-events
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -116,7 +116,7 @@ services:
   platform-event-registration-migrate:
     profiles:
       - standard-events
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -134,7 +134,7 @@ services:
 
   platform-api:
     profiles: *core-profiles
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -160,6 +160,7 @@ services:
       AI_HUB_AUTHENTIK_EXTERNAL_URL: ${AI_HUB_AUTHENTIK_EXTERNAL_URL:-http://auth.localhost:8088}
       AI_HUB_AUTHENTIK_API_TOKEN: ${AI_HUB_AUTHENTIK_API_TOKEN:?Set AI_HUB_AUTHENTIK_API_TOKEN in .env}
       AI_HUB_AUTHENTIK_PROVIDER_TEMPLATE_CLIENT_ID: ${AI_HUB_AUTHENTIK_PROVIDER_TEMPLATE_CLIENT_ID:-ai-hub-platform}
+      AI_HUB_CREDENTIAL_ROTATION_OVERLAP_SECONDS: ${AI_HUB_CREDENTIAL_ROTATION_OVERLAP_SECONDS:-300}
       AI_HUB_PUBLIC_ASSET_ROOT: ${AI_HUB_PUBLIC_ASSET_ROOT:-/workspace/public-assets}
       AI_HUB_PUBLIC_PLATFORM_BASE_URL: ${AI_HUB_PUBLIC_PLATFORM_BASE_URL:-http://platform.localhost:8088}
       AI_HUB_PUBLIC_IDENTITY_BASE_URL: ${AI_HUB_PUBLIC_IDENTITY_BASE_URL:-http://auth.localhost:8088}
@@ -188,7 +189,7 @@ services:
 
   portal:
     profiles: *core-profiles
-    image: "${AI_HUB_PORTAL_IMAGE:-ai-hub-portal}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PORTAL_IMAGE_REF:-ai-hub-portal:local}"
     build:
       context: ..
       dockerfile: deploy/docker/portal.Dockerfile
@@ -208,7 +209,7 @@ services:
 
   standalone-migrate:
     profiles: *core-profiles
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -227,7 +228,7 @@ services:
   standalone-event-publisher-migrate:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -253,7 +254,7 @@ services:
   standalone-event-consumer-migrate:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -532,7 +533,7 @@ services:
   standalone-outbox-publisher:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -557,7 +558,7 @@ services:
   standalone-event-consumer:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -582,7 +583,7 @@ services:
   platform-projection-worker:
     profiles:
       - standard-events
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile

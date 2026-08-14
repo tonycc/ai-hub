@@ -386,8 +386,10 @@ class ConformanceService:
                            e.status AS environment_status, e.portal_url,
                            e.api_base_url, e.health_url, e.oidc_redirect_uris,
                            e.version,
-                           c.status AS credential_status, c.issuer,
-                           c.service_subject,
+                           BOOL_OR(c.status = 'ACTIVE') AS credential_active,
+                           MAX(c.issuer) FILTER (WHERE c.status = 'ACTIVE') AS issuer,
+                           MAX(c.service_subject)
+                               FILTER (WHERE c.status = 'ACTIVE') AS service_subject,
                            COALESCE(
                                array_agg(DISTINCT g.scope_code)
                                FILTER (WHERE g.scope_code IS NOT NULL),
@@ -415,8 +417,7 @@ class ConformanceService:
                     WHERE a.application_id = :application_id
                     GROUP BY a.application_id, a.status, a.capabilities,
                              e.environment, e.status, e.portal_url, e.api_base_url,
-                             e.health_url, e.oidc_redirect_uris, e.version,
-                             c.status, c.issuer, c.service_subject
+                             e.health_url, e.oidc_redirect_uris, e.version
                     """
                     ),
                     {"application_id": application_id, "environment": environment},
@@ -431,7 +432,6 @@ class ConformanceService:
         result["capabilities"] = frozenset(row["capabilities"])
         result["scopes"] = frozenset(row["scopes"])
         return result
-
     @staticmethod
     def _api_only_check(application: dict[str, Any]) -> ConformanceCheckResult:
         missing_scopes = sorted(API_REQUIRED_SCOPES - application["scopes"])
@@ -442,7 +442,7 @@ class ConformanceService:
             failures.append("application is not active")
         if application["environment_status"] != "ACTIVE":
             failures.append("environment is not active")
-        if application["credential_status"] != "ACTIVE":
+        if application["credential_active"] is not True:
             failures.append("environment credential is not active")
         if not application["service_subject"]:
             failures.append("service subject is not bound")
@@ -465,7 +465,7 @@ class ConformanceService:
             evidence={
                 "application_status": application["application_status"],
                 "environment_status": application["environment_status"],
-                "credential_active": application["credential_status"] == "ACTIVE",
+                "credential_active": application["credential_active"] is True,
                 "redirect_uri_count": len(application["oidc_redirect_uris"]),
                 "missing_scopes": missing_scopes,
                 "permission_count": int(application["permission_count"] or 0),

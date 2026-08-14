@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, cast
 
-from ai_hub_sdk import OidcTokenValidator, TokenValidationError, VerifiedToken
+from ai_hub_sdk import TokenValidationError, VerifiedToken
 from ai_hub_sdk.identity import ActorType
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ from ai_hub_platform.modules.portal.service import (
     secret_hash,
 )
 from ai_hub_platform.shared.database import Database
+from ai_hub_platform.shared.token_validation import RegisteredOidcTokenValidator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,8 +47,8 @@ async def get_session(
             raise
 
 
-def get_token_validator(request: Request) -> OidcTokenValidator:
-    return cast(OidcTokenValidator, request.app.state.token_validator)
+def get_token_validator(request: Request) -> RegisteredOidcTokenValidator:
+    return cast(RegisteredOidcTokenValidator, request.app.state.token_validator)
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -94,7 +95,7 @@ def principal_dependency(
     async def dependency(
         request: Request,
         database: Annotated[Database, Depends(get_database)],
-        validator: Annotated[OidcTokenValidator, Depends(get_token_validator)],
+        validator: Annotated[RegisteredOidcTokenValidator, Depends(get_token_validator)],
         authorization: Annotated[str | None, Header()] = None,
         application_header: Annotated[str | None, Header(alias="X-Application-ID")] = None,
     ) -> Principal:

@@ -31,6 +31,7 @@ from ai_hub_platform.shared.observability import (
     PortalAuditMiddleware,
     RequestContextMiddleware,
 )
+from ai_hub_platform.shared.token_validation import RegisteredOidcTokenValidator
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -39,9 +40,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         database = Database(resolved_settings.database_url)
-        token_validator = OidcTokenValidator(
+        primary_token_validator = OidcTokenValidator(
             resolved_settings.oidc_issuer,
             resolved_settings.oidc_audience,
+            cache_ttl_seconds=resolved_settings.oidc_jwks_cache_ttl_seconds,
+            stale_ttl_seconds=resolved_settings.oidc_jwks_stale_ttl_seconds,
+        )
+        token_validator = RegisteredOidcTokenValidator(
+            primary_token_validator,
+            database,
             cache_ttl_seconds=resolved_settings.oidc_jwks_cache_ttl_seconds,
             stale_ttl_seconds=resolved_settings.oidc_jwks_stale_ttl_seconds,
         )

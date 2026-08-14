@@ -176,6 +176,7 @@ class Settings(_PlatformSettings):
     authentik_external_url: str = "http://auth.localhost:8088"
     authentik_api_token: SecretStr = SecretStr("local-only-authentik-automation-api-token")
     authentik_provider_template_client_id: str = "ai-hub-platform"
+    credential_rotation_overlap_seconds: int = 300
     public_asset_root: str = "/workspace/public-assets"
     public_platform_base_url: str = "http://platform.localhost:8088"
     public_identity_base_url: str = "http://auth.localhost:8088"
@@ -245,6 +246,12 @@ class Settings(_PlatformSettings):
             raise ValueError("portal session and CSRF cookie names must be different")
         if not self.authentik_provider_template_client_id.strip():
             raise ValueError("authentik_provider_template_client_id cannot be empty")
+        minimum_overlap = 300 if strict else 1
+        if not minimum_overlap <= self.credential_rotation_overlap_seconds <= 3600:
+            raise ValueError(
+                "credential_rotation_overlap_seconds must be between "
+                f"{minimum_overlap} and 3600"
+            )
         _validate_redirect_uri(
             self.public_platform_base_url,
             field_name="public_platform_base_url",

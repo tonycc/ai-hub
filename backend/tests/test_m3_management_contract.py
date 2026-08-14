@@ -103,6 +103,7 @@ def test_credential_response_ignores_service_join_context() -> None:
             "secret_hint": None,
             "created_at": now,
             "last_rotated_at": now,
+            "revoke_after": now,
             "revoked_at": now,
             "expires_at": None,
         }
@@ -209,16 +210,20 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
                         ]
                     },
                 )
-            if client_id == "sample-app__uat":
+            if client_id == "sample-app__uat__v1":
                 created = any(
                     item.method == "POST" and item.url.path.endswith("/providers/oauth2/")
                     for item in requests
                 )
                 return httpx.Response(
-                    200,
-                    json={
-                        "results": ([{"pk": 42, "client_id": "sample-app__uat"}] if created else [])
-                    },
+                        200,
+                        json={
+                            "results": (
+                                [{"pk": 42, "client_id": "sample-app__uat__v1"}]
+                                if created
+                                else []
+                            )
+                        },
                 )
             return httpx.Response(200, json={"results": []})
         if request.method == "GET" and request.url.path.endswith(
@@ -262,8 +267,8 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
         launch_url="https://sample.test",
         redirect_uris=["https://sample.test/auth/callback"],
         scopes=["platform.me.read"],
+        version=1,
     )
-    await client.rotate(client_id=provisioned.client_id)
     await client.revoke(client_id=provisioned.client_id)
 
     provider_create = next(
@@ -272,7 +277,8 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
         if request.method == "POST" and request.url.path.endswith("/providers/oauth2/")
     )
     provider_payload = cast(dict[str, Any], json.loads(provider_create.content))
-    assert provider_payload["client_id"] == "sample-app__uat"
+    assert provider_payload["client_id"] == "sample-app__uat__v1"
+    assert provider_payload["name"] == provider_payload["client_id"]
     assert provider_payload["client_secret"] != "must-not-be-copied"
     assert set(provider_payload) == {
         "name",
@@ -293,8 +299,8 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
         "issuer_mode",
         "grant_types",
     }
-    assert provisioned.service_subject == "ak-sample-app__uat-client_credentials"
-    assert len([request for request in requests if request.method == "PATCH"]) == 2
+    assert provisioned.service_subject == "ak-sample-app__uat__v1-client_credentials"
+    assert len([request for request in requests if request.method == "PATCH"]) == 1
     await http_client.aclose()
 
 
