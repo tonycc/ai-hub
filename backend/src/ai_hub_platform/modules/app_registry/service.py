@@ -135,13 +135,12 @@ class AppRegistryService:
                 "Service identity is revoked or does not match the application"
             )
 
-    async def check_health(
+    async def health_url(
         self,
         session: AsyncSession,
         *,
         application_id: str,
         environment: str,
-        http_client: httpx.AsyncClient,
     ) -> str:
         health_url = await session.scalar(
             sa.text(
@@ -155,6 +154,14 @@ class AppRegistryService:
         )
         if not isinstance(health_url, str):
             raise ApplicationNotFoundError("Application environment was not found")
+        return health_url
+
+    @staticmethod
+    async def probe_health(
+        health_url: str,
+        *,
+        http_client: httpx.AsyncClient,
+    ) -> str:
         health_status = "UNHEALTHY"
         try:
             response = await http_client.get(health_url, timeout=3.0)
@@ -166,6 +173,16 @@ class AppRegistryService:
                 health_status = "HEALTHY"
         except httpx.HTTPError, ValueError:
             pass
+        return health_status
+
+    async def record_health(
+        self,
+        session: AsyncSession,
+        *,
+        application_id: str,
+        environment: str,
+        health_status: str,
+    ) -> None:
         await session.execute(
             sa.text(
                 """
@@ -181,4 +198,3 @@ class AppRegistryService:
                 "health_status": health_status,
             },
         )
-        return health_status

@@ -345,6 +345,8 @@ async def test_operations_queue_diagnostics_use_read_only_metrics_and_thresholds
         rabbitmq_username="observer",
         rabbitmq_password=SecretStr("observer-password"),
         http_client=client,
+        backlog_warning=100,
+        backlog_critical=1000,
     )
     assert rows == [
         {
@@ -379,6 +381,8 @@ async def test_operations_skip_rabbitmq_only_when_no_event_contract_is_registere
         rabbitmq_username="observer",
         rabbitmq_password=SecretStr("observer-password"),
         http_client=client,
+        backlog_warning=100,
+        backlog_critical=1000,
     )
 
     assert rows == []
@@ -399,6 +403,8 @@ async def test_operations_report_missing_observer_for_registered_events() -> Non
         rabbitmq_username=None,
         rabbitmq_password=None,
         http_client=client,
+        backlog_warning=100,
+        backlog_critical=1000,
     )
 
     assert rows[0]["status"] == "CRITICAL"

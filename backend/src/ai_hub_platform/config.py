@@ -183,6 +183,7 @@ class Settings(_PlatformSettings):
     sandbox_application_id: str = "standalone-example"
     sandbox_user_subject: str = "ai-hub-demo-user"
     monitor_token: SecretStr | None = None
+    production_targets_path: str = "deploy/operations/production-targets.json"
     operations_rabbitmq_management_url: str | None = None
     operations_rabbitmq_vhost: str = "ai-hub-local"
     operations_rabbitmq_username: str | None = None
@@ -268,6 +269,8 @@ class Settings(_PlatformSettings):
         if strict and self.monitor_token is not None:
             if _has_placeholder_secret(self.monitor_token.get_secret_value()):
                 raise ValueError("monitor_token cannot use a placeholder outside local/test")
+        if not self.production_targets_path.strip():
+            raise ValueError("production_targets_path cannot be empty")
         operations_values = (
             self.operations_rabbitmq_management_url,
             self.operations_rabbitmq_username,

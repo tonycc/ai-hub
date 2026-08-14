@@ -41,6 +41,7 @@ ai-hub-conformance-evidence-import = "ai_hub_platform.cli:run_conformance_eviden
 ai-hub-backup = "ai_hub_platform.operations.backup:main"
 ai-hub-monitor = "ai_hub_platform.operations.monitor:main"
 ai-hub-release = "ai_hub_platform.operations.release:main"
+ai-hub-load-test = "ai_hub_platform.operations.resilience:main"
 
 [build-system]
 requires = ["hatchling>=1.27"]

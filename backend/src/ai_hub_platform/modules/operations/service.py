@@ -34,6 +34,8 @@ class OperationsService:
         rabbitmq_username: str | None,
         rabbitmq_password: SecretStr | None,
         http_client: httpx.AsyncClient,
+        event_backlog_warning: int,
+        event_backlog_critical: int,
     ) -> dict[str, Any]:
         applications = await self._application_entries(session, visible_application_ids)
         projections = await self._projection_health(session, visible_application_ids)
@@ -44,6 +46,8 @@ class OperationsService:
             rabbitmq_username=rabbitmq_username,
             rabbitmq_password=rabbitmq_password,
             http_client=http_client,
+            backlog_warning=event_backlog_warning,
+            backlog_critical=event_backlog_critical,
         )
         statuses = [
             item["status"] for group in (applications, projections, events) for item in group
@@ -204,6 +208,8 @@ class OperationsService:
         rabbitmq_username: str | None,
         rabbitmq_password: SecretStr | None,
         http_client: httpx.AsyncClient,
+        backlog_warning: int,
+        backlog_critical: int,
     ) -> list[dict[str, Any]]:
         event_table_present = bool(
             await session.scalar(
@@ -279,10 +285,10 @@ class OperationsService:
             if consumers == 0:
                 status = "CRITICAL"
                 reason = "No active consumer is attached to the queue"
-            elif ready + unacknowledged > 1000:
+            elif ready + unacknowledged > backlog_critical:
                 status = "CRITICAL"
                 reason = "Event backlog exceeds the critical threshold"
-            elif ready + unacknowledged > 100:
+            elif ready + unacknowledged > backlog_warning:
                 status = "WARNING"
                 reason = "Event backlog exceeds the warning threshold"
             rows.append(

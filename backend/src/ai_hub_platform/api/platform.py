@@ -402,13 +402,23 @@ async def application_health_check(
         await registry.require_service_identity(
             session, application_id=application_id, subject=principal.token.subject
         )
+        health_url = await registry.health_url(
+            session,
+            application_id=application_id,
+            environment=environment,
+        )
+        await session.rollback()
         async with httpx.AsyncClient() as client:
-            status = await registry.check_health(
-                session,
-                application_id=application_id,
-                environment=environment,
+            status = await registry.probe_health(
+                health_url,
                 http_client=client,
             )
+        await registry.record_health(
+            session,
+            application_id=application_id,
+            environment=environment,
+            health_status=status,
+        )
     except ApplicationNotFoundError as error:
         raise ApiError(404, "application_not_found", str(error)) from error
     except ServiceIdentityRevokedError as error:

@@ -25,6 +25,7 @@ from ai_hub_platform.api.portal_auth import auth_router, session_router
 from ai_hub_platform.config import Settings, get_settings
 from ai_hub_platform.modules.app_management.authentik import AuthentikAdminClient
 from ai_hub_platform.modules.permission.service import PermissionService
+from ai_hub_platform.operations.targets import load_production_targets
 from ai_hub_platform.shared.database import Database
 from ai_hub_platform.shared.metrics import MetricsMiddleware, MetricsRegistry
 from ai_hub_platform.shared.observability import (
@@ -36,6 +37,9 @@ from ai_hub_platform.shared.token_validation import RegisteredOidcTokenValidator
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
+    production_targets = load_production_targets(
+        resolved_settings.production_targets_path
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
@@ -95,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=__version__,
     )
     application.state.metrics_registry = metrics_registry
+    application.state.production_targets = production_targets
     application.add_middleware(PortalAuditMiddleware)
     application.add_middleware(RequestContextMiddleware)
     application.add_middleware(MetricsMiddleware, registry=metrics_registry)
