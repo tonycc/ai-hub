@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
+from ai_hub_platform.operations.release import (
+    RELEASE_SCHEMA_VERSION,
+    ReleaseError,
+    migration_heads,
+    validate_backup_receipt,
+    validate_migration_transition,
+    validate_release_manifest,
+)
+from jsonschema import Draft202012Validator, FormatChecker
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+OPERATIONS = PROJECT_ROOT / "deploy" / "operations"
+
+
+def _manifest(*, environment: str = "production") -> dict[str, Any]:
+    digest = "a" * 64
+    gates = [
+        "python",
+        "frontend",
+        "deployment",
+        "identity-runtime",
+        "events-runtime",
+        "recovery-runtime",
+        "observability-runtime",
+        "credential-rotation-runtime",
+    ]
+    migration_entries: dict[str, dict[str, Any]] = {
+        component: {
+            "component": component,
+            "previous_head": f"previous-{component}",
+            "target_head": f"target-{component}",
+            "revisions": [],
+            "phases": [],
+            "rollback_schema_compatible": True,
+        }
+        for component in ("core", "events", "projection")
+    }
+    return {
+        "$schema": "../operations/release-manifest.schema.json",
+        "schema_version": RELEASE_SCHEMA_VERSION,
+        "release_id": "release-2026.08.14",
+        "status": "APPROVED",
+        "created_at": "2026-08-14T10:00:00+00:00",
+        "source": {"commit_sha": "b" * 40, "dirty": False},
+        "deployment": {
+            "environment": environment,
+            "tier": "STANDARD_SINGLE_NODE",
+            "profile": "standard-events",
+        },
+        "images": {
+            "platform": f"registry.example.test/ai-hub/platform:2026.08.14@sha256:{digest}",
+            "portal": f"registry.example.test/ai-hub/portal:2026.08.14@sha256:{digest}",
+        },
+        "component_lock": {"lock_id": "lock-1", "sha256": digest},
+        "migrations": migration_entries,
+        "contracts": {
+            "contracts/api/platform-api.openapi.yaml": digest,
+            "contracts/events/ai-hub.asyncapi.yaml": digest,
+            "contracts/events/cloud-event.schema.json": digest,
+        },
+        "backup": {
+            "backup_id": "ai-hub-backup-20260814T095000Z-deadbeef",
+            "receipt": "/mnt/backups/backup.verified.json",
+            "archive_sha256": digest,
+            "created_at": "2026-08-14T09:50:00+00:00",
+            "verified_at": "2026-08-14T09:55:00+00:00",
+            "storage_class": "off-host",
+            "profile": "standard-events",
+        },
+        "gates": [
+            {
+                "id": gate,
+                "status": "PASSED",
+                "evidence": f"/evidence/{gate}.json",
+                "evidence_sha256": digest,
+            }
+            for gate in gates
+        ],
+        "approval": {
+            "approved_by": "platform-owner",
+            "approved_at": "2026-08-14T10:00:00+00:00",
+            "remaining_risks": [],
+        },
+        "rollback": {
+            "previous_release_id": "release-2026.08.13",
+            "previous_manifest": "/releases/release-2026.08.13.json",
+            "previous_manifest_sha256": digest,
+            "schema_compatible": True,
+            "live_data_check_required": True,
+            "live_data_condition": "no_environment_has_multiple_credential_rows",
+        },
+    }
+
+
+def test_release_manifest_matches_schema_and_runtime_invariants() -> None:
+    manifest = _manifest()
+    schema = json.loads((OPERATIONS / "release-manifest.schema.json").read_text(encoding="utf-8"))
+
+    Draft202012Validator(schema, format_checker=FormatChecker()).validate(  # pyright: ignore[reportUnknownMemberType]
+        manifest
+    )
+    validate_release_manifest(manifest)
+
+
+def test_production_manifest_rejects_mutable_images_and_secret_fields() -> None:
+    manifest = _manifest()
+    manifest["images"]["platform"] = "registry.example.test/ai-hub/platform:latest"
+    with pytest.raises(ReleaseError, match="exact tag and registry digest"):
+        validate_release_manifest(manifest)
+
+    manifest = _manifest()
+    manifest["approval"]["client_secret"] = "must-never-enter-a-manifest"
+    with pytest.raises(ReleaseError, match="forbidden secret field"):
+        validate_release_manifest(manifest)
+
+
+def test_release_manifest_requires_every_runtime_gate_and_clean_production_source() -> None:
+    manifest = _manifest()
+    manifest["gates"].pop()
+    with pytest.raises(ReleaseError, match="credential-rotation-runtime"):
+        validate_release_manifest(manifest)
+
+    manifest = _manifest()
+    manifest["source"]["dirty"] = True
+    with pytest.raises(ReleaseError, match="dirty tree"):
+        validate_release_manifest(manifest)
+
+
+def test_m4_credential_migration_is_expand_only_and_old_schema_compatible() -> None:
+    target_heads = migration_heads(PROJECT_ROOT)
+    transitions = validate_migration_transition(
+        PROJECT_ROOT,
+        {
+            "core": "20260813_core_0003",
+            "events": "20260812_events_0001",
+            "projection": "20260812_projection_0002",
+        },
+        target_heads,
+    )
+
+    assert transitions["core"].revisions == ("20260814_core_0004",)
+    assert transitions["core"].phases == ("expand",)
+    assert transitions["core"].rollback_schema_compatible is True
+    assert transitions["events"].revisions == ()
+    assert transitions["projection"].revisions == ()
+
+
+def test_expand_migration_gate_rejects_unreviewed_destructive_operation(
+    tmp_path: Path,
+) -> None:
+    for component in ("core", "events", "projection"):
+        directory = tmp_path / "backend" / "migrations" / "versions" / component
+        directory.mkdir(parents=True)
+        (directory / "base.py").write_text(
+            "revision = 'base'\ndown_revision = None\ndef upgrade():\n    pass\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "backend/migrations/versions/core/breaking.py").write_text(
+        """
+from alembic import op
+revision = "breaking"
+down_revision = "base"
+release_phase = "expand"
+def upgrade():
+    op.drop_table("important_data")
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseError, match="destructive operations"):
+        validate_migration_transition(
+            tmp_path,
+            {"core": "base", "events": "base", "projection": "base"},
+            {"core": "breaking", "events": "base", "projection": "base"},
+        )
+
+
+def test_verified_backup_receipt_requires_hash_off_host_and_freshness(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 14, 10, tzinfo=UTC)
+    backup_id = "ai-hub-backup-20260814T095000Z-deadbeef"
+    archive = tmp_path / f"{backup_id}.tar.aesgcm"
+    archive.write_bytes(b"encrypted-production-backup")
+    import hashlib
+
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    archive.with_suffix(archive.suffix + ".sha256").write_text(
+        f"{digest}  {archive.name}\n",
+        encoding="utf-8",
+    )
+    receipt = archive.with_suffix(archive.suffix + ".verified.json")
+    document = {
+        "schema_version": 1,
+        "verified": True,
+        "archive": archive.name,
+        "archive_sha256": digest,
+        "backup_id": backup_id,
+        "created_at": (now - timedelta(minutes=10)).isoformat(),
+        "verified_at": (now - timedelta(minutes=5)).isoformat(),
+        "storage_class": "off-host",
+        "profile": "standard-events",
+    }
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+
+    validated = validate_backup_receipt(receipt, now=now)
+    assert validated["backup_id"] == backup_id
+
+    document["storage_class"] = "local-drill"
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ReleaseError, match="off-host"):
+        validate_backup_receipt(receipt, now=now)
+
+    document["storage_class"] = "off-host"
+    document["created_at"] = (now - timedelta(minutes=61)).isoformat()
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ReleaseError, match="older than"):
+        validate_backup_receipt(receipt, now=now)
+
+
+def test_compose_internal_images_accept_complete_digest_references() -> None:
+    compose = (PROJECT_ROOT / "deploy/compose.yaml").read_text(encoding="utf-8")
+    environment = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}" in compose
+    assert "${AI_HUB_PORTAL_IMAGE_REF:-ai-hub-portal:local}" in compose
+    assert "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}" in compose
+    assert "AI_HUB_PLATFORM_IMAGE_REF=ai-hub-platform:local" in environment
+    assert "AI_HUB_IMAGE_TAG=" not in environment
+
+
+def test_release_runbook_and_cli_cover_canary_promote_and_safe_rollback() -> None:
+    runbook = (PROJECT_ROOT / "docs/runbooks/release-rollback.md").read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "backend/src/ai_hub_platform/operations/release.py").read_text(
+        encoding="utf-8"
+    )
+
+    for command in ("create-manifest", "preflight", "canary", "promote", "rollback"):
+        assert command in runbook
+        assert command in source
+    assert "base-access` 只检查和执行平台核心迁移" in runbook
+    assert "金丝雀命令会自动重新执行完整预检" in runbook
+    assert "提升命令会再次执行完整预检和隔离金丝雀" in runbook
+    assert "preflight = release_preflight" in source
+    assert "canary = _run_verified_canary" in source
+    assert "forward fix" in source
+    assert "database_downgraded" in source

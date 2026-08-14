@@ -36,7 +36,7 @@ Capability = Literal[
     "PROJECTION_SOURCE",
     "PROJECTION_READER",
 ]
-CredentialStatus = Literal["ACTIVE", "REVOKED", "ERROR"]
+CredentialStatus = Literal["ACTIVE", "DRAINING", "REVOKED", "ERROR"]
 ReleaseStatus = Literal["DRAFT", "ACTIVE", "RETIRED"]
 
 APPLICATION_ID_PATTERN = r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$"
@@ -62,6 +62,7 @@ class CredentialMetadataResponse(ApiModel):
     secret_hint: str | None
     created_at: datetime
     last_rotated_at: datetime | None
+    revoke_after: datetime | None
     revoked_at: datetime | None
     expires_at: datetime | None
 
@@ -79,6 +80,9 @@ class EnvironmentResponse(ApiModel):
     last_health_checked_at: datetime | None
     updated_at: datetime
     credential: CredentialMetadataResponse | None = None
+    credentials: list[CredentialMetadataResponse] = Field(
+        default_factory=lambda: list[CredentialMetadataResponse]()
+    )
 
 
 class ScopeResponse(ApiModel):
@@ -231,7 +235,15 @@ class CredentialRotationResponse(ApiModel):
     client_secret: str
     issuer: str | None
     version: int
+    previous_credential_id: UUID
+    previous_client_id: str
+    revoke_after: datetime
     display_once: Literal[True] = True
+
+
+class CredentialRevokeRequest(ApiModel):
+    credential_id: UUID | None = None
+    force: bool = False
 
 
 def credential_metadata_response(value: dict[str, Any]) -> CredentialMetadataResponse:
@@ -246,6 +258,7 @@ def credential_metadata_response(value: dict[str, Any]) -> CredentialMetadataRes
         secret_hint=value["secret_hint"],
         created_at=value["created_at"],
         last_rotated_at=value["last_rotated_at"],
+        revoke_after=value["revoke_after"],
         revoked_at=value["revoked_at"],
         expires_at=value["expires_at"],
     )
@@ -271,6 +284,7 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
                 secret_hint=item["secret_hint"],
                 created_at=item["credential_created_at"],
                 last_rotated_at=item["last_rotated_at"],
+                revoke_after=item["revoke_after"],
                 revoked_at=item["revoked_at"],
                 expires_at=item["expires_at"],
             )
@@ -288,6 +302,10 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
                 last_health_checked_at=item["last_health_checked_at"],
                 updated_at=item["updated_at"],
                 credential=credential,
+                credentials=[
+                    credential_metadata_response(row)
+                    for row in cast(list[dict[str, Any]], item["credentials"])
+                ],
             )
         )
     return ApplicationDetailResponse(
@@ -588,7 +606,7 @@ async def create_credential(
     ],
 ) -> CredentialIssueResponse:
     try:
-        provisioned = await ApplicationManagementService().create_credential(
+        provisioned, version = await ApplicationManagementService().create_credential(
             session,
             _authentik(request),
             application_id=application_id,
@@ -608,7 +626,7 @@ async def create_credential(
         action="platform.credential.create",
         application_id=application_id,
         environment=environment,
-        version=1,
+        version=version,
     )
     response.headers["Cache-Control"] = "no-store"
     return CredentialIssueResponse(
@@ -617,7 +635,7 @@ async def create_credential(
         client_id=provisioned.client_id,
         client_secret=provisioned.client_secret,
         issuer=provisioned.issuer,
-        version=1,
+        version=version,
     )
 
 
@@ -642,11 +660,12 @@ async def rotate_credential(
     ],
 ) -> CredentialRotationResponse:
     try:
-        metadata, client_secret = await ApplicationManagementService().rotate_credential(
+        metadata, client_secret, previous = await ApplicationManagementService().rotate_credential(
             session,
             _authentik(request),
             application_id=application_id,
             environment=environment,
+            overlap_seconds=request.app.state.settings.credential_rotation_overlap_seconds,
         )
     except (
         ApplicationManagementNotFoundError,
@@ -672,6 +691,9 @@ async def rotate_credential(
         client_secret=client_secret,
         issuer=metadata["issuer"],
         version=metadata["version"],
+        previous_credential_id=previous["credential_id"],
+        previous_client_id=previous["client_id"],
+        revoke_after=previous["revoke_after"],
     )
 
 
@@ -694,13 +716,17 @@ async def revoke_credential(
             )
         ),
     ],
+    payload: CredentialRevokeRequest | None = None,
 ) -> CredentialMetadataResponse:
+    revoke_request = payload or CredentialRevokeRequest()
     try:
         metadata = await ApplicationManagementService().revoke_credential(
             session,
             _authentik(request),
             application_id=application_id,
             environment=environment,
+            credential_id=revoke_request.credential_id,
+            force=revoke_request.force,
         )
     except (
         ApplicationManagementNotFoundError,

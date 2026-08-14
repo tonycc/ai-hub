@@ -133,6 +133,27 @@ def test_production_rejects_placeholder_authentik_api_token() -> None:
         )
 
 
+def test_production_rejects_placeholder_monitor_token() -> None:
+    with pytest.raises(ValidationError, match="monitor_token cannot use a placeholder"):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer="https://identity.example.org/application/o/ai-hub-portal/",
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="https://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+            monitor_token=SecretStr("local-only-monitor-token"),
+            public_platform_base_url="https://platform.example.org",
+            public_identity_base_url="https://identity.example.org",
+        )
+
+
 def test_migration_processes_validate_only_their_own_database_url() -> None:
     core = CoreMigrationSettings(
         environment="production",

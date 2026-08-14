@@ -1,0 +1,98 @@
+{
+  "$schema": "./alert-rules.schema.json",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "platform-api-unready",
+      "severity": "P0",
+      "source": "platform_readiness",
+      "condition": { "operator": "eq", "value": false },
+      "for_seconds": 60,
+      "route": "platform-runtime",
+      "runbook": "docs/runbooks/alert-response.md#platform-api-unready"
+    },
+    {
+      "id": "identity-unready",
+      "severity": "P0",
+      "source": "http_probe",
+      "condition": { "operator": "eq", "value": false },
+      "path": "/-/health/ready/",
+      "for_seconds": 60,
+      "route": "identity-security",
+      "runbook": "docs/runbooks/alert-response.md#identity-unready"
+    },
+    {
+      "id": "portal-unready",
+      "severity": "P1",
+      "source": "http_probe",
+      "condition": { "operator": "eq", "value": false },
+      "path": "/healthz",
+      "for_seconds": 180,
+      "route": "platform-runtime",
+      "runbook": "docs/runbooks/alert-response.md#portal-unready"
+    },
+    {
+      "id": "application-entry-critical",
+      "severity": "P1",
+      "source": "operations_summary",
+      "condition": { "operator": "eq", "value": "CRITICAL" },
+      "for_seconds": 180,
+      "route": "application-integration",
+      "runbook": "docs/runbooks/alert-response.md#application-entry-critical"
+    },
+    {
+      "id": "event-consumer-missing",
+      "severity": "P1",
+      "source": "operations_summary",
+      "condition": { "operator": "eq", "value": "NO_CONSUMER" },
+      "for_seconds": 60,
+      "route": "platform-runtime",
+      "runbook": "docs/runbooks/alert-response.md#event-consumer-missing"
+    },
+    {
+      "id": "event-backlog-warning",
+      "severity": "P2",
+      "source": "operations_summary",
+      "condition": {
+        "operator": "gt",
+        "target_path": "slo.event_backlog_warning"
+      },
+      "for_seconds": 180,
+      "route": "application-integration",
+      "runbook": "docs/runbooks/alert-response.md#event-backlog"
+    },
+    {
+      "id": "event-backlog-critical",
+      "severity": "P1",
+      "source": "operations_summary",
+      "condition": {
+        "operator": "gt",
+        "target_path": "slo.event_backlog_critical"
+      },
+      "for_seconds": 60,
+      "route": "platform-runtime",
+      "runbook": "docs/runbooks/alert-response.md#event-backlog"
+    },
+    {
+      "id": "projection-gap-open",
+      "severity": "P1",
+      "source": "operations_summary",
+      "condition": { "operator": "gt", "value": 0 },
+      "for_seconds": 60,
+      "route": "application-integration",
+      "runbook": "docs/runbooks/alert-response.md#projection-gap-open"
+    },
+    {
+      "id": "backup-rpo-breached",
+      "severity": "P0",
+      "source": "backup_freshness",
+      "condition": {
+        "operator": "gt",
+        "target_path": "recovery.rpo_minutes"
+      },
+      "for_seconds": 0,
+      "route": "data-recovery",
+      "runbook": "docs/runbooks/alert-response.md#backup-rpo-breached"
+    }
+  ]
+}

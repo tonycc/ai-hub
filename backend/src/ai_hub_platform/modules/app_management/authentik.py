@@ -139,16 +139,20 @@ class AuthentikAdminClient:
         return secrets.token_urlsafe(48)
 
     @staticmethod
-    def client_id(application_id: str, environment: str) -> str:
-        return f"{application_id}__{environment}"
+    def client_id(application_id: str, environment: str, version: int) -> str:
+        return f"{application_id}__{environment}__v{version}"
 
     @staticmethod
-    def provider_name(application_id: str, environment: str) -> str:
-        return f"ai-hub-app-{application_id}-{environment}"
+    def provider_name(application_id: str, environment: str, version: int) -> str:
+        # authentik derives the client-credentials service-account username from
+        # the provider name. Keeping it identical to the versioned client_id
+        # preserves the platform's deterministic ``application_id__env__vN``
+        # subject mapping used by the ai_hub.identity scope expression.
+        return AuthentikAdminClient.client_id(application_id, environment, version)
 
     @staticmethod
-    def application_slug(application_id: str, environment: str) -> str:
-        return f"ai-hub-{application_id}-{environment}"
+    def application_slug(application_id: str, environment: str, version: int) -> str:
+        return f"ai-hub-{application_id}-{environment}-v{version}"
 
     async def provision(
         self,
@@ -159,8 +163,11 @@ class AuthentikAdminClient:
         launch_url: str,
         redirect_uris: list[str],
         scopes: list[str],
+        version: int,
     ) -> ProvisionedCredential:
-        client_id = self.client_id(application_id, environment)
+        if version < 1:
+            raise ValueError("Credential version must be positive")
+        client_id = self.client_id(application_id, environment, version)
         if await self._provider_by_client_id(client_id) is not None:
             raise AuthentikConflictError("Application credential already exists in authentik")
         template = await self._provider_by_client_id(self.template_client_id)
@@ -175,7 +182,7 @@ class AuthentikAdminClient:
         property_mappings = await self._scope_mapping_ids(required_scopes)
         client_secret = self._new_secret()
         provider_payload: dict[str, Any] = {
-            "name": self.provider_name(application_id, environment),
+            "name": self.provider_name(application_id, environment, version),
             "authentication_flow": template.get("authentication_flow"),
             "authorization_flow": template.get("authorization_flow"),
             "invalidation_flow": template.get("invalidation_flow"),
@@ -213,13 +220,13 @@ class AuthentikAdminClient:
         provider_id = provider.get("pk")
         if not isinstance(provider_id, int):
             raise AuthentikManagementError("authentik provider identifier is invalid")
-        slug = self.application_slug(application_id, environment)
+        slug = self.application_slug(application_id, environment, version)
         try:
             await self._json_request(
                 "POST",
                 "/core/applications/",
                 json={
-                    "name": f"{application_name} ({environment})",
+                    "name": f"{application_name} ({environment}, credential v{version})",
                     "slug": slug,
                     "provider": provider_id,
                     "backchannel_providers": [],

@@ -1,0 +1,19 @@
+[Unit]
+Description=Evaluate AI Hub production alerts
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ai-hub-operator
+Group=ai-hub-operator
+WorkingDirectory=/opt/ai-hub
+EnvironmentFile=/etc/ai-hub/monitor.env
+UMask=0077
+ExecStart=/opt/ai-hub/.venv/bin/ai-hub-monitor --rules /opt/ai-hub/deploy/operations/alert-rules.json --targets /opt/ai-hub/deploy/operations/production-targets.json --backup-directory /mnt/ai-hub-off-host-backups --state-file /var/lib/ai-hub-monitor/state.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadOnlyPaths=/mnt/ai-hub-off-host-backups
+ReadWritePaths=/var/lib/ai-hub-monitor

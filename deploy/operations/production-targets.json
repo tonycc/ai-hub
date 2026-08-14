@@ -1,0 +1,72 @@
+{
+  "$schema": "./production-targets.schema.json",
+  "schema_version": 1,
+  "timezone": "Asia/Shanghai",
+  "service_window": {
+    "days": ["MON", "TUE", "WED", "THU", "FRI"],
+    "start": "08:00",
+    "end": "20:00",
+    "planned_maintenance_notice_hours": 24
+  },
+  "deployment_tier": {
+    "id": "STANDARD_SINGLE_NODE",
+    "profile": "standard-events",
+    "topology": "single-host-docker-compose",
+    "off_host_backup_required": true
+  },
+  "slo": {
+    "monthly_availability_percent": 99.5,
+    "public_api_p95_ms": 500,
+    "public_api_p99_ms": 1500,
+    "minimum_test_rps": 20,
+    "minimum_test_requests": 1000,
+    "maximum_server_error_percent": 1.0,
+    "event_backlog_warning": 100,
+    "event_backlog_critical": 1000,
+    "event_recovery_minutes": 15
+  },
+  "recovery": {
+    "rpo_minutes": 60,
+    "rto_minutes": 120,
+    "projection_rto_minutes": 240,
+    "backup_interval_minutes": 60
+  },
+  "retention": {
+    "audit_days": 365,
+    "notification_days": 90,
+    "portal_session_days_after_expiry": 7,
+    "conformance_days_after_expiry": 7,
+    "published_outbox_days": 7,
+    "inbox_days": 30,
+    "backup_hourly_count": 168,
+    "backup_daily_days": 35
+  },
+  "alert_routes": {
+    "platform-runtime": {
+      "primary": "platform-operator",
+      "backup": "platform-owner",
+      "acknowledge_minutes": 15
+    },
+    "identity-security": {
+      "primary": "security-owner",
+      "backup": "platform-owner",
+      "acknowledge_minutes": 15
+    },
+    "data-recovery": {
+      "primary": "data-owner",
+      "backup": "platform-operator",
+      "acknowledge_minutes": 30
+    },
+    "application-integration": {
+      "primary": "application-owner",
+      "backup": "platform-operator",
+      "acknowledge_minutes": 30
+    }
+  },
+  "ha_upgrade_triggers": {
+    "availability_percent": 99.9,
+    "rpo_minutes": 5,
+    "rto_minutes": 30,
+    "sustained_rps": 100
+  }
+}

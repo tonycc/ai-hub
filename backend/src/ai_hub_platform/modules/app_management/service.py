@@ -117,13 +117,34 @@ class ApplicationManagementService:
                            c.provider_external_id, c.status AS credential_status,
                            c.version AS credential_version, c.secret_hint,
                            c.created_at AS credential_created_at,
-                           c.last_rotated_at, c.revoked_at, c.expires_at
+                           c.last_rotated_at, c.revoke_after, c.revoked_at, c.expires_at
                     FROM platform_core.application_environment AS e
                     LEFT JOIN platform_core.application_credential AS c
                       ON c.application_id = e.application_id
                      AND c.environment = e.environment
+                     AND c.status = 'ACTIVE'
                     WHERE e.application_id = :application_id
                     ORDER BY e.environment
+                    """
+                    ),
+                    {"application_id": application_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        credential_rows = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT credential_id, application_id, environment, client_id,
+                           issuer, provider_external_id, status, version, secret_hint,
+                           created_at, last_rotated_at, revoke_after, revoked_at,
+                           expires_at
+                    FROM platform_core.application_credential
+                    WHERE application_id = :application_id
+                    ORDER BY environment, version DESC
                     """
                     ),
                     {"application_id": application_id},
@@ -170,7 +191,16 @@ class ApplicationManagementService:
             .all()
         )
         result = dict(application)
-        result["environments"] = [dict(row) for row in environment_rows]
+        credentials_by_environment: dict[str, list[dict[str, Any]]] = {}
+        for row in credential_rows:
+            credentials_by_environment.setdefault(str(row["environment"]), []).append(dict(row))
+        result["environments"] = [
+            {
+                **dict(row),
+                "credentials": credentials_by_environment.get(str(row["environment"]), []),
+            }
+            for row in environment_rows
+        ]
         result["scopes"] = [dict(row) for row in scopes]
         result["releases"] = [dict(row) for row in releases]
         return result
@@ -267,21 +297,28 @@ class ApplicationManagementService:
         version: str,
         status: str,
     ) -> dict[str, Any]:
-        await self._require_application(session, application_id)
-        credential_client_id = await session.scalar(
-            sa.text(
-                """
+        await self._lock_application(session, application_id)
+        credential_client_ids = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
                 SELECT client_id
                 FROM platform_core.application_credential
                 WHERE application_id = :application_id AND environment = :environment
-                  AND status = 'ACTIVE'
-                """
-            ),
-            {"application_id": application_id, "environment": environment},
+                  AND status IN ('ACTIVE', 'DRAINING')
+                ORDER BY version DESC
+                        """
+                    ),
+                    {"application_id": application_id, "environment": environment},
+                )
+            )
+            .scalars()
+            .all()
         )
-        if isinstance(credential_client_id, str):
+        for credential_client_id in credential_client_ids:
             await authentik.update_redirects(
-                client_id=credential_client_id,
+                client_id=str(credential_client_id),
                 redirect_uris=redirect_uris,
             )
         await session.execute(
@@ -324,7 +361,7 @@ class ApplicationManagementService:
         application_id: str,
         scope_codes: list[str],
     ) -> dict[str, Any]:
-        await self._require_application(session, application_id)
+        await self._lock_application(session, application_id)
         unique_scopes = sorted(set(scope_codes))
         if unique_scopes:
             count = await session.scalar(
@@ -346,7 +383,8 @@ class ApplicationManagementService:
                     sa.text(
                         """
                     SELECT client_id FROM platform_core.application_credential
-                    WHERE application_id = :application_id AND status = 'ACTIVE'
+                    WHERE application_id = :application_id
+                      AND status IN ('ACTIVE', 'DRAINING')
                     """
                     ),
                     {"application_id": application_id},
@@ -410,7 +448,13 @@ class ApplicationManagementService:
         *,
         application_id: str,
         environment: str,
-    ) -> ProvisionedCredential:
+    ) -> tuple[ProvisionedCredential, int]:
+        await self._lock_application(session, application_id)
+        await self._lock_environment(
+            session,
+            application_id=application_id,
+            environment=environment,
+        )
         application = await self.get_application(session, application_id=application_id)
         environment_record = next(
             (item for item in application["environments"] if item["environment"] == environment),
@@ -418,10 +462,19 @@ class ApplicationManagementService:
         )
         if environment_record is None:
             raise ApplicationManagementNotFoundError("Application environment was not found")
-        if environment_record.get("credential_id") is not None:
+        if await self._active_credential_exists(
+            session,
+            application_id=application_id,
+            environment=environment,
+        ):
             raise ApplicationManagementConflictError(
                 "Application environment already has a credential"
             )
+        version = await self._next_credential_version(
+            session,
+            application_id=application_id,
+            environment=environment,
+        )
         scopes = [scope["scope_code"] for scope in application["scopes"]]
         provisioned = await authentik.provision(
             application_id=application_id,
@@ -430,6 +483,7 @@ class ApplicationManagementService:
             launch_url=environment_record["portal_url"],
             redirect_uris=list(environment_record["oidc_redirect_uris"]),
             scopes=scopes,
+            version=version,
         )
         await session.execute(
             sa.text(
@@ -440,7 +494,7 @@ class ApplicationManagementService:
                      secret_hint)
                 VALUES
                     (:credential_id, :application_id, :environment, :client_id,
-                     :service_subject, :issuer, :provider_external_id, 'ACTIVE', 1,
+                     :service_subject, :issuer, :provider_external_id, 'ACTIVE', :version,
                      :secret_hint)
                 """
             ),
@@ -452,10 +506,11 @@ class ApplicationManagementService:
                 "service_subject": provisioned.service_subject,
                 "issuer": provisioned.issuer,
                 "provider_external_id": provisioned.provider_id,
+                "version": version,
                 "secret_hint": provisioned.client_secret[-4:],
             },
         )
-        return provisioned
+        return provisioned, version
 
     async def rotate_credential(
         self,
@@ -464,7 +519,14 @@ class ApplicationManagementService:
         *,
         application_id: str,
         environment: str,
-    ) -> tuple[dict[str, Any], str]:
+        overlap_seconds: int,
+    ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        await self._lock_application(session, application_id)
+        await self._lock_environment(
+            session,
+            application_id=application_id,
+            environment=environment,
+        )
         credential = await self._credential(
             session,
             application_id=application_id,
@@ -472,34 +534,103 @@ class ApplicationManagementService:
         )
         if credential["status"] != "ACTIVE":
             raise ApplicationManagementValidationError("Only an active credential can be rotated")
-        client_secret = await authentik.rotate(client_id=credential["client_id"])
-        row = (
+        if credential["provider_external_id"] is None:
+            raise ApplicationManagementValidationError(
+                "Bootstrap credentials are deployment-managed and cannot be rotated here"
+            )
+        if await self._draining_credential_exists(
+            session,
+            application_id=application_id,
+            environment=environment,
+        ):
+            raise ApplicationManagementConflictError(
+                "Revoke the previous draining credential before another rotation"
+            )
+        application = await self.get_application(session, application_id=application_id)
+        environment_record = next(
+            (item for item in application["environments"] if item["environment"] == environment),
+            None,
+        )
+        if environment_record is None:
+            raise ApplicationManagementNotFoundError("Application environment was not found")
+        next_version = await self._next_credential_version(
+            session,
+            application_id=application_id,
+            environment=environment,
+        )
+        scopes = [scope["scope_code"] for scope in application["scopes"]]
+        provisioned = await authentik.provision(
+            application_id=application_id,
+            application_name=application["name"],
+            environment=environment,
+            launch_url=environment_record["portal_url"],
+            redirect_uris=list(environment_record["oidc_redirect_uris"]),
+            scopes=scopes,
+            version=next_version,
+        )
+        draining = (
             (
                 await session.execute(
                     sa.text(
                         """
-                    UPDATE platform_core.application_credential
-                    SET version = version + 1,
-                        secret_hint = :secret_hint,
-                        last_rotated_at = CURRENT_TIMESTAMP,
-                        revoked_at = NULL,
-                        status = 'ACTIVE'
-                    WHERE credential_id = :credential_id
-                    RETURNING credential_id, application_id, environment, client_id,
-                              issuer, provider_external_id, status, version, secret_hint,
-                              created_at, last_rotated_at, revoked_at, expires_at
-                    """
+                UPDATE platform_core.application_credential
+                SET status = 'DRAINING',
+                    revoke_after = CURRENT_TIMESTAMP
+                        + make_interval(secs => :overlap_seconds),
+                    last_rotated_at = CURRENT_TIMESTAMP
+                WHERE credential_id = :credential_id
+                  AND status = 'ACTIVE'
+                RETURNING credential_id, application_id, environment, client_id,
+                          issuer, provider_external_id, status, version, secret_hint,
+                          created_at, last_rotated_at, revoke_after, revoked_at,
+                          expires_at
+                        """
                     ),
                     {
                         "credential_id": credential["credential_id"],
-                        "secret_hint": client_secret[-4:],
+                        "overlap_seconds": overlap_seconds,
                     },
                 )
             )
             .mappings()
             .one()
         )
-        return dict(row), client_secret
+        row = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    INSERT INTO platform_core.application_credential
+                        (credential_id, application_id, environment, client_id,
+                         service_subject, issuer, provider_external_id, status, version,
+                         secret_hint, last_rotated_at)
+                    VALUES
+                        (:credential_id, :application_id, :environment, :client_id,
+                         :service_subject, :issuer, :provider_external_id, 'ACTIVE',
+                         :version, :secret_hint, CURRENT_TIMESTAMP)
+                    RETURNING credential_id, application_id, environment, client_id,
+                              issuer, provider_external_id, status, version, secret_hint,
+                              created_at, last_rotated_at, revoke_after, revoked_at,
+                              expires_at
+                    """
+                    ),
+                    {
+                        "credential_id": uuid4(),
+                        "application_id": application_id,
+                        "environment": environment,
+                        "client_id": provisioned.client_id,
+                        "service_subject": provisioned.service_subject,
+                        "issuer": provisioned.issuer,
+                        "provider_external_id": provisioned.provider_id,
+                        "version": next_version,
+                        "secret_hint": provisioned.client_secret[-4:],
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return dict(row), provisioned.client_secret, dict(draining)
 
     async def revoke_credential(
         self,
@@ -508,14 +639,61 @@ class ApplicationManagementService:
         *,
         application_id: str,
         environment: str,
+        credential_id: UUID | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
-        credential = await self._credential(
+        await self._lock_application(session, application_id)
+        await self._lock_environment(
             session,
             application_id=application_id,
             environment=environment,
         )
+        if credential_id is None:
+            current_count = await session.scalar(
+                sa.text(
+                    """
+                    SELECT COUNT(*)
+                    FROM platform_core.application_credential
+                    WHERE application_id = :application_id
+                      AND environment = :environment
+                      AND status IN ('ACTIVE', 'DRAINING')
+                    """
+                ),
+                {"application_id": application_id, "environment": environment},
+            )
+            if int(current_count or 0) > 1:
+                raise ApplicationManagementValidationError(
+                    "credential_id is required while a rotation overlap is active"
+                )
+        credential = await self._credential(
+            session,
+            application_id=application_id,
+            environment=environment,
+            credential_id=credential_id,
+        )
         if credential["status"] == "REVOKED":
             return credential
+        if credential["provider_external_id"] is None:
+            raise ApplicationManagementValidationError(
+                "Bootstrap credentials are deployment-managed and cannot be revoked here"
+            )
+        eligible = await session.scalar(
+            sa.text(
+                """
+                SELECT status = 'ACTIVE'
+                       OR :force
+                       OR revoke_after IS NULL
+                       OR revoke_after <= CURRENT_TIMESTAMP
+                FROM platform_core.application_credential
+                WHERE credential_id = :credential_id
+                """
+            ),
+            {"credential_id": credential["credential_id"], "force": force},
+        )
+        if eligible is not True:
+            raise ApplicationManagementValidationError(
+                "Credential overlap window has not elapsed; use force only for an incident"
+            )
         await authentik.revoke(client_id=credential["client_id"])
         row = (
             (
@@ -523,12 +701,13 @@ class ApplicationManagementService:
                     sa.text(
                         """
                     UPDATE platform_core.application_credential
-                    SET status = 'REVOKED', version = version + 1,
-                        secret_hint = NULL, revoked_at = CURRENT_TIMESTAMP
+                    SET status = 'REVOKED', secret_hint = NULL,
+                        revoked_at = CURRENT_TIMESTAMP
                     WHERE credential_id = :credential_id
                     RETURNING credential_id, application_id, environment, client_id,
                               issuer, provider_external_id, status, version, secret_hint,
-                              created_at, last_rotated_at, revoked_at, expires_at
+                              created_at, last_rotated_at, revoke_after, revoked_at,
+                              expires_at
                     """
                     ),
                     {"credential_id": credential["credential_id"]},
@@ -738,6 +917,7 @@ class ApplicationManagementService:
         *,
         application_id: str,
         environment: str,
+        credential_id: UUID | None = None,
     ) -> dict[str, Any]:
         row = (
             (
@@ -746,13 +926,21 @@ class ApplicationManagementService:
                         """
                     SELECT credential_id, application_id, environment, client_id,
                            issuer, provider_external_id, status, version, secret_hint,
-                           created_at, last_rotated_at, revoked_at, expires_at
+                           created_at, last_rotated_at, revoke_after, revoked_at, expires_at
                     FROM platform_core.application_credential
                     WHERE application_id = :application_id
                       AND environment = :environment
+                      AND (CAST(:credential_id AS uuid) IS NULL
+                           OR credential_id = CAST(:credential_id AS uuid))
+                    ORDER BY (status = 'ACTIVE') DESC, version DESC
+                    LIMIT 1
                     """
                     ),
-                    {"application_id": application_id, "environment": environment},
+                    {
+                        "application_id": application_id,
+                        "environment": environment,
+                        "credential_id": credential_id,
+                    },
                 )
             )
             .mappings()
@@ -761,6 +949,72 @@ class ApplicationManagementService:
         if row is None:
             raise ApplicationManagementNotFoundError("Application credential was not found")
         return dict(row)
+
+    async def _active_credential_exists(
+        self,
+        session: AsyncSession,
+        *,
+        application_id: str,
+        environment: str,
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                sa.text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM platform_core.application_credential
+                        WHERE application_id = :application_id
+                          AND environment = :environment
+                          AND status = 'ACTIVE'
+                    )
+                    """
+                ),
+                {"application_id": application_id, "environment": environment},
+            )
+        )
+
+    async def _draining_credential_exists(
+        self,
+        session: AsyncSession,
+        *,
+        application_id: str,
+        environment: str,
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                sa.text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM platform_core.application_credential
+                        WHERE application_id = :application_id
+                          AND environment = :environment
+                          AND status = 'DRAINING'
+                    )
+                    """
+                ),
+                {"application_id": application_id, "environment": environment},
+            )
+        )
+
+    async def _next_credential_version(
+        self,
+        session: AsyncSession,
+        *,
+        application_id: str,
+        environment: str,
+    ) -> int:
+        version = await session.scalar(
+            sa.text(
+                """
+                SELECT COALESCE(MAX(version), 0) + 1
+                FROM platform_core.application_credential
+                WHERE application_id = :application_id
+                  AND environment = :environment
+                """
+            ),
+            {"application_id": application_id, "environment": environment},
+        )
+        return int(version or 1)
 
     async def _require_application(
         self,
@@ -779,3 +1033,44 @@ class ApplicationManagementService:
             {"application_id": application_id},
         ):
             raise ApplicationManagementNotFoundError("Application was not found")
+
+    async def _lock_application(
+        self,
+        session: AsyncSession,
+        application_id: str,
+    ) -> None:
+        locked = await session.scalar(
+            sa.text(
+                """
+                SELECT application_id
+                FROM platform_core.application
+                WHERE application_id = :application_id
+                FOR UPDATE
+                """
+            ),
+            {"application_id": application_id},
+        )
+        if locked is None:
+            raise ApplicationManagementNotFoundError("Application was not found")
+
+    async def _lock_environment(
+        self,
+        session: AsyncSession,
+        *,
+        application_id: str,
+        environment: str,
+    ) -> None:
+        locked = await session.scalar(
+            sa.text(
+                """
+                SELECT environment
+                FROM platform_core.application_environment
+                WHERE application_id = :application_id
+                  AND environment = :environment
+                FOR UPDATE
+                """
+            ),
+            {"application_id": application_id, "environment": environment},
+        )
+        if locked is None:
+            raise ApplicationManagementNotFoundError("Application environment was not found")

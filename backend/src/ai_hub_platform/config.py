@@ -176,11 +176,14 @@ class Settings(_PlatformSettings):
     authentik_external_url: str = "http://auth.localhost:8088"
     authentik_api_token: SecretStr = SecretStr("local-only-authentik-automation-api-token")
     authentik_provider_template_client_id: str = "ai-hub-platform"
+    credential_rotation_overlap_seconds: int = 300
     public_asset_root: str = "/workspace/public-assets"
     public_platform_base_url: str = "http://platform.localhost:8088"
     public_identity_base_url: str = "http://auth.localhost:8088"
     sandbox_application_id: str = "standalone-example"
     sandbox_user_subject: str = "ai-hub-demo-user"
+    monitor_token: SecretStr | None = None
+    production_targets_path: str = "deploy/operations/production-targets.json"
     operations_rabbitmq_management_url: str | None = None
     operations_rabbitmq_vhost: str = "ai-hub-local"
     operations_rabbitmq_username: str | None = None
@@ -244,6 +247,12 @@ class Settings(_PlatformSettings):
             raise ValueError("portal session and CSRF cookie names must be different")
         if not self.authentik_provider_template_client_id.strip():
             raise ValueError("authentik_provider_template_client_id cannot be empty")
+        minimum_overlap = 300 if strict else 1
+        if not minimum_overlap <= self.credential_rotation_overlap_seconds <= 3600:
+            raise ValueError(
+                "credential_rotation_overlap_seconds must be between "
+                f"{minimum_overlap} and 3600"
+            )
         _validate_redirect_uri(
             self.public_platform_base_url,
             field_name="public_platform_base_url",
@@ -257,6 +266,11 @@ class Settings(_PlatformSettings):
         _validate_application_id(self.sandbox_application_id)
         if not self.sandbox_user_subject.strip():
             raise ValueError("sandbox_user_subject cannot be empty")
+        if strict and self.monitor_token is not None:
+            if _has_placeholder_secret(self.monitor_token.get_secret_value()):
+                raise ValueError("monitor_token cannot use a placeholder outside local/test")
+        if not self.production_targets_path.strip():
+            raise ValueError("production_targets_path cannot be empty")
         operations_values = (
             self.operations_rabbitmq_management_url,
             self.operations_rabbitmq_username,

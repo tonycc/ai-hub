@@ -56,6 +56,7 @@ COPY backend/alembic-events.ini ./backend/alembic-events.ini
 COPY backend/alembic-projection.ini ./backend/alembic-projection.ini
 COPY backend/migrations ./backend/migrations
 COPY contracts ./public-assets/contracts
+COPY deploy/operations/production-targets.json ./deploy/operations/production-targets.json
 COPY docs/developer-integration-guide.md ./public-assets/docs/developer-integration-guide.md
 COPY examples/sdk ./public-assets/examples/sdk
 

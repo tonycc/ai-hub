@@ -31,7 +31,7 @@ x-standalone-app-environment: &standalone-app-environment
   STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS: ${STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS:-300}
 
 x-standalone-app-common: &standalone-app-common
-  image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+  image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
   build:
     context: ..
     dockerfile: examples/standalone-app/Dockerfile
@@ -78,7 +78,7 @@ services:
 
   platform-core-migrate:
     profiles: *core-profiles
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -97,7 +97,7 @@ services:
   platform-projection-migrate:
     profiles:
       - standard-events
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -116,7 +116,7 @@ services:
   platform-event-registration-migrate:
     profiles:
       - standard-events
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -134,7 +134,7 @@ services:
 
   platform-api:
     profiles: *core-profiles
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
@@ -160,11 +160,14 @@ services:
       AI_HUB_AUTHENTIK_EXTERNAL_URL: ${AI_HUB_AUTHENTIK_EXTERNAL_URL:-http://auth.localhost:8088}
       AI_HUB_AUTHENTIK_API_TOKEN: ${AI_HUB_AUTHENTIK_API_TOKEN:?Set AI_HUB_AUTHENTIK_API_TOKEN in .env}
       AI_HUB_AUTHENTIK_PROVIDER_TEMPLATE_CLIENT_ID: ${AI_HUB_AUTHENTIK_PROVIDER_TEMPLATE_CLIENT_ID:-ai-hub-platform}
+      AI_HUB_CREDENTIAL_ROTATION_OVERLAP_SECONDS: ${AI_HUB_CREDENTIAL_ROTATION_OVERLAP_SECONDS:-300}
       AI_HUB_PUBLIC_ASSET_ROOT: ${AI_HUB_PUBLIC_ASSET_ROOT:-/workspace/public-assets}
       AI_HUB_PUBLIC_PLATFORM_BASE_URL: ${AI_HUB_PUBLIC_PLATFORM_BASE_URL:-http://platform.localhost:8088}
       AI_HUB_PUBLIC_IDENTITY_BASE_URL: ${AI_HUB_PUBLIC_IDENTITY_BASE_URL:-http://auth.localhost:8088}
       AI_HUB_SANDBOX_APPLICATION_ID: ${AI_HUB_SANDBOX_APPLICATION_ID:-standalone-example}
       AI_HUB_SANDBOX_USER_SUBJECT: ${AI_HUB_SANDBOX_USER_SUBJECT:-ai-hub-demo-user}
+      AI_HUB_MONITOR_TOKEN: ${AI_HUB_MONITOR_TOKEN:?Set AI_HUB_MONITOR_TOKEN in .env}
+      AI_HUB_PRODUCTION_TARGETS_PATH: ${AI_HUB_PRODUCTION_TARGETS_PATH:-deploy/operations/production-targets.json}
       AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL: ${AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL:-}
       AI_HUB_OPERATIONS_RABBITMQ_VHOST: ${RABBITMQ_VHOST:-ai-hub-local}
       AI_HUB_OPERATIONS_RABBITMQ_USERNAME: ${RABBITMQ_OBSERVER_USER:-}
@@ -181,11 +184,13 @@ services:
       authentik-server:
         condition: service_healthy
     init: true
+    ports:
+      - "127.0.0.1:${AI_HUB_INTERNAL_API_PORT:-18080}:8000"
     restart: unless-stopped
 
   portal:
     profiles: *core-profiles
-    image: "${AI_HUB_PORTAL_IMAGE:-ai-hub-portal}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PORTAL_IMAGE_REF:-ai-hub-portal:local}"
     build:
       context: ..
       dockerfile: deploy/docker/portal.Dockerfile
@@ -205,7 +210,7 @@ services:
 
   standalone-migrate:
     profiles: *core-profiles
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -224,7 +229,7 @@ services:
   standalone-event-publisher-migrate:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -250,7 +255,7 @@ services:
   standalone-event-consumer-migrate:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -355,6 +360,33 @@ services:
         aliases:
           - standalone-app
 
+  authentik-storage-init:
+    profiles: *core-profiles
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2026.5.6@sha256:ed120caf710ccf82ef0026f0bc74e51615bc95ebff228a7a2d6fc60c441c3868}
+    user: "0:0"
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import os
+        from pathlib import Path
+
+        data = Path("/data")
+        media = Path("/data/media")
+        if media.is_symlink():
+            if media.readlink() != Path("/media"):
+                raise RuntimeError("refusing to replace an unexpected /data/media link")
+            media.unlink()
+        media.mkdir(parents=True, exist_ok=True)
+        os.chown(data, 1000, 1000)
+        os.chown(media, 1000, 1000)
+    volumes:
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
+    restart: "no"
+
   authentik-server:
     profiles: *core-profiles
     image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2026.5.6@sha256:ed120caf710ccf82ef0026f0bc74e51615bc95ebff228a7a2d6fc60c441c3868}
@@ -364,6 +396,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      authentik-storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "ak", "healthcheck"]
       interval: 10s
@@ -371,7 +405,11 @@ services:
       retries: 30
       start_period: 30s
     volumes:
-      - authentik-data:/data
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
     shm_size: 512mb
     restart: unless-stopped
 
@@ -403,7 +441,11 @@ services:
       retries: 30
       start_period: 30s
     volumes:
-      - authentik-data:/data
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
       - ./authentik/ai-hub-blueprint.yaml:/blueprints/ai-hub/ai-hub-blueprint.yaml:ro
     shm_size: 512mb
     restart: unless-stopped
@@ -492,7 +534,7 @@ services:
   standalone-outbox-publisher:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -517,7 +559,7 @@ services:
   standalone-event-consumer:
     profiles:
       - standard-events
-    image: "${STANDALONE_APP_IMAGE:-ai-hub-standalone-example}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
       dockerfile: examples/standalone-app/Dockerfile
@@ -542,7 +584,7 @@ services:
   platform-projection-worker:
     profiles:
       - standard-events
-    image: "${AI_HUB_PLATFORM_IMAGE:-ai-hub-platform}:${AI_HUB_IMAGE_TAG:-local}"
+    image: "${AI_HUB_PLATFORM_IMAGE_REF:-ai-hub-platform:local}"
     build:
       context: ..
       dockerfile: backend/Dockerfile
