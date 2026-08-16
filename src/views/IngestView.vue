@@ -139,7 +139,7 @@ async function runSync() {
 async function runReconcile() {
   const result = await mockIngestRunAction({ action: 'reconcile' })
   driftResult.value = result.drift || []
-  ElMessage.success(driftResult.value.length ? '对账完成：存在漂移（原型数据）' : '对账完成：无漂移')
+  ElMessage.success(driftResult.value.length ? '对账完成：存在漂移（模拟）' : '对账完成：无漂移')
   runs.value = await mockIngestListRuns()
 }
 
