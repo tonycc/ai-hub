@@ -2,13 +2,13 @@
 
 ## 1. 目的与适用范围
 
-本文用于在开发者本机验证 AI Hub 平台当前 M4.1 基线，覆盖：
+本文用于在开发者本机验证 AI Hub 平台当前基线（含 M7 数据汇聚），覆盖：
 
 - Python 单元测试、代码质量、严格类型和模块边界。
-- Vue 门户生产构建和两个 Docker Compose 部署档位。
+- Vue 门户生产构建与 `base-access` Docker Compose 部署档位。
 - authentik OIDC、平台 API、门户会话、权限、通知和审计链路。
 - 独立参考应用通过公开 API 接入平台的边界。
-- RabbitMQ、Outbox、Inbox、平台投影、重复与乱序、故障续传和重建链路。
+- 增量数据汇聚（导出、拉取、删除传播、对账与重建）；见 `scripts/ci/m7-runtime.sh`。
 - 平台管理员、应用开发者、安全审计员和平台运维四类角色的人工 UAT。
 - 发布前可选的恢复、监控、发布回滚、凭据轮换和韧性演练。
 
@@ -20,8 +20,8 @@
 
 1. 确认代码、工具和端口状态。
 2. 执行代码与部署静态门禁。
-3. 执行隔离的 M1 身份/API 和 M2 可靠事件运行门禁。
-4. 启动一个持久的 `standard-events` 本地环境。
+3. 执行隔离的 M1 身份/API 和 M7 数据汇聚运行门禁。
+4. 启动一个持久的 `base-access` 本地环境。
 5. 完成健康检查、四角色浏览器 UAT 和 API 冒烟测试。
 6. 发布前按需执行 M4 深度演练。
 7. 保存结果并停止或重置本地环境。
@@ -72,8 +72,6 @@ git status --porcelain
 | Traefik 统一入口 | 8088 |
 | 平台 API 主机回环入口 | 18080 |
 | PostgreSQL | 5433 |
-| RabbitMQ AMQP | 5672 |
-| RabbitMQ 管理端 | 15672 |
 
 M1 运行门禁固定使用 `8088`，因此执行自动运行门禁前必须停止占用该端口的持久本地环境。检查端口：
 
@@ -90,7 +88,7 @@ lsof -nP -iTCP:8088 -sTCP:LISTEN
 test -f .env || cp .env.example .env
 ```
 
-不要用该命令覆盖已经自定义的 `.env`。自动 M1/M2 门禁直接读取 `.env.example`，使用随机 Compose project name 和全新数据卷，成功或失败后默认自动清理，不会使用持久环境的命名卷。
+不要用该命令覆盖已经自定义的 `.env`。自动 M1/M7 门禁直接读取 `.env.example`，使用随机 Compose project name 和全新数据卷，成功或失败后默认自动清理，不会使用持久环境的命名卷。
 
 以下两种清理语义必须区分：
 
@@ -115,7 +113,7 @@ bash scripts/ci/all.sh
 4. Pyright strict。
 5. import-linter 模块边界。
 6. `npm ci` 和 Vue 生产构建。
-7. `base-access` 与 `standard-events` Compose 配置解析。
+7. `base-access` Compose 配置解析。
 
 Python 测试会在临时工作目录中运行，并把生产目标文件改为绝对路径；因此本地 Docker 所需的根 `.env` 不会污染配置默认值测试。临时目录在命令结束时自动删除。
 
