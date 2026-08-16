@@ -313,6 +313,24 @@ entries:
       description: Trigger a health check for the calling application registration.
       expression: "return {}"
 
+  - model: authentik_providers_oauth2.scopemapping
+    id: ai-hub-ingest-export-scope
+    identifiers:
+      name: AI Hub ai_hub.ingest.export
+    attrs:
+      scope_name: ai_hub.ingest.export
+      description: Pull application export APIs for platform incremental ingest.
+      expression: "return {}"
+
+  - model: authentik_providers_oauth2.scopemapping
+    id: platform-data-read-scope
+    identifiers:
+      name: AI Hub platform.data.read
+    attrs:
+      scope_name: platform.data.read
+      description: Read aggregated application current-state and change history.
+      expression: "return {}"
+
   - model: authentik_providers_oauth2.oauth2provider
     id: ai-hub-oauth-provider
     identifiers:
@@ -346,6 +364,8 @@ entries:
         - !KeyOf platform-authorization-decide-scope
         - !KeyOf platform-notification-request-scope
         - !KeyOf platform-application-health-scope
+        - !KeyOf ai-hub-ingest-export-scope
+        - !KeyOf platform-data-read-scope
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
 
   - model: authentik_core.application

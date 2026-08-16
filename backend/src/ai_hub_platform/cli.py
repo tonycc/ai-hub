@@ -19,7 +19,7 @@ from ai_hub_platform.modules.conformance.service import (
     ConformanceProfile,
     ConformanceService,
 )
-from ai_hub_platform.modules.ingest.rebuild import rebuild
+from ai_hub_platform.modules.ingest.rebuild import rebuild, sync_configured_source
 from ai_hub_platform.modules.ingest.reconcile import RebuildMode, reconcile_source
 from ai_hub_platform.modules.ingest.scheduler import run_ingest_scheduler
 
@@ -91,6 +91,33 @@ def run_ingest_rebuild_cli() -> None:
         )
     mode: RebuildMode = "log" if sys.argv[1] == "log" else "source"
     asyncio.run(_run_ingest_rebuild(mode, sys.argv[2], sys.argv[3]))
+
+
+async def _run_ingest_sync(
+    source_application_id: str,
+    object_type: str,
+    *,
+    force_full: bool,
+) -> None:
+    settings = get_raw_worker_settings()
+    result = await sync_configured_source(
+        settings,
+        source_application_id=source_application_id,
+        object_type=object_type,
+        force_full=force_full,
+    )
+    print(json.dumps(result, sort_keys=True, default=str))
+
+
+def run_ingest_sync_cli() -> None:
+    logging.config.dictConfig(json_log_config())
+    args = [argument for argument in sys.argv[1:] if argument != "--full"]
+    force_full = "--full" in sys.argv[1:]
+    if len(args) != 2:
+        raise SystemExit(
+            "usage: ai-hub-ingest-sync SOURCE_APPLICATION_ID OBJECT_TYPE [--full]"
+        )
+    asyncio.run(_run_ingest_sync(args[0], args[1], force_full=force_full))
 
 
 class RuntimeEvidenceProfile(BaseModel):

@@ -12,6 +12,7 @@ import pytest
 from ai_hub_platform.config import RawWorkerSettings
 from ai_hub_platform.modules.ingest.export_client import (
     EXPORT_SCOPE,
+    EXPORT_TOKEN_SCOPES,
     ExportClient,
     ExportClientError,
 )
@@ -261,6 +262,7 @@ async def test_export_client_fetches_page_with_bearer_and_scope_token() -> None:
     assert requests[0].headers["Authorization"] == "Bearer test-token"
     assert requests[0].url.params["object_type"] == "device"
     assert EXPORT_SCOPE == "ai_hub.ingest.export"
+    assert EXPORT_TOKEN_SCOPES == ("ai_hub.identity", "ai_hub.ingest.export")
     await client.close()
 
 

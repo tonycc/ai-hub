@@ -86,6 +86,8 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
         "platform.authorization.decide",
         "platform.notification.request",
         "platform.application.health.write",
+        "ai_hub.ingest.export",
+        "platform.data.read",
     ):
         assert f"scope_name: {scope}" in blueprint
 

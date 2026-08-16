@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本 | V0.4（评审修订版） |
+| 版本 | V1.0（M7 已实施） |
 | 本次变更 | 新增"数据汇聚"能力线：以贴源层（Raw/ODS）+ 定期增量拉取实现各业务应用数据向平台的汇聚，支撑统一治理与 AI 消费；**同时下线并删除 M2 实时事件投影能力线** |
 | 适用对象 | 产品、架构、前后端、数据、安全、运维团队 |
-| 关联基线 | [总体设计与实施](unified-internal-app-platform-product-and-implementation.md)、[实施计划](implementation-plan.md) |
-| 状态 | 设计阶段，未进入实施 |
+| 关联基线 | [总体设计与实施](unified-internal-app-platform-product-and-implementation.md)、[实施计划](implementation-plan.md)、[ADR-032](adr/ADR-032-incremental-ingestion-replaces-m2.md) |
+| 状态 | **已实施并合入 main**（M7-01～06）；开放问题见第 8 节 |
 
 ## 1. 背景与目标
 
@@ -371,9 +371,9 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 
 - 前置条件：M7-01 ~ M7-05 验收通过，增量汇聚能力已在至少一个参考场景验证达标；确认无在运行的应用依赖 M2 事件/投影能力。
 - 任务：按下线清单（第 9 节）删除 M2 代码、迁移、部署组件、CI 门禁、契约、SDK 事件模块与参考应用事件部分；从 `compose.yaml` 移除 RabbitMQ 与 `standard-events` 档位；清理 `platform_projection` Schema。**删除前打 git tag 归档（如 `archive/m2-event-projection`），并将事件契约（AsyncAPI / CloudEvents schema）归档保存**，供未来若出现实时需求时考古。
-- 产物：删除变更集；git tag `archive/m2-event-projection`；契约归档于 `docs/archive/m2-event-projection/`；唯一部署档位 `base-access`；静态门禁与单元测试通过。
-- 验证：`base-access` 档位从全新数据卷完整启动并通过 M1 及 M7 全部门禁；代码/配置路径无 RabbitMQ、Outbox、Inbox、projection、`standard-events` 能力残留（负向门禁测试除外）；备份/恢复流程不再包含 RabbitMQ 与投影库。
-- 状态：**已实施**（工作树）；运行时全量门禁待在干净数据卷上执行确认。
+- 产物：删除变更集；git tag `archive/m2-event-projection`；契约归档于 `docs/archive/m2-event-projection/`；唯一部署档位 `base-access`；静态门禁、单元测试与 `scripts/ci/m7-runtime.sh` 通过。
+- 验证：`base-access` 档位从全新数据卷完整启动并通过 M1 及 M7 运行时门禁；代码/配置路径无 RabbitMQ、Outbox、Inbox、projection、`standard-events` 能力残留（负向门禁测试除外）；备份/恢复流程不再包含 RabbitMQ 与投影库。
+- 状态：**已完成**（合入 `main`，PR #7）。
 
 ### 回滚与降级
 
@@ -458,4 +458,4 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 
 ---
 
-**下一步**：本方案评审通过后，按 M7-01 起逐步实施；M7-06 在增量汇聚验收达标后执行 M2 退役。同步更新[实施计划](implementation-plan.md)增加 M7 工作线，并在总体设计文档中登记"数据汇聚"为新的平台能力、标注 M2 已退役。**本架构决策（退役 M2、以批式汇聚承接）将另行编写一份 ADR**（延续 `docs/adr/` 惯例，如 ADR-031），记录背景、备选方案与不可逆性。
+**下一步**：M7 能力线已交付。后续优先：生产环境实例化（密钥/HTTPS/异机备份）；拍板第 8 节开放问题（同步周期、历史保留、大批量、重建触发）；按改口后的 M5 开展多消费方治理验证。事件契约考古见 `docs/archive/m2-event-projection/` 与 tag `archive/m2-event-projection`。

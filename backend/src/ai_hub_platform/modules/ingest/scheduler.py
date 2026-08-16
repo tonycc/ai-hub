@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ai_hub_platform.config import RawWorkerSettings
 from ai_hub_platform.modules.ingest.export_client import (
-    EXPORT_SCOPE,
+    EXPORT_TOKEN_SCOPES,
     ExportClient,
     ExportClientError,
     records_to_ingest,
@@ -393,7 +393,7 @@ async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
     )
 
     async def token_provider() -> str:
-        return await oidc.client_credentials_token((EXPORT_SCOPE,))
+        return await oidc.client_credentials_token(EXPORT_TOKEN_SCOPES)
 
     export_client = ExportClient(
         token_provider=token_provider,

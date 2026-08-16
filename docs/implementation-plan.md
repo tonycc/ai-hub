@@ -252,10 +252,33 @@ M4 退出条件：恢复、权限、性能、事件积压、凭据撤销和应�
 
 M4.1 退出条件：管理端不再展示原型记录或伪成功操作；平台配置只读且与权威目标文件一致；通知的“送达”明确表示站内测试通道记录成功，不表示邮件、短信或企业协作软件已实际投递；M5/M6 能力只显示未启用状态和启动条件。
 
-### 6.7 M5/M6：后续能力
+### 6.8 M7：增量数据汇聚（替代 M2 实时事件投影）
 
-- M5 多消费方治理：使用至少两套彼此独立的消费方配置验证 SDK、脚手架、兼容窗口、凭据隔离和公共能力复用；外部业务应用只作为平台的独立消费者，不是平台交付物。只有出现已批准的跨应用发现、统一搜索或 AI 数据需求时才启动语义目录、SourceBinding 和语义包。
-- M6 AI 增强：在数据来源、权限、评测和责任人已经就绪后，选择低风险用例接入模型、知识和受控工具；不反向改变 M0 至 M4 的应用和数据边界。
+目标：以贴源层（Raw/ODS）+ 平台拉取 + 位点实现应用数据向平台汇聚；验收达标后单向退役 M2 事件/投影能力线。设计见 [增量数据汇聚方案](incremental-data-ingestion-design.md) 与 [ADR-032](adr/ADR-032-incremental-ingestion-replaces-m2.md)。
+
+| 编号 | 任务 | 主要产物 | 依赖 | 状态 |
+| --- | --- | --- | --- | --- |
+| M7-01 | 贴源层 Schema、角色、迁移与批处理写入 | `platform_raw`、`IngestService`、raw Alembic | M4.1 | 已完成 |
+| M7-02 | 汇聚调度器（pull、回看窗口、full/incremental） | `ai-hub-ingest-scheduler`、`ingest-sources.json` | M7-01 | 已完成 |
+| M7-03 | 当前态读 API 与 `platform.data.read` | 平台/门户 data API、核心权限迁移 | M7-01 | 已完成 |
+| M7-04 | SDK 导出辅助、接入指南与 DATA_INGEST 认证 | SDK `export`、指南、一致性认证 | M7-02、M7-03 | 已完成 |
+| M7-05 | 对账与重建（日志重放 / 源 full） | `ai-hub-ingest-reconcile` / `rebuild`、手册 | M7-02 | 已完成 |
+| M7-06 | 退役 M2 实时事件投影并归档契约 | 删除事件/投影/RabbitMQ、`archive/m2-event-projection` | M7-01～05 | 已完成 |
+
+M7 必测场景：
+
+- 参考应用登记 `DATA_INGEST` 后，平台端无需为其定制建表即可同步 `example_record`。
+- 增量同步正确传播 upsert/delete；位点推进且重复同步不产生重复变更副作用。
+- full 重建对缺席对象合成墓碑；对账能发现人为漂移，日志重放可恢复当前态。
+- 当前态查询按 `platform.data.read` 鉴权并写审计。
+- `base-access` 为唯一部署档位；代码/配置路径无 RabbitMQ、Outbox/Inbox、投影能力残留。
+
+M7 退出条件：M7-01～06 产物合入受保护 `main`；`bash scripts/ci/m7-runtime.sh` 从全新数据卷通过；静态门禁与远端 Required gate（含 M7 runtime）通过。
+
+### 6.9 M5/M6：后续能力
+
+- M5 多消费方治理：在 M7 数据汇聚之上，使用至少两套彼此独立的消费方配置验证导出契约、`ai_hub.ingest.export` / `platform.data.read`、scope、位点隔离与公共能力复用；外部业务应用只作为平台的独立消费者，不是平台交付物。只有出现已批准的跨应用发现、统一搜索或 AI 数据需求时才启动语义目录、SourceBinding 和语义包。（原“事件多消费方”验证已随 M2 退役改口。）
+- M6 AI 增强：在数据来源、权限、评测和责任人已经就绪后，选择低风险用例接入模型、知识和受控工具；不反向改变 M0 至 M4 / M7 的应用和数据边界。
 
 ---
 
@@ -275,25 +298,15 @@ M4.1 退出条件：管理端不再展示原型记录或伪成功操作；平台
 
 具体路径以 OpenAPI 契约为准。实现前必须先更新 `contracts/api/platform-api.openapi.yaml`，破坏性变更使用新版本而不是原地修改消费方语义。
 
-### 7.2 首批事件契约
+### 7.2 数据汇聚契约（现行）
 
-首条示例事件采用业务中性名称，例如 `company.example.record.changed.v1`，只用于验证平台接入机制。信封至少包含：
+应用侧增量导出与平台读 API 以 OpenAPI / SDK 为准。核心约定：
 
-- `event_id`
-- `event_type`
-- `event_version`
-- `source`
-- `producer_application_id`
-- `subject`
-- `aggregate_version`
-- `object_type`
-- `occurred_at`
-- `trace_id`
-- `actor`
-- `data_classification`
-- `data`
+- 导出：`GET …/ai-hub/export`，scope `ai_hub.ingest.export`；记录含 `object_id` / `operation` / `version` / `payload`。
+- 消费：`GET /platform-api/v1/data/objects…`，权限 `platform.data.read`。
+- 运维源配置：`deploy/operations/ingest-sources.json`。
 
-`semantic_type` 和 `semantic_version` 是后续语义治理扩展字段，不是 M2 的必填前置条件。
+历史 M2 事件契约（AsyncAPI / CloudEvents）已归档至 `docs/archive/m2-event-projection/`，不再作为现行契约。
 
 ### 7.3 环境配置
 
@@ -411,5 +424,6 @@ bash scripts/ci/m2-runtime.sh
 - M4-05 已完成：统一生产目标加载、鉴权负载生成器和综合韧性门禁已落地。1000 个请求达到 25.015 RPS，p95 14.815 ms、p99 23.045 ms且无 5xx；20 个慢探针未阻塞正常 API，RabbitMQ 和 PostgreSQL 故障、1501 条关键积压、有限重试及双 DLQ 均按批准目标恢复，见 [M4 性能、安全与故障韧性演练报告](m4-resilience-drill-report.md)。
 - M4-06 已完成：实测容量、恢复和故障域均未触发高可用升级条件，首个生产档位继续采用 `STANDARD_SINGLE_NODE`；风险、升级顺序和复核机制见 [ADR-031](adr/ADR-031-standard-single-node-production-tier.md)，完整退出条件见 [M4 最终验收报告](m4-final-acceptance-report.md)。
 - M4.1 产品收尾已完成：受权限保护的生产目标 API 和只读配置即代码页面已替换原型配置；门户与能力状态已统一到 M4；模拟 Store、假记录和伪成功操作已删除；通知页面与公开契约明确当前只有 `IN_APP`/`LOCAL_REFERENCE` 站内测试通道，企业外部消息渠道未启用。
+- M7-01 至 M7-06 已完成：增量数据汇聚（Raw/ODS、调度器、读 API、SDK 导出、对账/重建）已落地；M2 实时事件投影已退役并归档（ADR-032、`archive/m2-event-projection`）；唯一部署档位为 `base-access`。运行时门禁见 `scripts/ci/m7-runtime.sh`。
 
-M0、M1、M2、M3、M4 和 M4.1 已完成。下一步是在具体生产环境完成密钥、HTTPS、异机备份、责任路由和目标主机门禁的部署实例化；随后按实际接入需求进入 M5 多消费方治理。API-only 应用继续只运行 `base-access`，不会因可靠事件能力被强制安装 Outbox、Inbox 或事件 Worker。后续变更通过 Pull Request 合入受保护的 `main`。
+M0、M1、M2（历史）、M3、M4、M4.1 和 M7 已完成。下一步是在具体生产环境完成密钥、HTTPS、异机备份、责任路由和目标主机门禁的部署实例化；随后按实际接入需求进入 M5 多消费方治理（围绕数据汇聚导出/读权限与位点隔离，而非已退役的事件能力）。API-only 应用继续只运行 `base-access`；需要向平台汇聚数据时登记 `DATA_INGEST`。后续变更通过 Pull Request 合入受保护的 `main`。

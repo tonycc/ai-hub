@@ -31,6 +31,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "m1-runtime",
+        "m7-runtime",
         "required-gate",
     }
     assert set(jobs["required-gate"]["needs"]) == {
@@ -38,6 +39,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "m1-runtime",
+        "m7-runtime",
     }
     assert jobs["required-gate"]["if"] == "${{ always() }}"
     assert jobs["required-gate"]["name"] == "Required gate"
@@ -81,6 +83,7 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     assert jobs["frontend"]["steps"][-1]["run"] == "bash scripts/ci/frontend.sh"
     assert jobs["deployment"]["steps"][-1]["run"] == "bash scripts/ci/deploy.sh"
     assert jobs["m1-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m1-runtime.sh"
+    assert jobs["m7-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m7-runtime.sh"
 
 
 def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
@@ -103,6 +106,7 @@ def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
     assert "--profile base-access config --quiet" in scripts["deploy"]
     assert "--profile standard-events" not in scripts["deploy"]
     assert "m2-runtime" not in scripts["all"]
+    assert "m7-runtime.sh" in scripts["all"]
     for child_script in ("python.sh", "frontend.sh", "deploy.sh"):
         assert child_script in scripts["all"]
 
@@ -117,6 +121,19 @@ def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
         "find_spec('ai_hub_platform') is None",
     ):
         assert scenario in m1_runtime
+
+    m7_runtime = (PROJECT_ROOT / "scripts/ci/m7-runtime.sh").read_text(encoding="utf-8")
+    assert "set -euo pipefail" in m7_runtime
+    for scenario in (
+        "ai-hub-ingest-sync",
+        "ai-hub-ingest-reconcile",
+        "ai-hub-ingest-rebuild log",
+        "platform-raw-migrate",
+        "M7_EDGE_PORT",
+        "raw_current_state",
+        "m7-corrupt-extra",
+    ):
+        assert scenario in m7_runtime
 
     assert not (PROJECT_ROOT / "scripts/ci/m2-runtime.sh").exists()
     postgres_bootstrap = (

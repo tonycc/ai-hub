@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ai_hub_platform.modules.ingest.service import IngestRecord, Operation
 
 EXPORT_SCOPE = "ai_hub.ingest.export"
+IDENTITY_SCOPE = "ai_hub.identity"
+EXPORT_TOKEN_SCOPES = (IDENTITY_SCOPE, EXPORT_SCOPE)
 TokenProvider = Callable[[], Awaitable[str]]
 
 
