@@ -1,10 +1,10 @@
 # 独立应用接入指南
 
-本指南面向独立部署的企业 B 端应用。应用通过版本化 API 和按需事件接入平台，不共享平台源码、数据库账号、Cookie 或 Session 表。
+本指南面向独立部署的企业 B 端应用。应用通过版本化 API 与**数据汇聚导出接口**接入平台，不共享平台源码、数据库账号、Cookie 或 Session 表。
 
 ## 1. 从 API-only 开始
 
-默认只登记 `API_CLIENT`，无需 RabbitMQ、Outbox、Inbox 或事件 Worker：
+默认只登记 `API_CLIENT`，无需消息队列或事件基础设施：
 
 1. 在应用中心登记应用和每个环境的入口、严格回调 URI 与版本。
 2. 仅选择实际需要的 OAuth scope。
@@ -15,14 +15,38 @@
 
 Python 最小示例见开发者目录中的 `api-only-python`。服务通知请求必须携带唯一幂等键；失败需按公开错误码处理，不得静默丢弃。
 
-## 2. 按需启用事件
+## 2. 数据汇聚（推荐）
 
-- `EVENT_PUBLISHER`：已经发生且需要可靠传播的业务事实；业务写入与 Outbox 同一事务。
-- `EVENT_CONSUMER`：事件会产生本地持久化副作用时使用 Inbox 幂等消费。
-- `PROJECTION_SOURCE`：来源应用提供可校验快照，支持平台只读投影重建。
-- `PROJECTION_READER`：只读平台投影；详情与权威判断仍回源应用 API。
+需要把业务对象同步到平台供治理 / AI 消费时，登记能力 `DATA_INGEST`，实现增量导出接口。平台按位点拉取，应用无需维护消息投递基础设施。
 
-API-only 应用不要创建事件表。启用事件的环境使用独立 RabbitMQ 凭据和 vhost 权限，不能复用 OAuth 客户端密钥。
+### 2.1 导出接口
+
+```
+GET {app_base_url}/ai-hub/export?object_type={type}&since_version={n}&limit={n}
+```
+
+- 认证：平台服务身份 Bearer 令牌。
+- 授权：必须校验专用 scope `ai_hub.ingest.export`（不能只校验“令牌合法”）。
+- 响应信封固定：`object_type`、`payload_contract_version`、`records[]`、`has_more`、`high_watermark`。
+- 每条记录：`object_id`、`operation`（`upsert` | `delete`）、`version`、`payload`（delete 时为 `null`）。
+
+Python 辅助见 SDK：`ExportPage` / `ExportRecord` / `paginate_export_records` / `require_export_scope` / `PayloadContract`。参考应用示例：`GET /ai-hub/export`（`example_record`）。
+
+### 2.2 硬要求
+
+1. **`version` 在 (应用, 对象类型) 全序单调**，且与**事务提交顺序**一致（或接受平台安全回看窗口）。
+2. **删除必须显式上报**（软删变更日志 / `operation=delete`），不能只靠“下次全量里消失”。
+3. 按 `since_version` 增量查询，结果按 `version` 有序。
+4. 同一对象同一版本只出现一次。
+5. **payload 契约化**：字段经过筛选/脱敏并登记 `payload_contract_version`，禁止直接 dump 表行。
+
+### 2.3 首次接入
+
+1. 登记应用 + 对象类型 + payload 契约，初始化位点 `last_version = 0`。
+2. 平台跑一次 `full` 建基线（对缺席对象合成删除墓碑）。
+3. 转入 `incremental`，按周期拉取；失败不推进位点，下次重拉（幂等去重）。
+
+消费侧（治理 / AI）使用 `platform.data.read` 查询当前态与历史，见 `examples/sdk/data_read.py`。
 
 ## 3. 故障与安全边界
 
@@ -30,8 +54,10 @@ API-only 应用不要创建事件表。启用事件的环境使用独立 RabbitM
 - authentik 短时不可用时，本地 JWKS 缓存只在配置的陈旧窗口内继续验证已签发令牌。
 - 凭据轮换后立即替换应用密钥并清除令牌缓存；吊销后平台服务主体绑定会立即拒绝已签发令牌。
 - 传播 `X-Request-ID` 和 `X-Trace-ID`，排障时使用审计中心关联，不在日志中记录令牌、Cookie 或密钥。
-- 每个环境分别登记回调、scope、凭据、数据库角色和事件权限；生产与非生产不共享凭据或数据。
+- 每个环境分别登记回调、scope、凭据与数据库角色；生产与非生产不共享凭据或数据。
 
 ## 4. 一致性认证
 
-提交上线前分别运行已启用能力的认证配置：API-only、事件发布、事件消费、投影。未启用能力应显示为“不适用”，不能为了通过认证而安装无用基础设施。
+提交上线前分别运行已启用能力的认证配置：`API_ONLY`、`DATA_INGEST`。未启用能力应显示为“不适用”，不能为了通过认证而安装无用基础设施。
+
+`DATA_INGEST` 运行时证据须证明：导出接口可达且校验 `ai_hub.ingest.export`、version 全序单调、回看窗口下无漏拉、删除可捕获、幂等正确、payload 符合已登记契约。

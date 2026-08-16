@@ -65,6 +65,7 @@ class PortalPrincipal:
 @dataclass(frozen=True, slots=True)
 class LoginTransaction:
     code_verifier: str
+    nonce: str
     redirect_path: str
 
 
@@ -98,6 +99,7 @@ class PortalSessionService:
         *,
         state: str,
         code_verifier: str,
+        nonce: str,
         redirect_path: str,
         ttl_seconds: int,
     ) -> None:
@@ -115,14 +117,15 @@ class PortalSessionService:
             sa.text(
                 """
                 INSERT INTO platform_core.portal_login_transaction
-                    (state_hash, code_verifier, redirect_path, expires_at)
+                    (state_hash, code_verifier, nonce, redirect_path, expires_at)
                 VALUES
-                    (:state_hash, :code_verifier, :redirect_path, :expires_at)
+                    (:state_hash, :code_verifier, :nonce, :redirect_path, :expires_at)
                 """
             ),
             {
                 "state_hash": secret_hash(state),
                 "code_verifier": code_verifier,
+                "nonce": nonce,
                 "redirect_path": redirect_path,
                 "expires_at": now + timedelta(seconds=ttl_seconds),
             },
@@ -142,7 +145,7 @@ class PortalSessionService:
                     DELETE FROM platform_core.portal_login_transaction
                     WHERE state_hash = :state_hash
                       AND expires_at > CURRENT_TIMESTAMP
-                    RETURNING code_verifier, redirect_path
+                    RETURNING code_verifier, nonce, redirect_path
                     """
                     ),
                     {"state_hash": secret_hash(state)},
@@ -157,6 +160,7 @@ class PortalSessionService:
             )
         return LoginTransaction(
             code_verifier=row["code_verifier"],
+            nonce=row["nonce"],
             redirect_path=row["redirect_path"],
         )
 

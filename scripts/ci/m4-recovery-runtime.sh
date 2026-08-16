@@ -10,8 +10,6 @@ M4_RECOVERY_PROJECT_NAME="ai-hub-m4-recovery-$PPID-$$"
 M4_RECOVERY_WORK_DIR="$(mktemp -d /tmp/ai-hub-m4-recovery.XXXXXX)"
 M4_RECOVERY_EDGE_PORT="${M4_RECOVERY_EDGE_PORT:-18090}"
 M4_RECOVERY_POSTGRES_PORT="${M4_RECOVERY_POSTGRES_PORT:-15436}"
-M4_RECOVERY_RABBITMQ_PORT="${M4_RECOVERY_RABBITMQ_PORT:-25674}"
-M4_RECOVERY_RABBITMQ_MANAGEMENT_PORT="${M4_RECOVERY_RABBITMQ_MANAGEMENT_PORT:-15675}"
 M4_RECOVERY_PLATFORM_MARKER="m4-recovery-platform-source"
 M4_RECOVERY_APP_MARKER="M4 recovery application source"
 M4_RECOVERY_AUTH_MARKER="M4 recovery identity source"
@@ -20,12 +18,6 @@ M4_RECOVERY_PYTHON="${M4_RECOVERY_PYTHON:-${M4_RECOVERY_PROJECT_ROOT}/.venv/bin/
 
 export AI_HUB_EDGE_PORT="${M4_RECOVERY_EDGE_PORT}"
 export AI_HUB_POSTGRES_PORT="${M4_RECOVERY_POSTGRES_PORT}"
-export AI_HUB_RABBITMQ_PORT="${M4_RECOVERY_RABBITMQ_PORT}"
-export AI_HUB_RABBITMQ_MANAGEMENT_PORT="${M4_RECOVERY_RABBITMQ_MANAGEMENT_PORT}"
-export AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL="http://rabbitmq:15672"
-export AI_HUB_OPERATIONS_RABBITMQ_USERNAME="platform_observer"
-export AI_HUB_OPERATIONS_RABBITMQ_PASSWORD="local-only-rabbitmq-observer-password"
-export RABBITMQ_OBSERVER_PASSWORD="local-only-rabbitmq-observer-password"
 export AI_HUB_ENVIRONMENT="test"
 
 m4_recovery_compose() {
@@ -33,7 +25,7 @@ m4_recovery_compose() {
     --project-name "${M4_RECOVERY_PROJECT_NAME}" \
     --env-file "${M4_RECOVERY_ENV_FILE}" \
     -f "${M4_RECOVERY_COMPOSE_FILE}" \
-    --profile standard-events \
+    --profile base-access \
     "$@"
 }
 
@@ -131,10 +123,7 @@ m4_recovery_wait_scalar() {
 
 m4_recovery_assert_migrations() {
   for m4_recovery_migration in \
-    platform-core-migrate platform-event-registration-migrate \
-    platform-projection-migrate standalone-migrate \
-    standalone-publisher-db-bootstrap standalone-consumer-db-bootstrap \
-    standalone-event-publisher-migrate standalone-event-consumer-migrate; do
+    platform-core-migrate platform-raw-migrate standalone-migrate; do
     m4_recovery_container_id="$(m4_recovery_compose ps -a -q \
       "${m4_recovery_migration}")"
     [[ -n "${m4_recovery_container_id}" ]] \
@@ -173,7 +162,7 @@ done
 
 cd "${M4_RECOVERY_PROJECT_ROOT}"
 
-m4_recovery_note "starting a fresh isolated standard-events deployment"
+m4_recovery_note "starting a fresh isolated base-access deployment"
 if [[ "${M4_RECOVERY_SKIP_BUILD:-0}" == "1" ]]; then
   m4_recovery_compose up -d --no-build
 else
@@ -181,8 +170,7 @@ else
 fi
 m4_recovery_assert_migrations
 for m4_recovery_service in postgres authentik-server platform-api \
-  standalone-app-events rabbitmq standalone-outbox-publisher \
-  standalone-event-consumer platform-projection-worker traefik; do
+  standalone-app platform-ingest-scheduler traefik; do
   m4_recovery_wait_service "${m4_recovery_service}" "initial deployment"
 done
 m4_recovery_wait_scalar authentik_db \
@@ -208,7 +196,7 @@ AI_HUB_BACKUP_KEY_BASE64="$("${M4_RECOVERY_PYTHON}" -c \
 m4_recovery_backup_json="$(m4_recovery_backup create \
   --compose-file "${M4_RECOVERY_COMPOSE_FILE}" \
   --env-file "${M4_RECOVERY_ENV_FILE}" \
-  --profile standard-events \
+  --profile base-access \
   --project-name "${M4_RECOVERY_PROJECT_NAME}" \
   --output-dir "${M4_RECOVERY_WORK_DIR}" \
   --storage-class local-drill)"
@@ -240,11 +228,11 @@ m4_recovery_wait_service postgres "isolated restore target"
 m4_recovery_restore_json="$(m4_recovery_backup restore \
   --compose-file "${M4_RECOVERY_COMPOSE_FILE}" \
   --env-file "${M4_RECOVERY_ENV_FILE}" \
-  --profile standard-events \
+  --profile base-access \
   --project-name "${M4_RECOVERY_PROJECT_NAME}" \
   --confirm-replace \
   "${m4_recovery_archive}")"
-jq --exit-status '.restored == true and (.migration_versions | length == 6)' \
+jq --exit-status '.restored == true and (.migration_versions["platform_core.alembic_version"] != null) and (.migration_versions["platform_raw.alembic_version"] != null)' \
   <<<"${m4_recovery_restore_json}" >/dev/null \
   || m4_recovery_fail "restore verification did not pass"
 
@@ -267,9 +255,8 @@ m4_recovery_note "verifying all restored facts before application startup"
 m4_recovery_note "restarting the profile and validating service and role boundaries"
 m4_recovery_compose up -d --no-build
 m4_recovery_assert_migrations
-for m4_recovery_service in authentik-server platform-api standalone-app-events \
-  rabbitmq standalone-outbox-publisher standalone-event-consumer \
-  platform-projection-worker traefik; do
+for m4_recovery_service in authentik-server platform-api standalone-app \
+  platform-ingest-scheduler traefik; do
   m4_recovery_wait_service "${m4_recovery_service}" "restored deployment"
 done
 m4_recovery_psql postgres \
@@ -297,7 +284,7 @@ jq -n \
     encrypted_archive_verified: true,
     databases_restored: 3,
     authentik_data_restored: true,
-    migration_heads_verified: 6,
+    migration_heads_verified: true,
     role_boundaries_verified: true,
     tool_restore_seconds: $tool_restore_seconds,
     total_recovery_seconds: $total_recovery_seconds,

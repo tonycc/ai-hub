@@ -31,7 +31,6 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "m1-runtime",
-        "m2-runtime",
         "required-gate",
     }
     assert set(jobs["required-gate"]["needs"]) == {
@@ -39,10 +38,10 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "m1-runtime",
-        "m2-runtime",
     }
     assert jobs["required-gate"]["if"] == "${{ always() }}"
     assert jobs["required-gate"]["name"] == "Required gate"
+    assert "m2-runtime" not in jobs
 
 
 def test_ci_external_actions_are_pinned_to_full_commit_shas() -> None:
@@ -82,7 +81,6 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     assert jobs["frontend"]["steps"][-1]["run"] == "bash scripts/ci/frontend.sh"
     assert jobs["deployment"]["steps"][-1]["run"] == "bash scripts/ci/deploy.sh"
     assert jobs["m1-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m1-runtime.sh"
-    assert jobs["m2-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m2-runtime.sh"
 
 
 def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
@@ -103,7 +101,8 @@ def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
     assert "npm ci" in scripts["frontend"]
     assert "npm run build" in scripts["frontend"]
     assert "--profile base-access config --quiet" in scripts["deploy"]
-    assert "--profile standard-events config --quiet" in scripts["deploy"]
+    assert "--profile standard-events" not in scripts["deploy"]
+    assert "m2-runtime" not in scripts["all"]
     for child_script in ("python.sh", "frontend.sh", "deploy.sh"):
         assert child_script in scripts["all"]
 
@@ -119,17 +118,9 @@ def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
     ):
         assert scenario in m1_runtime
 
-    m2_runtime = (PROJECT_ROOT / "scripts/ci/m2-runtime.sh").read_text(encoding="utf-8")
-    for scenario in (
-        "base-access unexpectedly includes",
-        "rollback must disappear",
-        "broker outage retention and recovery",
-        "crash before database commit",
-        "crash after commit but before acknowledgement",
-        "version gap was not made explicit",
-        "snapshot watermark rebuild from an empty projection schema",
-        "an older snapshot was allowed to roll back an installed checkpoint",
-        "Outbox publisher database role can modify application business data",
-        "platform API role can modify source-derived projection",
-    ):
-        assert scenario in m2_runtime
+    assert not (PROJECT_ROOT / "scripts/ci/m2-runtime.sh").exists()
+    postgres_bootstrap = (
+        PROJECT_ROOT / "deploy/postgres/bootstrap/enable-raw-ingest.sql"
+    ).read_text(encoding="utf-8")
+    assert "Outbox publisher" not in postgres_bootstrap
+    assert "ai_hub_raw" in postgres_bootstrap

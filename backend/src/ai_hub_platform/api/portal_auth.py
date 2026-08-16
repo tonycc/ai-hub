@@ -1,24 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import secrets
 from datetime import UTC, datetime
 from typing import Annotated, cast
 from urllib.parse import quote
 
 from ai_hub_sdk import OAuthProtocolError, OidcClient, OidcTokenValidator, TokenValidationError
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ai_hub_platform.api.dependencies import (
+    PortalCsrfDependency,
     PortalPrincipalDependency,
     SessionDependency,
-    portal_permission_dependency,
 )
+from ai_hub_platform.api.errors import ApiError
 from ai_hub_platform.modules.audit.service import AuditRecord, AuditService
 from ai_hub_platform.modules.portal.service import (
     PortalIdentityNotFoundError,
     PortalLoginTransactionError,
-    PortalPrincipal,
     PortalSessionService,
 )
 
@@ -71,6 +73,38 @@ def _error_redirect(error_code: str) -> RedirectResponse:
     return RedirectResponse(f"/?auth_error={quote(error_code)}", status_code=302)
 
 
+def _oidc_logout_url(request: Request) -> str:
+    settings = request.app.state.settings
+    endpoint = f"{settings.portal_oidc_issuer.rstrip('/')}/end-session/"
+    return (
+        f"{endpoint}?client_id={quote(settings.portal_oidc_client_id)}"
+        f"&post_logout_redirect_uri={quote(settings.portal_oidc_logout_redirect_uri, safe='')}"
+    )
+
+
+async def _create_authorization_request(
+    request: Request,
+    redirect_uri: str,
+    nonce: str,
+):
+    """Create an authorization request while Authentik finishes starting up."""
+
+    oidc_client = _oidc_client(request)
+    for attempt in range(3):
+        try:
+            return await oidc_client.create_authorization_request(
+                redirect_uri,
+                scopes=PORTAL_LOGIN_SCOPES,
+                nonce=nonce,
+            )
+        except OAuthProtocolError as error:
+            if error.error_code != "identity_provider_unavailable" or attempt == 2:
+                raise ApiError(503, error.error_code, error.message) from error
+            await asyncio.sleep(0.5 * (attempt + 1))
+
+    raise AssertionError("authorization request retry loop did not return")
+
+
 @auth_router.get("/login")
 async def login(
     request: Request,
@@ -78,14 +112,17 @@ async def login(
     return_to: Annotated[str, Query(max_length=500)] = "/",
 ) -> RedirectResponse:
     settings = request.app.state.settings
-    authorization = await _oidc_client(request).create_authorization_request(
+    nonce = secrets.token_urlsafe(32)
+    authorization = await _create_authorization_request(
+        request,
         settings.portal_oidc_redirect_uri,
-        scopes=PORTAL_LOGIN_SCOPES,
+        nonce,
     )
     await PortalSessionService().create_login_transaction(
         session,
         state=authorization.state,
         code_verifier=authorization.code_verifier,
+        nonce=nonce,
         redirect_path=_safe_return_path(return_to),
         ttl_seconds=settings.portal_login_ttl_seconds,
     )
@@ -195,16 +232,7 @@ async def _append_login_audit(
 async def logout(
     request: Request,
     session: SessionDependency,
-    principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.developer.read",
-                application_parameter=None,
-                require_csrf=True,
-            )
-        ),
-    ],
+    principal: PortalCsrfDependency,
 ) -> Response:
     settings = request.app.state.settings
     await PortalSessionService().revoke_session(
@@ -227,6 +255,13 @@ async def logout(
     response.delete_cookie(settings.portal_csrf_cookie_name, path="/")
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@auth_router.get("/logout")
+async def logout_redirect(request: Request) -> RedirectResponse:
+    """End the upstream OIDC session after the platform session is revoked."""
+
+    return RedirectResponse(_oidc_logout_url(request), status_code=302)
 
 
 @session_router.get("/session", response_model=PortalSessionResponse)

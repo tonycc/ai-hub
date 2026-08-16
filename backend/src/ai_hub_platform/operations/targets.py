@@ -21,9 +21,6 @@ class SloTargets:
     minimum_test_rps: float
     minimum_test_requests: int
     maximum_server_error_percent: float
-    event_backlog_warning: int
-    event_backlog_critical: int
-    event_recovery_minutes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +43,6 @@ class ServiceWindowTargets:
 class RecoveryTargets:
     rpo_minutes: int
     rto_minutes: int
-    projection_rto_minutes: int
     backup_interval_minutes: int
 
 
@@ -56,8 +52,6 @@ class RetentionTargets:
     notification_days: int
     portal_session_days_after_expiry: int
     conformance_days_after_expiry: int
-    published_outbox_days: int
-    inbox_days: int
     backup_hourly_count: int
     backup_daily_days: int
 
@@ -239,9 +233,6 @@ def load_production_targets(path_value: str) -> ProductionTargets:
                 "minimum_test_rps",
                 "minimum_test_requests",
                 "maximum_server_error_percent",
-                "event_backlog_warning",
-                "event_backlog_critical",
-                "event_recovery_minutes",
             }
         ),
         context="slo",
@@ -249,7 +240,7 @@ def load_production_targets(path_value: str) -> ProductionTargets:
     _exact_keys(
         recovery,
         required=frozenset(
-            {"rpo_minutes", "rto_minutes", "projection_rto_minutes", "backup_interval_minutes"}
+            {"rpo_minutes", "rto_minutes", "backup_interval_minutes"}
         ),
         context="recovery",
     )
@@ -261,8 +252,6 @@ def load_production_targets(path_value: str) -> ProductionTargets:
                 "notification_days",
                 "portal_session_days_after_expiry",
                 "conformance_days_after_expiry",
-                "published_outbox_days",
-                "inbox_days",
                 "backup_hourly_count",
                 "backup_daily_days",
             }
@@ -296,14 +285,10 @@ def load_production_targets(path_value: str) -> ProductionTargets:
             minimum_test_rps=_integer(slo, "minimum_test_rps"),
             minimum_test_requests=_integer(slo, "minimum_test_requests"),
             maximum_server_error_percent=_number(slo, "maximum_server_error_percent"),
-            event_backlog_warning=_integer(slo, "event_backlog_warning"),
-            event_backlog_critical=_integer(slo, "event_backlog_critical"),
-            event_recovery_minutes=_integer(slo, "event_recovery_minutes"),
         ),
         recovery=RecoveryTargets(
             rpo_minutes=_positive_integer(recovery, "rpo_minutes"),
             rto_minutes=_positive_integer(recovery, "rto_minutes"),
-            projection_rto_minutes=_positive_integer(recovery, "projection_rto_minutes"),
             backup_interval_minutes=_positive_integer(recovery, "backup_interval_minutes"),
         ),
         retention=RetentionTargets(
@@ -315,8 +300,6 @@ def load_production_targets(path_value: str) -> ProductionTargets:
             conformance_days_after_expiry=_positive_integer(
                 retention, "conformance_days_after_expiry"
             ),
-            published_outbox_days=_positive_integer(retention, "published_outbox_days"),
-            inbox_days=_positive_integer(retention, "inbox_days"),
             backup_hourly_count=_positive_integer(retention, "backup_hourly_count"),
             backup_daily_days=_positive_integer(retention, "backup_daily_days"),
         ),
@@ -330,7 +313,7 @@ def load_production_targets(path_value: str) -> ProductionTargets:
     )
     if targets.deployment_tier != "STANDARD_SINGLE_NODE":
         raise ProductionTargetsError("Unsupported production deployment tier")
-    if targets.profile not in {"base-access", "standard-events"}:
+    if targets.profile not in {"base-access"}:
         raise ProductionTargetsError("Unsupported production deployment profile")
     if targets.timezone != "Asia/Shanghai":
         raise ProductionTargetsError("Unsupported production timezone")
@@ -363,10 +346,6 @@ def load_production_targets(path_value: str) -> ProductionTargets:
         raise ProductionTargetsError("Load-test size and rate targets are below the minimum")
     if not 0 <= targets.slo.maximum_server_error_percent <= 10:
         raise ProductionTargetsError("Server error target must be a percentage")
-    if not 0 < targets.slo.event_backlog_warning < targets.slo.event_backlog_critical:
-        raise ProductionTargetsError("Event backlog targets are inconsistent")
-    if targets.slo.event_recovery_minutes <= 0:
-        raise ProductionTargetsError("Event recovery target must be positive")
     if targets.recovery.backup_interval_minutes > targets.recovery.rpo_minutes:
         raise ProductionTargetsError("Backup interval cannot exceed the RPO target")
     if not 99 <= targets.ha_upgrade_triggers.availability_percent <= 100:

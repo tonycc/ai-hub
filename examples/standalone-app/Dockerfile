@@ -51,8 +51,6 @@ WORKDIR /workspace
 
 COPY --from=builder /workspace/.venv /workspace/.venv
 COPY examples/standalone-app/alembic.ini ./examples/standalone-app/alembic.ini
-COPY examples/standalone-app/alembic-event-publisher.ini ./examples/standalone-app/alembic-event-publisher.ini
-COPY examples/standalone-app/alembic-event-consumer.ini ./examples/standalone-app/alembic-event-consumer.ini
 COPY examples/standalone-app/migrations ./examples/standalone-app/migrations
 
 USER standalone

@@ -5,7 +5,7 @@ from logging.config import fileConfig
 
 from ai_hub_platform.config import (
     get_core_migration_settings,
-    get_projection_migration_settings,
+    get_raw_migration_settings,
 )
 from alembic import context
 from sqlalchemy import pool
@@ -24,10 +24,10 @@ version_table_schema = config.get_main_option("version_table_schema") or None
 
 
 def get_migration_database_url() -> str:
-    if migration_target in {"core", "events"}:
+    if migration_target == "core":
         return get_core_migration_settings().migration_database_url
-    if migration_target == "projection":
-        return get_projection_migration_settings().projection_migration_database_url
+    if migration_target == "raw":
+        return get_raw_migration_settings().raw_migration_database_url
     raise RuntimeError(f"Unsupported migration target: {migration_target}")
 
 

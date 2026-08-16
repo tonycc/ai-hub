@@ -4,7 +4,6 @@ from datetime import datetime
 from secrets import compare_digest
 from typing import Annotated, Literal, cast
 
-import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 
@@ -47,15 +46,11 @@ class SloTargetsResponse(ApiModel):
     minimum_test_rps: float
     minimum_test_requests: int
     maximum_server_error_percent: float
-    event_backlog_warning: int
-    event_backlog_critical: int
-    event_recovery_minutes: int
 
 
 class RecoveryTargetsResponse(ApiModel):
     rpo_minutes: int
     rto_minutes: int
-    projection_rto_minutes: int
     backup_interval_minutes: int
 
 
@@ -64,8 +59,6 @@ class RetentionTargetsResponse(ApiModel):
     notification_days: int
     portal_session_days_after_expiry: int
     conformance_days_after_expiry: int
-    published_outbox_days: int
-    inbox_days: int
     backup_hourly_count: int
     backup_daily_days: int
 
@@ -112,33 +105,10 @@ class ApplicationEntryDiagnostic(ApiModel):
     reason: str
 
 
-class EventQueueDiagnostic(ApiModel):
-    queue_name: str
-    messages_ready: int
-    messages_unacknowledged: int
-    consumer_count: int
-    status: DiagnosticStatus
-    reason: str
-
-
-class ProjectionDiagnostic(ApiModel):
-    application_id: str
-    application_name: str
-    last_source_sequence: int
-    last_snapshot_watermark: int
-    updated_at: datetime
-    open_gap_count: int
-    checkpoint_age_seconds: int
-    status: DiagnosticStatus
-    reason: str
-
-
 class OperationsSummaryResponse(ApiModel):
     observed_at: datetime
     overall_status: Literal["HEALTHY", "DEGRADED"]
     application_entries: list[ApplicationEntryDiagnostic]
-    event_queues: list[EventQueueDiagnostic]
-    projections: list[ProjectionDiagnostic]
     runbook_path: str
 
 
@@ -173,14 +143,10 @@ def production_targets_response(
                 "minimum_test_rps": targets.slo.minimum_test_rps,
                 "minimum_test_requests": targets.slo.minimum_test_requests,
                 "maximum_server_error_percent": (targets.slo.maximum_server_error_percent),
-                "event_backlog_warning": targets.slo.event_backlog_warning,
-                "event_backlog_critical": targets.slo.event_backlog_critical,
-                "event_recovery_minutes": targets.slo.event_recovery_minutes,
             },
             "recovery": {
                 "rpo_minutes": targets.recovery.rpo_minutes,
                 "rto_minutes": targets.recovery.rto_minutes,
-                "projection_rto_minutes": targets.recovery.projection_rto_minutes,
                 "backup_interval_minutes": targets.recovery.backup_interval_minutes,
             },
             "retention": {
@@ -190,8 +156,6 @@ def production_targets_response(
                     targets.retention.portal_session_days_after_expiry
                 ),
                 "conformance_days_after_expiry": (targets.retention.conformance_days_after_expiry),
-                "published_outbox_days": targets.retention.published_outbox_days,
-                "inbox_days": targets.retention.inbox_days,
                 "backup_hourly_count": targets.retention.backup_hourly_count,
                 "backup_daily_days": targets.retention.backup_daily_days,
             },
@@ -244,20 +208,10 @@ async def operations_summary(
         ),
     ],
 ) -> OperationsSummaryResponse:
-    settings = request.app.state.settings
-    targets = _production_targets(request)
-    async with httpx.AsyncClient() as client:
-        summary = await OperationsService().summary(
-            session,
-            visible_application_ids=principal.application_scope("platform.application.read"),
-            rabbitmq_management_url=settings.operations_rabbitmq_management_url,
-            rabbitmq_vhost=settings.operations_rabbitmq_vhost,
-            rabbitmq_username=settings.operations_rabbitmq_username,
-            rabbitmq_password=settings.operations_rabbitmq_password,
-            http_client=client,
-            event_backlog_warning=targets.slo.event_backlog_warning,
-            event_backlog_critical=targets.slo.event_backlog_critical,
-        )
+    summary = await OperationsService().summary(
+        session,
+        visible_application_ids=principal.application_scope("platform.application.read"),
+    )
     return OperationsSummaryResponse.model_validate(summary)
 
 
@@ -275,7 +229,6 @@ async def internal_operations_summary(
     ] = None,
 ) -> OperationsSummaryResponse:
     settings = request.app.state.settings
-    targets = _production_targets(request)
     if settings.monitor_token is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -289,16 +242,8 @@ async def internal_operations_summary(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid monitor credential",
         )
-    async with httpx.AsyncClient() as client:
-        summary = await OperationsService().summary(
-            session,
-            visible_application_ids=None,
-            rabbitmq_management_url=settings.operations_rabbitmq_management_url,
-            rabbitmq_vhost=settings.operations_rabbitmq_vhost,
-            rabbitmq_username=settings.operations_rabbitmq_username,
-            rabbitmq_password=settings.operations_rabbitmq_password,
-            http_client=client,
-            event_backlog_warning=targets.slo.event_backlog_warning,
-            event_backlog_critical=targets.slo.event_backlog_critical,
-        )
+    summary = await OperationsService().summary(
+        session,
+        visible_application_ids=None,
+    )
     return OperationsSummaryResponse.model_validate(summary)

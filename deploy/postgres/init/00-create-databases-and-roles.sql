@@ -3,8 +3,8 @@
 \getenv authentik_password AUTHENTIK_DB_PASSWORD
 \getenv platform_migrator_password AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD
 \getenv platform_password AI_HUB_PLATFORM_DB_PASSWORD
-\getenv projection_migrator_password AI_HUB_PROJECTION_MIGRATOR_DB_PASSWORD
-\getenv projection_password AI_HUB_PROJECTION_DB_PASSWORD
+\getenv raw_migrator_password AI_HUB_RAW_MIGRATOR_DB_PASSWORD
+\getenv raw_password AI_HUB_RAW_DB_PASSWORD
 \getenv standalone_migrator_password STANDALONE_MIGRATOR_DB_PASSWORD
 \getenv standalone_password STANDALONE_APP_DB_PASSWORD
 
@@ -20,12 +20,12 @@ CREATE ROLE ai_hub_platform
     LOGIN PASSWORD :'platform_password'
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 
-CREATE ROLE ai_hub_projection_migrator
-    LOGIN PASSWORD :'projection_migrator_password'
+CREATE ROLE ai_hub_raw_migrator
+    LOGIN PASSWORD :'raw_migrator_password'
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 
-CREATE ROLE ai_hub_projection
-    LOGIN PASSWORD :'projection_password'
+CREATE ROLE ai_hub_raw
+    LOGIN PASSWORD :'raw_password'
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 
 CREATE ROLE standalone_app_migrator
@@ -46,8 +46,8 @@ REVOKE ALL ON DATABASE standalone_app_db FROM PUBLIC;
 
 GRANT CONNECT, TEMPORARY ON DATABASE authentik_db TO authentik;
 GRANT CONNECT, TEMPORARY ON DATABASE platform_db TO ai_hub_platform_migrator;
-GRANT CONNECT, TEMPORARY ON DATABASE platform_db TO ai_hub_projection_migrator;
-GRANT CONNECT ON DATABASE platform_db TO ai_hub_platform, ai_hub_projection;
+GRANT CONNECT, TEMPORARY ON DATABASE platform_db TO ai_hub_raw_migrator;
+GRANT CONNECT ON DATABASE platform_db TO ai_hub_platform, ai_hub_raw;
 GRANT CONNECT, TEMPORARY ON DATABASE standalone_app_db TO standalone_app_migrator;
 GRANT CONNECT ON DATABASE standalone_app_db TO standalone_app;
 
@@ -61,36 +61,36 @@ ALTER SCHEMA public OWNER TO authentik;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 CREATE SCHEMA platform_core AUTHORIZATION ai_hub_platform_migrator;
-CREATE SCHEMA platform_projection AUTHORIZATION ai_hub_projection_migrator;
+CREATE SCHEMA platform_raw AUTHORIZATION ai_hub_raw_migrator;
 
 REVOKE ALL ON SCHEMA platform_core FROM PUBLIC;
-REVOKE ALL ON SCHEMA platform_projection FROM PUBLIC;
+REVOKE ALL ON SCHEMA platform_raw FROM PUBLIC;
 
 GRANT USAGE ON SCHEMA platform_core TO ai_hub_platform;
-GRANT USAGE ON SCHEMA platform_projection TO ai_hub_platform, ai_hub_projection;
-REVOKE ALL ON SCHEMA platform_core FROM ai_hub_projection_migrator, ai_hub_projection;
-REVOKE ALL ON SCHEMA platform_projection FROM ai_hub_platform_migrator;
+GRANT USAGE ON SCHEMA platform_raw TO ai_hub_platform, ai_hub_raw;
+REVOKE ALL ON SCHEMA platform_core FROM ai_hub_raw_migrator, ai_hub_raw;
+REVOKE ALL ON SCHEMA platform_raw FROM ai_hub_platform_migrator;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_platform_migrator IN SCHEMA platform_core
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ai_hub_platform;
 ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_platform_migrator IN SCHEMA platform_core
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ai_hub_platform;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_projection_migrator IN SCHEMA platform_projection
+ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_raw_migrator IN SCHEMA platform_raw
     GRANT SELECT ON TABLES TO ai_hub_platform;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_projection_migrator IN SCHEMA platform_projection
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ai_hub_projection;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_projection_migrator IN SCHEMA platform_projection
-    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ai_hub_projection;
+ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_raw_migrator IN SCHEMA platform_raw
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ai_hub_raw;
+ALTER DEFAULT PRIVILEGES FOR ROLE ai_hub_raw_migrator IN SCHEMA platform_raw
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ai_hub_raw;
 
 ALTER ROLE ai_hub_platform_migrator IN DATABASE platform_db
     SET search_path TO platform_core, public;
 ALTER ROLE ai_hub_platform IN DATABASE platform_db
-    SET search_path TO platform_core, platform_projection, public;
-ALTER ROLE ai_hub_projection_migrator IN DATABASE platform_db
-    SET search_path TO platform_projection, public;
-ALTER ROLE ai_hub_projection IN DATABASE platform_db
-    SET search_path TO platform_projection, public;
+    SET search_path TO platform_core, platform_raw, public;
+ALTER ROLE ai_hub_raw_migrator IN DATABASE platform_db
+    SET search_path TO platform_raw, public;
+ALTER ROLE ai_hub_raw IN DATABASE platform_db
+    SET search_path TO platform_raw, public;
 
 \connect standalone_app_db
 

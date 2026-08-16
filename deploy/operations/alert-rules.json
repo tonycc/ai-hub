@@ -41,48 +41,6 @@
       "runbook": "docs/runbooks/alert-response.md#application-entry-critical"
     },
     {
-      "id": "event-consumer-missing",
-      "severity": "P1",
-      "source": "operations_summary",
-      "condition": { "operator": "eq", "value": "NO_CONSUMER" },
-      "for_seconds": 60,
-      "route": "platform-runtime",
-      "runbook": "docs/runbooks/alert-response.md#event-consumer-missing"
-    },
-    {
-      "id": "event-backlog-warning",
-      "severity": "P2",
-      "source": "operations_summary",
-      "condition": {
-        "operator": "gt",
-        "target_path": "slo.event_backlog_warning"
-      },
-      "for_seconds": 180,
-      "route": "application-integration",
-      "runbook": "docs/runbooks/alert-response.md#event-backlog"
-    },
-    {
-      "id": "event-backlog-critical",
-      "severity": "P1",
-      "source": "operations_summary",
-      "condition": {
-        "operator": "gt",
-        "target_path": "slo.event_backlog_critical"
-      },
-      "for_seconds": 60,
-      "route": "platform-runtime",
-      "runbook": "docs/runbooks/alert-response.md#event-backlog"
-    },
-    {
-      "id": "projection-gap-open",
-      "severity": "P1",
-      "source": "operations_summary",
-      "condition": { "operator": "gt", "value": 0 },
-      "for_seconds": 60,
-      "route": "application-integration",
-      "runbook": "docs/runbooks/alert-response.md#projection-gap-open"
-    },
-    {
       "id": "backup-rpo-breached",
       "severity": "P0",
       "source": "backup_freshness",

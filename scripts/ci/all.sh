@@ -10,5 +10,4 @@ bash "${SCRIPT_DIR}/deploy.sh"
 
 if [[ "${AI_HUB_RUN_RUNTIME_GATES:-0}" == "1" ]]; then
   bash "${SCRIPT_DIR}/m1-runtime.sh"
-  bash "${SCRIPT_DIR}/m2-runtime.sh"
 fi

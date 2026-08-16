@@ -1,0 +1,25 @@
+version: 1
+metadata:
+  name: AI Hub local debug portal redirect URIs
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    identifiers:
+      name: ai-hub-portal
+    state: present
+    attrs:
+      redirect_uris:
+        - matching_mode: strict
+          url: http://platform.localhost:8088/auth/callback
+          redirect_uri_type: authorization
+        - matching_mode: strict
+          url: http://platform.localhost:8088/
+          redirect_uri_type: logout
+        - matching_mode: strict
+          url: http://localhost:4173/auth/callback
+          redirect_uri_type: authorization
+        - matching_mode: strict
+          url: http://localhost:4173/
+          redirect_uri_type: logout

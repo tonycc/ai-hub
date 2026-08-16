@@ -29,9 +29,9 @@ def test_production_targets_match_their_schema_and_safety_invariants() -> None:
         "rpo_minutes"
     ]
     assert targets["slo"]["public_api_p95_ms"] <= targets["slo"]["public_api_p99_ms"]
-    assert targets["slo"]["event_backlog_warning"] < targets["slo"][
-        "event_backlog_critical"
-    ]
+    assert targets["deployment_tier"]["profile"] == "base-access"
+    assert "event_backlog_warning" not in targets["slo"]
+    assert "projection_rto_minutes" not in targets["recovery"]
     assert targets["deployment_tier"]["off_host_backup_required"] is True
 
 
@@ -75,10 +75,14 @@ def test_retention_keeps_hourly_and_daily_recovery_points() -> None:
     assert keep | delete == {path for path, _ in backups}
 
 
-def test_standard_events_backup_requires_its_dynamic_database_roles() -> None:
-    assert set(role_names_for_profile("standard-events")) - set(
-        role_names_for_profile("base-access")
-    ) == {"standalone_outbox_publisher", "standalone_event_consumer"}
+def test_base_access_backup_requires_only_base_database_roles() -> None:
+    roles = set(role_names_for_profile("base-access"))
+    assert "standalone_outbox_publisher" not in roles
+    assert "standalone_event_consumer" not in roles
+    assert "ai_hub_raw" in roles
+    assert "standalone_app" in roles
+    with pytest.raises(BackupError, match="Unsupported backup profile"):
+        role_names_for_profile("standard-events")
 
 
 def test_systemd_backup_uses_off_host_storage_and_persistent_timers() -> None:

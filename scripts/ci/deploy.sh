@@ -10,5 +10,3 @@ cd "${PROJECT_ROOT}"
 docker compose version
 docker compose --env-file .env.example -f deploy/compose.yaml \
   --profile base-access config --quiet
-docker compose --env-file .env.example -f deploy/compose.yaml \
-  --profile standard-events config --quiet

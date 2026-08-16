@@ -484,6 +484,7 @@ def upgrade() -> None:
         "portal_login_transaction",
         sa.Column("state_hash", sa.String(length=64), nullable=False),
         sa.Column("code_verifier", sa.String(length=160), nullable=False),
+        sa.Column("nonce", sa.String(length=128), nullable=False),
         sa.Column("redirect_path", sa.Text(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(

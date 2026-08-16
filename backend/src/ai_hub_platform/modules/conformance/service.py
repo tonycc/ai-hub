@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -12,19 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 ConformanceProfile = Literal[
     "API_ONLY",
-    "EVENT_PUBLISHER",
-    "EVENT_CONSUMER",
-    "PROJECTION_READER",
+    "DATA_INGEST",
 ]
 ConformanceStatus = Literal["PASSED", "FAILED", "NOT_APPLICABLE"]
 
-CONTRACT_VERSION = "m3-conformance-0.2.0"
+CONTRACT_VERSION = "m7-conformance-0.1.0"
 RUNTIME_EVIDENCE_TTL = timedelta(days=30)
 ALL_PROFILES: tuple[ConformanceProfile, ...] = (
     "API_ONLY",
-    "EVENT_PUBLISHER",
-    "EVENT_CONSUMER",
-    "PROJECTION_READER",
+    "DATA_INGEST",
 )
 API_REQUIRED_SCOPES = frozenset(
     {
@@ -32,6 +28,16 @@ API_REQUIRED_SCOPES = frozenset(
         "platform.application.read",
         "platform.me.read",
         "platform.notification.request",
+    }
+)
+DATA_INGEST_EVIDENCE_KEYS = frozenset(
+    {
+        "export_scope_enforced",
+        "version_monotonic",
+        "lookback_no_loss",
+        "delete_captured",
+        "idempotent_replay",
+        "payload_contract_ok",
     }
 )
 
@@ -73,11 +79,29 @@ class ConformanceService:
             raise ConformanceValidationError(
                 f"Runtime evidence contract must be {CONTRACT_VERSION}"
             )
-        allowed = {"EVENT_PUBLISHER", "EVENT_CONSUMER", "PROJECTION_READER"}
+        allowed = {"DATA_INGEST"}
         if not profiles or not set(profiles) <= allowed:
             raise ConformanceValidationError(
-                "Runtime evidence must contain only event or projection profiles"
+                "Runtime evidence must contain only data-ingest profiles"
             )
+        for profile, payload in profiles.items():
+            if profile == "DATA_INGEST" and payload.get("status") == "PASSED":
+                raw_evidence = payload.get("evidence")
+                if not isinstance(raw_evidence, dict):
+                    raise ConformanceValidationError(
+                        "Runtime evidence for DATA_INGEST is malformed"
+                    )
+                evidence = cast(dict[str, Any], raw_evidence)
+                missing = sorted(DATA_INGEST_EVIDENCE_KEYS - set(evidence))
+                if missing:
+                    raise ConformanceValidationError(
+                        "DATA_INGEST evidence is missing required keys: "
+                        + ", ".join(missing)
+                    )
+                if any(evidence.get(key) is not True for key in DATA_INGEST_EVIDENCE_KEYS):
+                    raise ConformanceValidationError(
+                        "DATA_INGEST evidence checks must all be true when status is PASSED"
+                    )
         now = datetime.now(UTC)
         if verified_at.tzinfo is None:
             raise ConformanceValidationError("verified_at must include a timezone")
@@ -268,9 +292,8 @@ class ConformanceService:
                     WHERE run_id = :run_id
                     ORDER BY CASE profile
                         WHEN 'API_ONLY' THEN 1
-                        WHEN 'EVENT_PUBLISHER' THEN 2
-                        WHEN 'EVENT_CONSUMER' THEN 3
-                        ELSE 4
+                        WHEN 'DATA_INGEST' THEN 2
+                        ELSE 3
                     END
                     """
                     ),
@@ -304,10 +327,6 @@ class ConformanceService:
         for profile in profiles:
             if profile == "API_ONLY":
                 checks.append(self._api_only_check(application))
-            elif profile == "EVENT_PUBLISHER":
-                checks.append(await self._runtime_profile_check(session, application, profile))
-            elif profile == "EVENT_CONSUMER":
-                checks.append(await self._runtime_profile_check(session, application, profile))
             else:
                 checks.append(await self._runtime_profile_check(session, application, profile))
 
@@ -481,8 +500,6 @@ class ConformanceService:
     ) -> ConformanceCheckResult:
         required_capability = profile
         enabled = required_capability in application["capabilities"]
-        if profile == "PROJECTION_READER":
-            enabled = bool({"PROJECTION_SOURCE", "PROJECTION_READER"} & application["capabilities"])
         if not enabled:
             return ConformanceCheckResult(
                 profile,

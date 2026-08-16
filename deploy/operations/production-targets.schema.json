@@ -41,7 +41,7 @@
       "required": ["id", "profile", "topology", "off_host_backup_required"],
       "properties": {
         "id": { "const": "STANDARD_SINGLE_NODE" },
-        "profile": { "enum": ["base-access", "standard-events"] },
+        "profile": { "const": "base-access" },
         "topology": { "const": "single-host-docker-compose" },
         "off_host_backup_required": { "const": true }
       }
@@ -55,10 +55,7 @@
         "public_api_p99_ms",
         "minimum_test_rps",
         "minimum_test_requests",
-        "maximum_server_error_percent",
-        "event_backlog_warning",
-        "event_backlog_critical",
-        "event_recovery_minutes"
+        "maximum_server_error_percent"
       ],
       "properties": {
         "monthly_availability_percent": { "type": "number", "minimum": 99, "maximum": 100 },
@@ -66,20 +63,16 @@
         "public_api_p99_ms": { "type": "integer", "minimum": 1 },
         "minimum_test_rps": { "type": "integer", "minimum": 1 },
         "minimum_test_requests": { "type": "integer", "minimum": 100 },
-        "maximum_server_error_percent": { "type": "number", "minimum": 0, "maximum": 10 },
-        "event_backlog_warning": { "type": "integer", "minimum": 1 },
-        "event_backlog_critical": { "type": "integer", "minimum": 1 },
-        "event_recovery_minutes": { "type": "integer", "minimum": 1 }
+        "maximum_server_error_percent": { "type": "number", "minimum": 0, "maximum": 10 }
       }
     },
     "recovery": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rpo_minutes", "rto_minutes", "projection_rto_minutes", "backup_interval_minutes"],
+      "required": ["rpo_minutes", "rto_minutes", "backup_interval_minutes"],
       "properties": {
         "rpo_minutes": { "type": "integer", "minimum": 1 },
         "rto_minutes": { "type": "integer", "minimum": 1 },
-        "projection_rto_minutes": { "type": "integer", "minimum": 1 },
         "backup_interval_minutes": { "type": "integer", "minimum": 1 }
       }
     },
@@ -91,8 +84,6 @@
         "notification_days",
         "portal_session_days_after_expiry",
         "conformance_days_after_expiry",
-        "published_outbox_days",
-        "inbox_days",
         "backup_hourly_count",
         "backup_daily_days"
       ]

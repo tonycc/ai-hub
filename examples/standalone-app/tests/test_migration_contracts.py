@@ -24,37 +24,10 @@ def test_api_client_migration_creates_reference_record_with_m1_owner() -> None:
     assert "CREATE TABLE app.example_record" in sql
     assert "ADD COLUMN owner_subject" in sql
     assert "ADD COLUMN aggregate_version" in sql
+    assert "CREATE TABLE app.ingest_change_log" in sql
+    assert "CREATE TABLE app.ingest_version_counter" in sql
     assert "M1 ownership denial record" in sql
     assert "another-user" in sql
     assert "integration_outbox" not in sql
     assert "integration_inbox" not in sql
     assert "CREATE TABLE alembic_version" in sql
-
-
-def test_event_publisher_migration_only_creates_outbox() -> None:
-    sql = render_upgrade_sql("alembic-event-publisher.ini")
-
-    assert "CREATE TABLE app.integration_outbox" in sql
-    assert "ix_app_outbox_dispatch" in sql
-    assert "CREATE TABLE app.integration_source_state" in sql
-    assert "uq_app_outbox_source_sequence" in sql
-    assert "TO standalone_outbox_publisher" in sql
-    assert (
-        "REVOKE SELECT, UPDATE, DELETE ON app.integration_outbox FROM standalone_app"
-        in sql
-    )
-    assert "CREATE TABLE app.example_record" not in sql
-    assert "ALTER TABLE app.example_record" not in sql
-    assert "integration_inbox" not in sql
-    assert "alembic_version_event_publisher" in sql
-
-
-def test_event_consumer_migration_only_creates_inbox() -> None:
-    sql = render_upgrade_sql("alembic-event-consumer.ini")
-
-    assert "CREATE TABLE app.integration_inbox" in sql
-    assert "CREATE TABLE app.integration_consumer_effect" in sql
-    assert "TO standalone_event_consumer" in sql
-    assert "example_record" not in sql
-    assert "integration_outbox" not in sql
-    assert "alembic_version_event_consumer" in sql

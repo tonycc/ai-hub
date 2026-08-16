@@ -19,7 +19,6 @@ M4_RELEASE_GATE_IDS=(
   frontend
   deployment
   identity-runtime
-  events-runtime
   recovery-runtime
   observability-runtime
   credential-rotation-runtime
@@ -233,14 +232,6 @@ M4_RELEASE_OPENAPI_SHA="$(
   m4_release_sha256 \
     "${M4_RELEASE_PROJECT_ROOT}/contracts/api/platform-api.openapi.yaml"
 )"
-M4_RELEASE_ASYNCAPI_SHA="$(
-  m4_release_sha256 \
-    "${M4_RELEASE_PROJECT_ROOT}/contracts/events/ai-hub.asyncapi.yaml"
-)"
-M4_RELEASE_CLOUDEVENT_SHA="$(
-  m4_release_sha256 \
-    "${M4_RELEASE_PROJECT_ROOT}/contracts/events/cloud-event.schema.json"
-)"
 
 jq -n \
   --arg release_id "${M4_RELEASE_PREVIOUS_ID}" \
@@ -251,8 +242,6 @@ jq -n \
   --arg lock_id "${M4_RELEASE_COMPONENT_LOCK_ID}" \
   --arg lock_sha "${M4_RELEASE_COMPONENT_LOCK_SHA}" \
   --arg openapi_sha "${M4_RELEASE_OPENAPI_SHA}" \
-  --arg asyncapi_sha "${M4_RELEASE_ASYNCAPI_SHA}" \
-  --arg cloudevent_sha "${M4_RELEASE_CLOUDEVENT_SHA}" \
   --arg backup_id "${M4_RELEASE_BACKUP_ID}" \
   --arg backup_receipt "${M4_RELEASE_BACKUP_RECEIPT}" \
   --arg backup_sha "${M4_RELEASE_BACKUP_SHA}" \
@@ -280,27 +269,17 @@ jq -n \
         phases: ["expand"],
         rollback_schema_compatible: true
       },
-      events: {
-        component: "events",
-        previous_head: "20260812_events_0001",
-        target_head: "20260812_events_0001",
-        revisions: [],
-        phases: [],
-        rollback_schema_compatible: true
-      },
-      projection: {
-        component: "projection",
-        previous_head: "20260812_projection_0002",
-        target_head: "20260812_projection_0002",
+      raw: {
+        component: "raw",
+        previous_head: "20260816_raw_0001",
+        target_head: "20260816_raw_0001",
         revisions: [],
         phases: [],
         rollback_schema_compatible: true
       }
     },
     contracts: {
-      "contracts/api/platform-api.openapi.yaml": $openapi_sha,
-      "contracts/events/ai-hub.asyncapi.yaml": $asyncapi_sha,
-      "contracts/events/cloud-event.schema.json": $cloudevent_sha
+      "contracts/api/platform-api.openapi.yaml": $openapi_sha
     },
     backup: {
       backup_id: $backup_id,

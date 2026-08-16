@@ -210,16 +210,7 @@ def evaluate_observations(
     backup_age_minutes: float | None,
     targets: dict[str, Any] | None = None,
 ) -> list[Observation]:
-    operating_targets = targets or {
-        "slo": {"event_backlog_warning": 100, "event_backlog_critical": 1000},
-        "recovery": {"rpo_minutes": 60},
-    }
-    backlog_warning = _condition_threshold(
-        rules["event-backlog-warning"], operating_targets
-    )
-    backlog_critical = _condition_threshold(
-        rules["event-backlog-critical"], operating_targets
-    )
+    operating_targets = targets or {"recovery": {"rpo_minutes": 60}}
     observations = [
         _observation(
             rules["platform-api-unready"],
@@ -262,51 +253,6 @@ def evaluate_observations(
                 object_id=object_id,
                 active=critical,
                 summary=str(entry.get("reason", "Application entry status changed")),
-            )
-        )
-    for raw_queue in cast(list[object], operations.get("event_queues", [])):
-        if not isinstance(raw_queue, dict):
-            continue
-        queue = cast(dict[str, Any], raw_queue)
-        queue_name = str(queue.get("queue_name", "unknown"))
-        backlog = int(queue.get("messages_ready", 0)) + int(
-            queue.get("messages_unacknowledged", 0)
-        )
-        consumers = int(queue.get("consumer_count", 0))
-        observations.extend(
-            [
-                _observation(
-                    rules["event-consumer-missing"],
-                    object_id=queue_name,
-                    active=consumers == 0,
-                    summary=f"Queue {queue_name} has {consumers} consumers",
-                ),
-                _observation(
-                    rules["event-backlog-warning"],
-                    object_id=queue_name,
-                    active=backlog_warning < backlog <= backlog_critical,
-                    summary=f"Queue {queue_name} backlog is {backlog}",
-                ),
-                _observation(
-                    rules["event-backlog-critical"],
-                    object_id=queue_name,
-                    active=backlog > backlog_critical,
-                    summary=f"Queue {queue_name} backlog is {backlog}",
-                ),
-            ]
-        )
-    for raw_projection in cast(list[object], operations.get("projections", [])):
-        if not isinstance(raw_projection, dict):
-            continue
-        projection = cast(dict[str, Any], raw_projection)
-        application_id = str(projection.get("application_id", "unknown"))
-        gaps = int(projection.get("open_gap_count", 0))
-        observations.append(
-            _observation(
-                rules["projection-gap-open"],
-                object_id=application_id,
-                active=gaps > 0,
-                summary=f"Projection {application_id} has {gaps} open gaps",
             )
         )
     backup_rule = rules["backup-rpo-breached"]
@@ -533,11 +479,7 @@ def run_check(args: argparse.Namespace) -> dict[str, Any]:
             raise
         operations = cast(
             dict[str, Any],
-            {
-                "application_entries": [],
-                "event_queues": [],
-                "projections": [],
-            },
+            {"application_entries": []},
         )
     probe_application_entries(operations)
     observations = evaluate_observations(

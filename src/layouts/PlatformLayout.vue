@@ -109,7 +109,7 @@ async function handleUserCommand(command) {
   if (command === 'logout') {
     try {
       await session.logout()
-      window.location.assign('/auth/login')
+      window.location.assign('/auth/logout')
     } catch (error) {
       ElMessage.error(error.message || '退出登录失败')
     }
@@ -120,6 +120,15 @@ function handleGlobalShortcut(event) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
     searchVisible.value = true
+  }
+}
+
+async function handleVisibilityRefresh() {
+  if (document.visibilityState !== 'visible') return
+  try {
+    await session.loadSession({ force: true })
+  } catch (error) {
+    if (error.status !== 401) ElMessage.error(error.message || '平台会话加载失败')
   }
 }
 
@@ -134,6 +143,7 @@ async function loadSearchApplications() {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalShortcut)
+  document.addEventListener('visibilitychange', handleVisibilityRefresh)
   try {
     await session.loadSession()
     await loadSearchApplications()
@@ -145,7 +155,10 @@ onMounted(async () => {
     ElMessage.error(error.message || '平台会话加载失败')
   }
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalShortcut))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalShortcut)
+  document.removeEventListener('visibilitychange', handleVisibilityRefresh)
+})
 </script>
 
 <template>

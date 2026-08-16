@@ -30,9 +30,6 @@ def _targets(*, minimum_requests: int = 1000, minimum_rps: float = 20) -> SloTar
         minimum_test_rps=minimum_rps,
         minimum_test_requests=minimum_requests,
         maximum_server_error_percent=1,
-        event_backlog_warning=100,
-        event_backlog_critical=1000,
-        event_recovery_minutes=15,
     )
 
 
@@ -41,11 +38,9 @@ def test_runtime_targets_are_loaded_from_the_single_approved_document() -> None:
     targets = load_production_targets(str(TARGETS_PATH))
 
     assert targets.deployment_tier == "STANDARD_SINGLE_NODE"
-    assert targets.profile == "standard-events"
+    assert targets.profile == "base-access"
     assert targets.slo.minimum_test_requests == 1000
     assert targets.slo.minimum_test_rps == 20
-    assert targets.slo.event_backlog_warning == 100
-    assert targets.slo.event_backlog_critical == 1000
     assert targets.deployment_topology == "single-host-docker-compose"
     assert targets.off_host_backup_required is True
     assert targets.recovery.rpo_minutes == 60
@@ -69,21 +64,11 @@ def test_runtime_targets_have_a_safe_read_only_portal_contract() -> None:
     assert response["recovery"] == {
         "rpo_minutes": 60,
         "rto_minutes": 120,
-        "projection_rto_minutes": 240,
         "backup_interval_minutes": 60,
     }
     assert "production_targets_path" not in response
-
-
-def test_runtime_targets_reject_inconsistent_backlog_thresholds(tmp_path: Path) -> None:
-    document = json.loads(TARGETS_PATH.read_text(encoding="utf-8"))
-    document["slo"]["event_backlog_warning"] = 1001
-    path = tmp_path / "invalid-targets.json"
-    path.write_text(json.dumps(document), encoding="utf-8")
-    load_production_targets.cache_clear()
-
-    with pytest.raises(ProductionTargetsError, match="backlog targets"):
-        load_production_targets(str(path))
+    assert "projection_rto_minutes" not in response["recovery"]
+    assert "event_backlog_warning" not in response["slo"]
 
 
 def test_runtime_targets_reject_an_unsafe_backup_interval(tmp_path: Path) -> None:

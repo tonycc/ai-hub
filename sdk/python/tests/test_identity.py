@@ -264,7 +264,9 @@ async def test_client_credentials_token_is_cached_and_pkce_is_s256() -> None:
             clock=clock,
         )
         authorization = await client.create_authorization_request(
-            "https://app.test/callback", scopes=("openid", "platform.me.read")
+            "https://app.test/callback",
+            scopes=("openid", "platform.me.read"),
+            nonce="nonce-value",
         )
         first = await client.client_credentials_token(("platform.notification.request",))
         second = await client.client_credentials_token(("platform.notification.request",))
@@ -274,6 +276,8 @@ async def test_client_credentials_token_is_cached_and_pkce_is_s256() -> None:
     ).rstrip(b"=").decode("ascii")
     assert f"code_challenge={expected}" in authorization.url
     assert "code_challenge_method=S256" in authorization.url
+    assert "nonce=nonce-value" in authorization.url
+    assert authorization.nonce == "nonce-value"
     assert first == second == "service-token-1"
     assert token_requests == 1
 

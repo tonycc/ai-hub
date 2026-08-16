@@ -1,0 +1,51 @@
+services:
+  platform-api:
+    command:
+      - uvicorn
+      - ai_hub_platform.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /workspace/backend/src
+      - --reload-dir
+      - /workspace/sdk/python/src
+      - --log-level
+      - debug
+    environment:
+      PYTHONPATH: /workspace/backend/src:/workspace/sdk/python/src
+      AI_HUB_PORTAL_OIDC_REDIRECT_URI: http://localhost:4173/auth/callback
+      AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI: http://localhost:4173/
+    volumes:
+      - type: bind
+        source: ../backend/src
+        target: /workspace/backend/src
+      - type: bind
+        source: ../sdk/python/src
+        target: /workspace/sdk/python/src
+
+  portal:
+    profiles: !override [frontend]
+
+  authentik-worker:
+    environment:
+      AI_HUB_PORTAL_OIDC_REDIRECT_URI: http://localhost:4173/auth/callback
+      AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI: http://localhost:4173/
+      AI_HUB_PORTAL_EXTERNAL_URL: http://localhost:4173
+    volumes:
+      - ./authentik/ai-hub-local-debug-blueprint.yaml:/blueprints/ai-hub/ai-hub-local-debug-blueprint.yaml:ro
+
+  traefik:
+    depends_on: !override
+      authentik-server:
+        condition: service_healthy
+      platform-api:
+        condition: service_healthy
+      standalone-app:
+        condition: service_healthy
+        required: false
+      standalone-app-events:
+        condition: service_healthy
+        required: false

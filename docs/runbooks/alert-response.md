@@ -69,20 +69,12 @@ curl --fail --silent http://127.0.0.1:18080/internal/metrics
 - 路由：`application-integration`，P1。确认对象中的 `application_id:environment` 和应用登记的 health URL。
 - 平台可用时，外部应用故障不算平台不可用；由 application-owner 恢复应用，platform-operator 协助验证网络、OIDC、回调和平台 API。
 
-## event-consumer-missing
+## ingest-current-state-drift
 
-- 路由：`platform-runtime`，P1。确认相应 Outbox/Inbox/投影 Worker 和 RabbitMQ bootstrap 状态。
-- 不要清队列。先恢复消费者并观察积压下降；消费者反复退出时保留 DLQ 和重试头证据。
-
-## event-backlog
-
-- 101–1000 条为 P2，超过 1000 条为 P1。检查消费者数量、未确认消息、数据库延迟和下游应用状态。
-- 恢复后必须在 15 分钟内排空演练负载；未达到则限流生产者、扩展同一 Worker 的实例数或进入容量评审。禁止直接删除 PENDING、失败或 DLQ 消息。
-
-## projection-gap-open
-
-- 路由：`application-integration`，P1。确认 gap 的生产应用、aggregate version 和 source sequence。
-- 先用快照 reconcile；需要重建时使用已注册来源的快照执行空投影重建。平台投影不能反写应用业务事实。
+- 路由：`data-recovery` / `platform-runtime`，P1。由定时任务 `ai-hub-ingest-reconcile SOURCE OBJECT_TYPE` 非零退出触发（详见 [`ingest-reconcile.md`](ingest-reconcile.md)）。
+- 先看 stdout JSON 的 `drifts[]`：`missing` / `unexpected` / `hash_mismatch` / `version_mismatch`。
+- 当前态损坏且变更日志可信：`ai-hub-ingest-rebuild log …`。位点丢失或日志不可信：`ai-hub-ingest-rebuild source …`（force full），再对账一次。
+- 禁止手改 `raw_current_state` 掩盖漂移。
 
 ## backup-rpo-breached
 

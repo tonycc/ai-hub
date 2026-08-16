@@ -31,10 +31,7 @@ ApplicationStatus = Literal["DRAFT", "ACTIVE", "DISABLED", "RETIRED"]
 EnvironmentStatus = Literal["ACTIVE", "DISABLED"]
 Capability = Literal[
     "API_CLIENT",
-    "EVENT_PUBLISHER",
-    "EVENT_CONSUMER",
-    "PROJECTION_SOURCE",
-    "PROJECTION_READER",
+    "DATA_INGEST",
 ]
 CredentialStatus = Literal["ACTIVE", "DRAINING", "REVOKED", "ERROR"]
 ReleaseStatus = Literal["DRAFT", "ACTIVE", "RETIRED"]

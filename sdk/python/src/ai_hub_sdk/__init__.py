@@ -6,12 +6,18 @@ from ai_hub_sdk.authorization import (
     AuthorizationVersionMismatchError,
 )
 from ai_hub_sdk.client import AiHubClient
-from ai_hub_sdk.events import (
-    CloudEvent,
-    EventActor,
-    ExampleRecordSnapshot,
-    ExampleRecordSnapshotItem,
-    example_record_snapshot_checksum,
+from ai_hub_sdk.export import (
+    EXPORT_SCOPE,
+    ExportContractError,
+    ExportPage,
+    ExportRecord,
+    PayloadContract,
+    allocate_next_version,
+    assert_payload_keys_allowed,
+    assert_versions_monotonic,
+    build_export_page,
+    paginate_export_records,
+    require_export_scope,
 )
 from ai_hub_sdk.identity import (
     AuthorizationRequest,
@@ -47,14 +53,18 @@ __all__ = [
     "AuthorizationRequest",
     "AuthorizationUnavailableError",
     "AuthorizationVersionMismatchError",
-    "CloudEvent",
     "CurrentUser",
     "DataScope",
+    "EXPORT_SCOPE",
     "ErrorResponse",
-    "EventActor",
-    "ExampleRecordSnapshot",
-    "ExampleRecordSnapshotItem",
-    "example_record_snapshot_checksum",
+    "ExportContractError",
+    "ExportPage",
+    "ExportRecord",
+    "PayloadContract",
+    "allocate_next_version",
+    "assert_payload_keys_allowed",
+    "assert_versions_monotonic",
+    "build_export_page",
     "HealthResponse",
     "NotificationRequest",
     "NotificationResult",
@@ -62,10 +72,12 @@ __all__ = [
     "OAuthToken",
     "OidcClient",
     "OidcTokenValidator",
+    "paginate_export_records",
     "PermissionSnapshot",
+    "require_export_scope",
     "TokenValidationError",
     "VerifiedToken",
     "json_log_config",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

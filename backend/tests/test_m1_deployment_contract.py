@@ -14,16 +14,18 @@ def load_yaml(path: str) -> dict[str, Any]:
     return cast(dict[str, Any], payload)
 
 
-def test_both_profiles_include_authentik_and_traefik_without_docker_socket() -> None:
+def test_base_access_profile_includes_authentik_and_traefik_without_docker_socket() -> None:
     compose = load_yaml("deploy/compose.yaml")
     services = compose["services"]
-    expected_profiles = ["base-access", "standard-events"]
+    expected_profiles = ["base-access"]
 
     for service_name in ("authentik-server", "authentik-worker", "traefik"):
         assert services[service_name]["profiles"] == expected_profiles
     serialized = (PROJECT_ROOT / "deploy/compose.yaml").read_text(encoding="utf-8")
     assert "/var/run/docker.sock" not in serialized
     assert "./authentik/ai-hub-blueprint.yaml:/blueprints/" in serialized
+    assert "rabbitmq" not in services
+    assert "standard-events" not in serialized
 
 
 def test_authentik_file_storage_is_initialized_as_persistent_real_directories() -> None:
@@ -31,7 +33,7 @@ def test_authentik_file_storage_is_initialized_as_persistent_real_directories() 
     services = compose["services"]
 
     initializer = services["authentik-storage-init"]
-    assert initializer["profiles"] == ["base-access", "standard-events"]
+    assert initializer["profiles"] == ["base-access"]
     assert initializer["user"] == "0:0"
     assert "media.is_symlink()" in initializer["command"][0]
     assert "media.mkdir" in initializer["command"][0]
@@ -95,56 +97,29 @@ def test_standalone_image_build_does_not_copy_platform_source() -> None:
     assert "COPY sdk/python/src" in dockerfile
 
 
-def test_event_profile_uses_a_dedicated_outbox_relay_database_role() -> None:
-    compose = load_yaml("deploy/compose.yaml")
-    publisher = compose["services"]["standalone-outbox-publisher"]
-    application = compose["services"]["standalone-app"]
-    event_application = compose["services"]["standalone-app-events"]
-
-    assert "STANDALONE_PUBLISHER_DATABASE_URL" in publisher["environment"]
-    assert (
-        "standalone_outbox_publisher"
-        in publisher["environment"]["STANDALONE_PUBLISHER_DATABASE_URL"]
-    )
-    assert "STANDALONE_DATABASE_URL" in application["environment"]
-    assert "standalone_app:" in application["environment"]["STANDALONE_DATABASE_URL"]
-    assert application["profiles"] == ["base-access"]
-    assert event_application["profiles"] == ["standard-events"]
-    assert application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == "API_CLIENT"
-    assert event_application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == (
-        "API_CLIENT,EVENT_PUBLISHER,EVENT_CONSUMER,PROJECTION_SOURCE"
-    )
-
-
-def test_event_database_role_bootstraps_are_serialized() -> None:
+def test_standalone_app_uses_api_client_and_data_ingest_only() -> None:
     compose = load_yaml("deploy/compose.yaml")
     services = compose["services"]
+    application = services["standalone-app"]
 
-    assert services["standalone-consumer-db-bootstrap"]["depends_on"][
-        "standalone-publisher-db-bootstrap"
-    ] == {"condition": "service_completed_successfully"}
+    assert application["profiles"] == ["base-access"]
+    assert application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == (
+        "API_CLIENT,DATA_INGEST"
+    )
+    assert "standalone-outbox-publisher" not in services
+    assert "standalone-app-events" not in services
+    assert "standalone-consumer-db-bootstrap" not in services
+    assert "standalone-publisher-db-bootstrap" not in services
 
 
-def test_platform_operations_uses_the_read_only_rabbitmq_observer() -> None:
+def test_platform_operations_does_not_configure_a_rabbitmq_observer() -> None:
     compose = load_yaml("deploy/compose.yaml")
     environment = compose["services"]["platform-api"]["environment"]
-
-    assert environment["AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL"] == (
-        "${AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL:-}"
-    )
-    assert environment["AI_HUB_OPERATIONS_RABBITMQ_USERNAME"] == (
-        "${RABBITMQ_OBSERVER_USER:-}"
-    )
-    assert environment["AI_HUB_OPERATIONS_RABBITMQ_PASSWORD"] == (
-        "${RABBITMQ_OBSERVER_PASSWORD:-}"
-    )
-
+    serialized_env = "\n".join(f"{key}={value}" for key, value in environment.items())
     local_environment = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL=http://rabbitmq:15672" in (
-        local_environment
-    )
-    assert "RABBITMQ_OBSERVER_USER=platform_observer" in local_environment
-    assert "RABBITMQ_OBSERVER_PASSWORD=" in local_environment
+
+    assert "RABBITMQ" not in serialized_env
+    assert "RABBITMQ" not in local_environment
 
 
 def test_m1_revokes_the_authoritative_application_credential() -> None:

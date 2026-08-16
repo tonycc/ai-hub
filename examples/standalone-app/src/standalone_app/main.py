@@ -8,10 +8,12 @@ from uuid import UUID
 import httpx
 import sqlalchemy as sa
 from ai_hub_sdk import (
+    EXPORT_SCOPE,
     AiHubClient,
     AuthorizationCache,
     AuthorizationDecisionRequest,
     AuthorizationUnavailableError,
+    ExportPage,
     NotificationRequest,
     OAuthProtocolError,
     OidcClient,
@@ -19,8 +21,9 @@ from ai_hub_sdk import (
     PermissionSnapshot,
     TokenValidationError,
     VerifiedToken,
+    require_export_scope,
 )
-from fastapi import APIRouter, Depends, FastAPI, Header, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -29,6 +32,11 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from standalone_app import __version__
 from standalone_app.config import Settings, get_settings
+from standalone_app.export import (
+    EXAMPLE_RECORD_OBJECT_TYPE,
+    export_example_records,
+    seed_ingest_baseline_if_empty,
+)
 from standalone_app.observability import (
     RequestContextMiddleware,
     log_security_event,
@@ -363,14 +371,10 @@ async def update_record(
     async with session_factory(request)() as session:
         mutation = await change_record(
             session,
-            application_id=settings.application_id,
-            events_enabled="EVENT_PUBLISHER" in settings.capabilities,
+            data_ingest_enabled="DATA_INGEST" in settings.capabilities,
             record_id=record_id,
             owner_subject=token.subject,
             name=payload.name,
-            actor_type="user",
-            actor_id=token.subject,
-            trace_id=trace_id_from(request),
         )
         if mutation is None:
             log_security_event(
@@ -437,13 +441,9 @@ async def remove_record(
     async with session_factory(request)() as session:
         mutation = await delete_record(
             session,
-            application_id=settings.application_id,
-            events_enabled="EVENT_PUBLISHER" in settings.capabilities,
+            data_ingest_enabled="DATA_INGEST" in settings.capabilities,
             record_id=record_id,
             owner_subject=token.subject,
-            actor_type="user",
-            actor_id=token.subject,
-            trace_id=trace_id_from(request),
         )
         if mutation is None:
             raise PermissionError("Local ownership or business-state check denied the delete")
@@ -463,6 +463,64 @@ async def remove_record(
         owner_subject=mutation.owner_subject,
         aggregate_version=mutation.aggregate_version,
     )
+
+
+def _bearer_token(authorization: str | None) -> str:
+    if authorization is None:
+        raise PermissionError("Bearer authentication is required")
+    scheme, separator, token = authorization.partition(" ")
+    if separator != " " or scheme.lower() != "bearer" or not token:
+        raise PermissionError("Authorization must use Bearer")
+    return token
+
+
+async def export_service_token(
+    request: Request,
+    validator: Annotated[OidcTokenValidator, Depends(token_validator)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> VerifiedToken:
+    try:
+        token = await validator.verify(
+            _bearer_token(authorization),
+            required_scopes=(EXPORT_SCOPE,),
+            allowed_actor_types=("service",),
+        )
+        require_export_scope(token)
+        return token
+    except TokenValidationError as error:
+        raise PermissionError(str(error)) from error
+
+
+@router.get("/ai-hub/export", response_model=ExportPage, tags=["ingest"])
+async def ai_hub_export(
+    request: Request,
+    token: Annotated[VerifiedToken, Depends(export_service_token)],
+    object_type: Annotated[str, Query(min_length=1, max_length=100)],
+    since_version: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 200,
+) -> ExportPage:
+    settings: Settings = request.app.state.settings
+    if "DATA_INGEST" not in settings.capabilities:
+        raise PermissionError("DATA_INGEST capability is not enabled")
+    if object_type != EXAMPLE_RECORD_OBJECT_TYPE:
+        raise LookupError(f"Unknown object_type: {object_type}")
+    async with session_factory(request)() as session:
+        await seed_ingest_baseline_if_empty(session)
+        page = await export_example_records(
+            session,
+            since_version=since_version,
+            limit=limit,
+        )
+        await session.commit()
+    log_security_event(
+        request,
+        action="ai_hub.ingest.export",
+        result="SUCCESS",
+        actor_id=token.subject,
+        target_type="object_type",
+        target_id=object_type,
+    )
+    return page
 
 
 @router.post(

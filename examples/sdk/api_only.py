@@ -1,4 +1,4 @@
-"""Minimal API-only integration; no Outbox, Inbox, or RabbitMQ dependency."""
+"""Minimal API-only integration; no message broker or export pipeline required."""
 
 from __future__ import annotations
 

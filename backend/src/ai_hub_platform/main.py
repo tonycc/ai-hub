@@ -10,6 +10,8 @@ from ai_hub_platform.api.application_management import (
 )
 from ai_hub_platform.api.audit_management import router as audit_management_router
 from ai_hub_platform.api.conformance import router as conformance_router
+from ai_hub_platform.api.data import router as data_router
+from ai_hub_platform.api.data_governance import router as data_governance_router
 from ai_hub_platform.api.developer import router as developer_router
 from ai_hub_platform.api.errors import register_error_handlers
 from ai_hub_platform.api.governance import router as governance_router
@@ -108,9 +110,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(internal_router)
     application.include_router(internal_operations_router)
     application.include_router(platform_router)
+    application.include_router(data_router)
     application.include_router(auth_router)
     application.include_router(session_router)
     application.include_router(governance_router)
+    application.include_router(data_governance_router)
     application.include_router(application_management_router)
     application.include_router(notification_management_router)
     application.include_router(audit_management_router)

@@ -163,14 +163,7 @@ m1_login() {
     --cookie "${M1_COOKIE_JAR}" \
     --cookie-jar "${M1_COOKIE_JAR}" \
     --header 'Content-Type: application/json' \
-    --data '{"component":"ak-stage-identification","uid_field":"ai-hub-demo-user"}' \
-    --output /dev/null \
-    "${m1_executor_url}"
-  curl --fail --location --silent --show-error --max-time 15 \
-    --cookie "${M1_COOKIE_JAR}" \
-    --cookie-jar "${M1_COOKIE_JAR}" \
-    --header 'Content-Type: application/json' \
-    --data '{"component":"ak-stage-password","password":"local-only-demo-user-password"}' \
+    --data '{"component":"ak-stage-identification","uid_field":"ai-hub-demo-user","password":"local-only-demo-user-password"}' \
     --output "${m1_flow_password}" \
     "${m1_executor_url}"
   jq --exit-status '.component == "xak-flow-redirect"' \
@@ -213,7 +206,7 @@ m1_wait_url "${M1_APP_BASE}/health/live"
 m1_wait_url "${M1_AUTH_BASE}/-/health/ready/"
 m1_wait_url "${M1_AUTH_BASE}/application/o/ai-hub/.well-known/openid-configuration"
 
-for m1_migration in platform-core-migrate standalone-migrate; do
+for m1_migration in platform-core-migrate platform-raw-migrate standalone-migrate; do
   m1_container_id="$(m1_compose ps -a -q "${m1_migration}")"
   [[ -n "${m1_container_id}" ]] || m1_fail "migration container is missing: ${m1_migration}"
   m1_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "${m1_container_id}")"

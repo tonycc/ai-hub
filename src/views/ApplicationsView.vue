@@ -27,10 +27,7 @@ const scopeOptions = ref([])
 
 const capabilityOptions = [
   ['API_CLIENT', 'API 客户端'],
-  ['EVENT_PUBLISHER', '事件发布'],
-  ['EVENT_CONSUMER', '事件消费'],
-  ['PROJECTION_SOURCE', '投影来源'],
-  ['PROJECTION_READER', '投影读取'],
+  ['DATA_INGEST', '增量数据接入'],
 ]
 
 const createForm = reactive({

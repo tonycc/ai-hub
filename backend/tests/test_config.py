@@ -1,14 +1,18 @@
+import os
+
 import pytest
 from ai_hub_platform.config import (
     CoreMigrationSettings,
-    ProjectionMigrationSettings,
     Settings,
 )
 from pydantic import SecretStr, ValidationError
 
 
-def test_local_runtime_defaults_are_valid() -> None:
-    settings = Settings()
+def test_local_runtime_defaults_are_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("AI_HUB_"):
+            monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
     assert settings.environment == "local"
     assert settings.application_id == "ai-hub-platform"
@@ -34,6 +38,7 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
         authentik_api_url="https://identity.example.org/api/v3",
         authentik_external_url="https://identity.example.org",
         authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+        monitor_token=SecretStr("ProdMonitorToken-4821"),
         public_platform_base_url="https://platform.example.org",
         public_identity_base_url="https://identity.example.org",
     )
@@ -162,47 +167,15 @@ def test_migration_processes_validate_only_their_own_database_url() -> None:
             "platform-db.internal:5432/platform_db"
         ),
     )
-    projection = ProjectionMigrationSettings(
+    from ai_hub_platform.config import RawMigrationSettings
+
+    raw = RawMigrationSettings(
         environment="production",
-        projection_migration_database_url=(
-            "postgresql+psycopg://ai_hub_projection_migrator:ProjectionSecret-2947@"
+        raw_migration_database_url=(
+            "postgresql+psycopg://ai_hub_raw_migrator:RawSecret-1847@"
             "platform-db.internal:5432/platform_db"
         ),
     )
 
     assert core.environment == "production"
-    assert projection.environment == "production"
-
-
-def test_operations_rabbitmq_observer_configuration_is_all_or_nothing() -> None:
-    with pytest.raises(ValidationError, match="must be configured together"):
-        Settings(
-            environment="test",
-            operations_rabbitmq_management_url="http://rabbitmq.test:15672",
-        )
-
-
-def test_production_rejects_placeholder_operations_observer_password() -> None:
-    with pytest.raises(
-        ValidationError,
-        match="operations_rabbitmq_password cannot use a placeholder",
-    ):
-        Settings(
-            environment="production",
-            database_url=(
-                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
-                "platform-db.internal:5432/platform_db"
-            ),
-            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
-            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
-            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
-            authentik_api_url="https://identity.example.org/api/v3",
-            authentik_external_url="https://identity.example.org",
-            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
-            public_platform_base_url="https://platform.example.org",
-            public_identity_base_url="https://identity.example.org",
-            operations_rabbitmq_management_url="https://rabbitmq.example.org",
-            operations_rabbitmq_username="platform_observer",
-            operations_rabbitmq_password=SecretStr("local-only-observer-password"),
-        )
+    assert raw.environment == "production"

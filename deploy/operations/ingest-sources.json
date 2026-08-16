@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "source_application_id": "standalone-example",
+      "object_type": "example_record",
+      "export_base_url": "http://standalone-app:8000",
+      "interval_seconds": 60,
+      "lookback_versions": 100,
+      "page_limit": 200,
+      "enabled": false
+    }
+  ]
+}

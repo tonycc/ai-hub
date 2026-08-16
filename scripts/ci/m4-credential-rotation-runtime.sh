@@ -11,8 +11,6 @@ M4_ROTATION_WORK_DIR="$(mktemp -d /tmp/ai-hub-m4-credential-rotation.XXXXXX)"
 M4_ROTATION_EDGE_PORT="${M4_ROTATION_EDGE_PORT:-18092}"
 M4_ROTATION_INTERNAL_PORT="${M4_ROTATION_INTERNAL_PORT:-18083}"
 M4_ROTATION_POSTGRES_PORT="${M4_ROTATION_POSTGRES_PORT:-15438}"
-M4_ROTATION_RABBITMQ_PORT="${M4_ROTATION_RABBITMQ_PORT:-25676}"
-M4_ROTATION_RABBITMQ_MANAGEMENT_PORT="${M4_ROTATION_RABBITMQ_MANAGEMENT_PORT:-15677}"
 M4_ROTATION_APPLICATION_ID="m4-rotation-app"
 M4_ROTATION_ENVIRONMENT="uat"
 M4_ROTATION_OVERLAP_SECONDS="${M4_ROTATION_OVERLAP_SECONDS:-5}"
@@ -23,8 +21,6 @@ M4_ROTATION_CANONICAL_AUTH_BASE="http://auth.localhost:8088"
 export AI_HUB_EDGE_PORT="${M4_ROTATION_EDGE_PORT}"
 export AI_HUB_INTERNAL_API_PORT="${M4_ROTATION_INTERNAL_PORT}"
 export AI_HUB_POSTGRES_PORT="${M4_ROTATION_POSTGRES_PORT}"
-export AI_HUB_RABBITMQ_PORT="${M4_ROTATION_RABBITMQ_PORT}"
-export AI_HUB_RABBITMQ_MANAGEMENT_PORT="${M4_ROTATION_RABBITMQ_MANAGEMENT_PORT}"
 export AI_HUB_OIDC_ISSUER="${M4_ROTATION_CANONICAL_AUTH_BASE}/application/o/ai-hub/"
 export AI_HUB_PORTAL_OIDC_ISSUER="${M4_ROTATION_CANONICAL_AUTH_BASE}/application/o/ai-hub-portal/"
 export AI_HUB_AUTHENTIK_API_URL="http://authentik-server:9000/api/v3"
@@ -40,7 +36,7 @@ m4_rotation_compose() {
     --project-name "${M4_ROTATION_PROJECT_NAME}" \
     --env-file "${M4_ROTATION_ENV_FILE}" \
     -f "${M4_ROTATION_COMPOSE_FILE}" \
-    --profile standard-events \
+    --profile base-access \
     "$@"
 }
 
@@ -279,7 +275,7 @@ for m4_rotation_command in curl docker jq; do
 done
 
 cd "${M4_ROTATION_PROJECT_ROOT}"
-m4_rotation_note "starting a fresh standard-events deployment"
+m4_rotation_note "starting a fresh base-access deployment"
 if [[ "${M4_ROTATION_SKIP_BUILD:-0}" == "1" ]]; then
   m4_rotation_compose up -d --no-build
 else

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-AssetKind = Literal["OPENAPI", "ASYNCAPI", "JSON_SCHEMA", "SDK_EXAMPLE", "GUIDE"]
+AssetKind = Literal["OPENAPI", "JSON_SCHEMA", "SDK_EXAMPLE", "GUIDE"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,29 +44,29 @@ ASSETS: tuple[AssetDefinition, ...] = (
         "API_CLIENT",
     ),
     AssetDefinition(
-        "platform-asyncapi",
-        "ASYNCAPI",
-        "Reliable events AsyncAPI",
-        "0.2.0",
-        "contracts/events/ai-hub.asyncapi.yaml",
-        "application/yaml",
-        "EVENT_PUBLISHER or EVENT_CONSUMER",
-    ),
-    AssetDefinition(
-        "cloud-event-schema",
-        "JSON_SCHEMA",
-        "CloudEvents envelope schema",
-        "1.0.0",
-        "contracts/events/cloud-event.schema.json",
-        "application/schema+json",
-        "EVENT_PUBLISHER or EVENT_CONSUMER",
-    ),
-    AssetDefinition(
         "api-only-python",
         "SDK_EXAMPLE",
         "Python API-only quickstart",
         "0.1.0",
         "examples/sdk/api_only.py",
+        "text/x-python",
+        "API_CLIENT",
+    ),
+    AssetDefinition(
+        "data-read-python",
+        "SDK_EXAMPLE",
+        "Python aggregated data read example",
+        "0.1.0",
+        "examples/sdk/data_read.py",
+        "text/x-python",
+        "API_CLIENT",
+    ),
+    AssetDefinition(
+        "data-ingest-evidence",
+        "SDK_EXAMPLE",
+        "DATA_INGEST conformance evidence template",
+        "0.1.0",
+        "examples/sdk/data_ingest_evidence.py",
         "text/x-python",
         "API_CLIENT",
     ),

@@ -163,6 +163,104 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /platform-api/v1/data/objects:
+    get:
+      operationId: listAggregatedObjects
+      tags: [data]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.data.read]
+      parameters:
+        - name: source_application_id
+          in: query
+          required: false
+          schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+        - name: object_type
+          in: query
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 100}
+        - name: object_id
+          in: query
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        "200":
+          description: Current-state objects from platform aggregated data.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AggregatedObjectList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}:
+    get:
+      operationId: getAggregatedObject
+      tags: [data]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.data.read]
+      parameters:
+        - name: source_application_id
+          in: path
+          required: true
+          schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+        - name: object_type
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 100}
+        - name: object_id
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        "200":
+          description: One current-state aggregated object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AggregatedObject"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /platform-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}/history:
+    get:
+      operationId: listAggregatedObjectHistory
+      tags: [data]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.data.read]
+      parameters:
+        - name: source_application_id
+          in: path
+          required: true
+          schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+        - name: object_type
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 100}
+        - name: object_id
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        "200":
+          description: Version history for one aggregated object from the raw change log.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AggregatedObjectHistoryList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 components:
   securitySchemes:
     oidcAuth:
@@ -292,7 +390,7 @@ components:
         status: {type: string}
         capabilities:
           type: array
-          items: {type: string, enum: [API_CLIENT, EVENT_PUBLISHER, EVENT_CONSUMER, PROJECTION_SOURCE, PROJECTION_READER]}
+          items: {type: string, enum: [API_CLIENT, DATA_INGEST]}
         environments:
           type: array
           items: {$ref: "#/components/schemas/ApplicationEnvironment"}
@@ -321,6 +419,72 @@ components:
         delivered_at: {type: [string, "null"], format: date-time}
         delivery_reference: {type: [string, "null"]}
         failure_reason: {type: [string, "null"]}
+    AggregatedObject:
+      type: object
+      additionalProperties: false
+      required:
+        - source_application_id
+        - object_type
+        - object_id
+        - version
+        - payload
+        - payload_contract_version
+        - updated_at
+      properties:
+        source_application_id: {type: string}
+        object_type: {type: string}
+        object_id: {type: string}
+        version: {type: integer, minimum: 1}
+        payload: {type: [object, "null"], additionalProperties: true}
+        payload_contract_version: {type: [string, "null"]}
+        updated_at: {type: string, format: date-time}
+    AggregatedObjectList:
+      type: object
+      additionalProperties: false
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/AggregatedObject"}
+        total: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 500}
+        offset: {type: integer, minimum: 0}
+    AggregatedObjectHistoryRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - source_application_id
+        - object_type
+        - object_id
+        - operation
+        - version
+        - payload
+        - payload_contract_version
+        - content_hash
+        - received_at
+        - batch_id
+      properties:
+        source_application_id: {type: string}
+        object_type: {type: string}
+        object_id: {type: string}
+        operation: {type: string, enum: [upsert, delete]}
+        version: {type: integer, minimum: 1}
+        payload: {type: [object, "null"], additionalProperties: true}
+        payload_contract_version: {type: [string, "null"]}
+        content_hash: {type: [string, "null"]}
+        received_at: {type: string, format: date-time}
+        batch_id: {type: string, format: uuid}
+    AggregatedObjectHistoryList:
+      type: object
+      additionalProperties: false
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/AggregatedObjectHistoryRecord"}
+        total: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 500}
+        offset: {type: integer, minimum: 0}
     ErrorResponse:
       type: object
       additionalProperties: false
