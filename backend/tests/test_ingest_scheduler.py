@@ -110,10 +110,12 @@ class _SessionFactory:
 
 @dataclass
 class _InMemoryIngestStore:
-    cursor: dict[tuple[str, str], int] = field(default_factory=dict)
-    cursor_status: dict[tuple[str, str], str] = field(default_factory=dict)
-    batches: list[dict[str, Any]] = field(default_factory=list)
-    records: list[IngestRecord] = field(default_factory=list)
+    cursor: dict[tuple[str, str], int] = field(default_factory=dict[tuple[str, str], int])
+    cursor_status: dict[tuple[str, str], str] = field(
+        default_factory=dict[tuple[str, str], str]
+    )
+    batches: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    records: list[IngestRecord] = field(default_factory=list[IngestRecord])
     fail_next_load: bool = False
 
     async def get_cursor(

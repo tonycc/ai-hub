@@ -80,9 +80,13 @@ class _Current:
 class InMemoryRawStore:
     """Mirrors platform_raw idempotent log + current-state rules for unit tests."""
 
-    changes: dict[tuple[str, str, str, int], IngestRecord] = field(default_factory=dict)
-    current: dict[tuple[str, str, str], _Current] = field(default_factory=dict)
-    cursor: dict[tuple[str, str], int] = field(default_factory=dict)
+    changes: dict[tuple[str, str, str, int], IngestRecord] = field(
+        default_factory=dict[tuple[str, str, str, int], IngestRecord]
+    )
+    current: dict[tuple[str, str, str], _Current] = field(
+        default_factory=dict[tuple[str, str, str], _Current]
+    )
+    cursor: dict[tuple[str, str], int] = field(default_factory=dict[tuple[str, str], int])
 
     def load_batch(
         self,

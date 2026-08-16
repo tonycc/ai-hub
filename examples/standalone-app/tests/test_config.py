@@ -9,7 +9,7 @@ def test_local_runtime_defaults_are_valid(monkeypatch: pytest.MonkeyPatch) -> No
     for key in list(os.environ):
         if key.startswith("STANDALONE_"):
             monkeypatch.delenv(key, raising=False)
-    settings = Settings(_env_file=None)
+    settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
     assert settings.environment == "local"
     assert settings.application_id == "standalone-example"
