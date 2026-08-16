@@ -46,6 +46,3 @@ services:
       standalone-app:
         condition: service_healthy
         required: false
-      standalone-app-events:
-        condition: service_healthy
-        required: false

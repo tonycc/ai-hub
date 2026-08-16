@@ -39,6 +39,7 @@ const navGroups = [
     items: [
       { label: '能力总览', path: '/platform', icon: 'DataAnalysis' },
       { label: '运维中心', path: '/platform/operations', icon: 'Monitor' },
+      { label: '数据汇聚', path: '/platform/ingest', icon: 'Coin' },
       { label: '平台配置', path: '/platform/settings', icon: 'SetUp' },
       { label: '开发者中心', path: '/platform/developer', icon: 'Tools' },
     ],
@@ -53,6 +54,7 @@ const routePermissions = {
   '/platform/integrations': 'platform.application.read',
   '/platform/audit': 'platform.audit.read',
   '/platform/operations': 'platform.operations.read',
+  '/platform/ingest': 'platform.operations.read',
   '/platform/settings': 'platform.operations.read',
   '/platform/developer': 'platform.developer.read',
 }
