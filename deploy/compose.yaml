@@ -148,6 +148,9 @@ services:
       AI_HUB_SANDBOX_USER_SUBJECT: ${AI_HUB_SANDBOX_USER_SUBJECT:-ai-hub-demo-user}
       AI_HUB_MONITOR_TOKEN: ${AI_HUB_MONITOR_TOKEN:?Set AI_HUB_MONITOR_TOKEN in .env}
       AI_HUB_PRODUCTION_TARGETS_PATH: ${AI_HUB_PRODUCTION_TARGETS_PATH:-deploy/operations/production-targets.json}
+      AI_HUB_RAW_DATABASE_URL: postgresql+psycopg://ai_hub_raw:${AI_HUB_RAW_DB_PASSWORD:?Set AI_HUB_RAW_DB_PASSWORD in .env}@postgres:5432/platform_db
+      AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:-ai-hub-platform}
+      AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
       interval: 5s
@@ -360,6 +363,7 @@ services:
       AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub/}
       AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:-ai-hub-platform}
       AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
+      AI_HUB_SEED_DATABASE_URL: postgresql+psycopg://ai_hub_platform_migrator:${AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/platform_db
       AI_HUB_TICK_INTERVAL_SECONDS: ${AI_HUB_INGEST_TICK_INTERVAL_SECONDS:-1}
       AI_HUB_HTTP_TIMEOUT_SECONDS: ${AI_HUB_INGEST_HTTP_TIMEOUT_SECONDS:-30}
       AI_HUB_MAX_CONCURRENT_SOURCES: ${AI_HUB_INGEST_MAX_CONCURRENT_SOURCES:-4}

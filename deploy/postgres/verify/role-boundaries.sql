@@ -177,13 +177,41 @@ BEGIN
         RAISE EXCEPTION 'platform audit table is not append-only and queryable for runtime';
     END IF;
 
-    IF has_schema_privilege('ai_hub_raw', 'platform_core', 'USAGE')
-       OR has_table_privilege(
+    -- Raw runtime reads portal-managed ingest config from platform_core
+    -- (design §2.5.1): USAGE on the schema plus SELECT on the two config tables
+    -- only. It must not read or write any other core table or migration metadata.
+    IF NOT has_schema_privilege('ai_hub_raw', 'platform_core', 'USAGE')
+       OR has_schema_privilege('ai_hub_raw', 'platform_core', 'CREATE') THEN
+        RAISE EXCEPTION 'raw runtime platform_core schema privilege is invalid';
+    END IF;
+
+    IF NOT has_table_privilege('ai_hub_raw', 'platform_core.ingest_source', 'SELECT')
+       OR NOT has_table_privilege('ai_hub_raw', 'platform_core.ingest_policy', 'SELECT')
+       OR has_table_privilege('ai_hub_raw', 'platform_core.ingest_source', 'INSERT,UPDATE,DELETE')
+       OR has_table_privilege('ai_hub_raw', 'platform_core.ingest_policy', 'INSERT,UPDATE,DELETE') THEN
+        RAISE EXCEPTION 'raw runtime ingest config privilege is not read-only';
+    END IF;
+
+    IF has_table_privilege(
            'ai_hub_raw',
            'platform_core.alembic_version',
            'SELECT,INSERT,UPDATE,DELETE'
        ) THEN
-        RAISE EXCEPTION 'raw runtime can access platform_core';
+        RAISE EXCEPTION 'raw runtime can access core migration metadata';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_tables
+        WHERE schemaname = 'platform_core'
+          AND tablename NOT IN ('ingest_source', 'ingest_policy')
+          AND has_table_privilege(
+              'ai_hub_raw',
+              format('%I.%I', schemaname, tablename),
+              'SELECT,INSERT,UPDATE,DELETE'
+          )
+    ) THEN
+        RAISE EXCEPTION 'raw runtime can access platform_core data beyond ingest config';
     END IF;
 
     IF to_regclass('platform_raw.raw_change_record') IS NOT NULL THEN

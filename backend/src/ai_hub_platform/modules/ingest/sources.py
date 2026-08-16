@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class IngestSourceConfig(BaseModel):
@@ -92,6 +94,37 @@ def load_ingest_sources(path: str | Path) -> IngestSourcesDocument:
 @lru_cache
 def get_ingest_sources(path: str) -> IngestSourcesDocument:
     return load_ingest_sources(path)
+
+
+async def load_sync_cursors(session: AsyncSession) -> dict[tuple[str, str], dict[str, Any]]:
+    """Latest sync cursor per (source_application_id, object_type) from platform_raw."""
+    result = await session.execute(
+        text(
+            """
+            SELECT source_application_id, object_type, last_version,
+                   last_synced_at, last_status
+            FROM platform_raw.raw_sync_cursor
+            """
+        )
+    )
+    cursors: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in result.all():
+        cursors[(str(row.source_application_id), str(row.object_type))] = {
+            "last_cursor": int(row.last_version),
+            "last_sync_at": row.last_synced_at,
+            "last_status": str(row.last_status),
+        }
+    return cursors
+
+
+async def load_source_configs_from_db(
+    session: AsyncSession,
+) -> list[IngestSourceConfig]:
+    """Load authoritative source configs from platform_core (design §2.5.1)."""
+    from ai_hub_platform.modules.ingest.config_store import IngestConfigStore
+
+    rows = await IngestConfigStore().list_sources(session)
+    return [row.config for row in rows]
 
 
 def compute_since_version(last_version: int, lookback_versions: int) -> int:

@@ -120,6 +120,37 @@ def run_ingest_sync_cli() -> None:
     asyncio.run(_run_ingest_sync(args[0], args[1], force_full=force_full))
 
 
+async def _run_ingest_seed(sources_path: str | None) -> None:
+    from ai_hub_platform.modules.ingest.config_store import IngestConfigStore
+    from ai_hub_platform.modules.ingest.sources import load_ingest_sources
+
+    settings = get_raw_worker_settings()
+    path = sources_path or settings.ingest_sources_path
+    document = load_ingest_sources(path)
+    # Seeding writes platform_core, which the raw worker role cannot do; prefer the
+    # migrator connection when the deployment provides it (compose sets it).
+    database_url = (
+        settings.seed_database_url
+        if settings.seed_database_url is not None
+        else settings.raw_database_url
+    )
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with sessions.begin() as session:
+            added = await IngestConfigStore().seed_sources(session, document.sources)
+        print(json.dumps({"seeded": added, "total": len(document.sources)}, sort_keys=True))
+    finally:
+        await engine.dispose()
+
+
+def run_ingest_seed_cli() -> None:
+    """Seed platform_core.ingest_source from the operations JSON (bootstrap only)."""
+    logging.config.dictConfig(json_log_config())
+    sources_path = sys.argv[1] if len(sys.argv) > 1 else None
+    asyncio.run(_run_ingest_seed(sources_path))
+
+
 class RuntimeEvidenceProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
