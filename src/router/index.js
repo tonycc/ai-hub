@@ -61,6 +61,12 @@ const routes = [
         meta: { title: '运维中心', breadcrumb: ['运行与研发', '运维中心'] },
       },
       {
+        path: 'platform/ingest',
+        name: 'ingest',
+        component: () => import('../views/IngestView.vue'),
+        meta: { title: '数据汇聚', breadcrumb: ['运行与研发', '数据汇聚'] },
+      },
+      {
         path: 'platform/settings',
         name: 'platform-settings',
         component: () => import('../views/PlatformSettingsView.vue'),
