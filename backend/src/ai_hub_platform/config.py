@@ -167,6 +167,13 @@ class Settings(_PlatformSettings):
     sandbox_user_subject: str = "ai-hub-demo-user"
     monitor_token: SecretStr | None = None
     production_targets_path: str = "deploy/operations/production-targets.json"
+    # Portal ingest ops actions read/write platform_raw and pull export APIs.
+    raw_database_url: str = (
+        "postgresql+psycopg://ai_hub_raw:local-only-raw-password@"
+        "localhost:5433/platform_db"
+    )
+    oidc_client_id: str = "ai-hub-platform"
+    oidc_client_secret: SecretStr = SecretStr("local-only-oidc-client-secret")
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -250,6 +257,15 @@ class Settings(_PlatformSettings):
                 raise ValueError("monitor_token cannot use a placeholder outside local/test")
         if not self.production_targets_path.strip():
             raise ValueError("production_targets_path cannot be empty")
+        _validate_database_url(
+            self.raw_database_url,
+            field_name="raw_database_url",
+            strict=strict,
+        )
+        if not self.oidc_client_id.strip():
+            raise ValueError("oidc_client_id cannot be empty")
+        if strict and _has_placeholder_secret(self.oidc_client_secret.get_secret_value()):
+            raise ValueError("oidc_client_secret cannot use a placeholder outside local/test")
         return self
 
 
@@ -308,6 +324,9 @@ class RawWorkerSettings(_PlatformSettings):
     oidc_issuer: str = "http://localhost:9000/application/o/ai-hub/"
     oidc_client_id: str = "ai-hub-platform"
     oidc_client_secret: SecretStr = SecretStr("local-only-oidc-client-secret")
+    # Used only by ai-hub-ingest-seed to write platform_core; compose points this at
+    # the platform migrator role. One-shot sync/reconcile CLIs use raw_database_url.
+    seed_database_url: str | None = None
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -339,6 +358,12 @@ class RawWorkerSettings(_PlatformSettings):
         if strict and _has_placeholder_secret(self.oidc_client_secret.get_secret_value()):
             raise ValueError(
                 "oidc_client_secret cannot use a placeholder outside local/test"
+            )
+        if self.seed_database_url is not None:
+            _validate_database_url(
+                self.seed_database_url,
+                field_name="seed_database_url",
+                strict=strict,
             )
         return self
 

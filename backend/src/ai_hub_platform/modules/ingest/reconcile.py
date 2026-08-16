@@ -381,3 +381,74 @@ def ingest_records_from_replay(entries: Sequence[ChangeLogEntry]) -> list[Ingest
         )
         for fingerprint in sorted(expected.values(), key=lambda row: row.object_id)
     ]
+
+
+async def prune_change_records(
+    sessions: async_sessionmaker[AsyncSession],
+    *,
+    keep_versions: int,
+    keep_days: int | None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Prune raw_change_record beyond the retention policy (design §8).
+
+    Keeps, per (source_application_id, object_type, object_id), the newest
+    ``keep_versions`` rows and, when ``keep_days`` is set, any row received
+    within that many days. ``dry_run`` only counts what would be deleted.
+    """
+    if keep_versions < 1:
+        raise ValueError("keep_versions must be >= 1")
+    if keep_days is not None and keep_days < 1:
+        raise ValueError("keep_days must be >= 1 when set")
+
+    ranked = """
+        SELECT id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY source_application_id, object_type, object_id
+                   ORDER BY version DESC
+               ) AS version_rank,
+               received_at
+        FROM platform_raw.raw_change_record
+    """
+    age_clause = (
+        "AND received_at < CURRENT_TIMESTAMP - (:keep_days || ' days')::interval"
+        if keep_days is not None
+        else ""
+    )
+    candidate_sql = f"""
+        SELECT id FROM ({ranked}) AS ranked
+        WHERE version_rank > :keep_versions
+        {age_clause}
+    """
+    params: dict[str, Any] = {"keep_versions": keep_versions}
+    if keep_days is not None:
+        params["keep_days"] = str(keep_days)
+
+    async with sessions() as session:
+        async with session.begin():
+            count_row = await session.execute(
+                text(f"SELECT count(*) FROM ({candidate_sql}) AS c"), params
+            )
+            candidates = int(count_row.scalar_one())
+            deleted = 0
+            if not dry_run and candidates:
+                deleted_rows = await session.execute(
+                    text(
+                        f"""
+                        DELETE FROM platform_raw.raw_change_record
+                        WHERE id IN ({candidate_sql})
+                        RETURNING id
+                        """
+                    ),
+                    params,
+                )
+                deleted = len(deleted_rows.all())
+            if dry_run:
+                await session.rollback()
+            return {
+                "dry_run": dry_run,
+                "keep_versions": keep_versions,
+                "keep_days": keep_days,
+                "candidates": int(candidates),
+                "deleted": deleted,
+            }

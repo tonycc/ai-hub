@@ -32,7 +32,7 @@ from ai_hub_platform.modules.ingest.service import IngestService, SyncMode
 from ai_hub_platform.modules.ingest.sources import (
     IngestSourceConfig,
     compute_since_version,
-    load_ingest_sources,
+    load_source_configs_from_db,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -90,8 +90,37 @@ class IngestScheduler:
         self.metrics = SchedulerMetrics()
         self._global_sem = asyncio.Semaphore(settings.max_concurrent_sources)
         self._app_sems: dict[str, asyncio.Semaphore] = {}
+        self._runtimes: dict[tuple[str, str], _SourceRuntime] = {}
+        self._replace_runtimes(sources)
+
+    def _replace_runtimes(self, sources: Sequence[IngestSourceConfig]) -> None:
         enabled = [source for source in sources if source.enabled]
-        self._runtimes = [_SourceRuntime(config=source) for source in enabled]
+        desired = {source.source_key: source for source in enabled}
+        for key in list(self._runtimes):
+            if key not in desired:
+                del self._runtimes[key]
+        for key, config in desired.items():
+            existing = self._runtimes.get(key)
+            if existing is None:
+                self._runtimes[key] = _SourceRuntime(config=config)
+            else:
+                existing.config = config
+
+    async def reload_sources(
+        self, loader: Callable[[], Awaitable[list[IngestSourceConfig]]]
+    ) -> None:
+        """Hot-reload source configs from the authoritative store (design §2.5.1)."""
+        try:
+            sources = await loader()
+        except Exception:
+            LOGGER.exception(
+                json.dumps(
+                    {"event": "ingest_config_reload_failed", "worker_id": self.worker_id},
+                    separators=(",", ":"),
+                )
+            )
+            return
+        self._replace_runtimes(sources)
 
     def _app_semaphore(self, application_id: str) -> asyncio.Semaphore:
         semaphore = self._app_sems.get(application_id)
@@ -335,7 +364,13 @@ class IngestScheduler:
                 )
             )
 
-    async def run(self, stop: asyncio.Event) -> None:
+    async def run(
+        self,
+        stop: asyncio.Event,
+        *,
+        reload_loader: Callable[[], Awaitable[list[IngestSourceConfig]]] | None = None,
+        reload_interval_ticks: int = 15,
+    ) -> None:
         if not self._runtimes:
             LOGGER.warning(
                 json.dumps(
@@ -347,11 +382,15 @@ class IngestScheduler:
                     separators=(",", ":"),
                 )
             )
+        tick = 0
         while not stop.is_set():
+            tick += 1
+            if reload_loader is not None and tick % reload_interval_ticks == 0:
+                await self.reload_sources(reload_loader)
             now = self._clock()
             due = [
                 runtime
-                for runtime in self._runtimes
+                for runtime in self._runtimes.values()
                 if runtime.next_run_at <= now and not runtime.lock.locked()
             ]
             tasks = [asyncio.create_task(self._run_due(runtime)) for runtime in due]
@@ -383,9 +422,16 @@ async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
     for signal_name in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signal_name, stop.set)
 
-    document = load_ingest_sources(settings.ingest_sources_path)
     engine: AsyncEngine = create_async_engine(settings.raw_database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def load_sources() -> list[IngestSourceConfig]:
+        async with sessions() as session:
+            return await load_source_configs_from_db(session)
+
+    async with sessions() as session:
+        initial_sources = await load_source_configs_from_db(session)
+
     oidc = OidcClient(
         settings.oidc_issuer,
         settings.oidc_client_id,
@@ -401,12 +447,12 @@ async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
     )
     scheduler = IngestScheduler(
         settings,
-        sources=document.sources,
+        sources=initial_sources,
         sessions=sessions,
         export_client=export_client,
     )
     try:
-        await scheduler.run(stop)
+        await scheduler.run(stop, reload_loader=load_sources)
     finally:
         await export_client.close()
         await oidc.close()

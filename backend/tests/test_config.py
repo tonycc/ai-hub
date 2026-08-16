@@ -41,6 +41,11 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
         monitor_token=SecretStr("ProdMonitorToken-4821"),
         public_platform_base_url="https://platform.example.org",
         public_identity_base_url="https://identity.example.org",
+        raw_database_url=(
+            "postgresql+psycopg://ai_hub_raw:ProdRawSecret-6754@"
+            "platform-db.internal:5432/platform_db"
+        ),
+        oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
     )
 
     assert settings.environment == "production"

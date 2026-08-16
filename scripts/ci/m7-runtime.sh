@@ -142,11 +142,10 @@ asyncio.run(main())
 }
 
 m7_cli() {
-  # One-shot platform CLI against the live stack; mounts enabled ingest sources.
+  # One-shot platform CLI against the live stack. Sources come from
+  # platform_core.ingest_source (seeded by m7_seed_sources); no file mount needed.
   # Compose status lines go to stderr so callers can parse stdout as JSON.
   m7_compose --progress=quiet run --rm --no-deps \
-    --volume "${M7_SOURCES_FILE}:${M7_SOURCES_CONTAINER_PATH}:ro" \
-    --env "AI_HUB_INGEST_SOURCES_PATH=${M7_SOURCES_CONTAINER_PATH}" \
     platform-ingest-scheduler \
     "$@" 2>"${M7_WORK_DIR}/cli.stderr"
 }
@@ -269,6 +268,14 @@ m7_write_enabled_sources() {
 EOF
 }
 
+m7_seed_sources() {
+  # Bootstrap platform_core.ingest_source from the operations JSON document.
+  m7_compose --progress=quiet run --rm --no-deps \
+    --volume "${M7_SOURCES_FILE}:${M7_SOURCES_CONTAINER_PATH}:ro" \
+    platform-ingest-scheduler \
+    ai-hub-ingest-seed "${M7_SOURCES_CONTAINER_PATH}" 2>"${M7_WORK_DIR}/seed.stderr"
+}
+
 m7_sync() {
   m7_sync_attempt=0
   m7_sync_output="${M7_WORK_DIR}/sync-attempt.json"
@@ -368,9 +375,13 @@ for m7_migration in platform-core-migrate platform-raw-migrate standalone-migrat
   [[ "${m7_exit_code}" == "0" ]] || m7_fail "migration failed: ${m7_migration}"
 done
 
-# Keep the background scheduler on the default disabled sources file so one-shot
+# Keep the background scheduler on an empty (unseeded) source set so one-shot
 # CLI syncs remain the only writer during this gate.
 m7_compose stop platform-ingest-scheduler >/dev/null
+
+# Seed the gate's source into platform_core.ingest_source (authoritative store).
+m7_note "seeding ingest source into platform_core"
+m7_seed_sources >/dev/null || { cat "${M7_WORK_DIR}/seed.stderr" >&2 || true; m7_fail "ingest seed failed"; }
 
 # Re-confirm OIDC from the host edge after scheduler stop / login traffic.
 m7_wait_url "${M7_AUTH_BASE}/application/o/ai-hub/.well-known/openid-configuration"

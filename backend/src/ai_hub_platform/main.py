@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from ai_hub_sdk import OidcClient, OidcTokenValidator
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_hub_platform import __version__
 from ai_hub_platform.api.application_management import (
@@ -17,6 +18,7 @@ from ai_hub_platform.api.errors import register_error_handlers
 from ai_hub_platform.api.governance import router as governance_router
 from ai_hub_platform.api.health import internal_router
 from ai_hub_platform.api.health import router as health_router
+from ai_hub_platform.api.ingest import router as ingest_router
 from ai_hub_platform.api.notification_management import (
     router as notification_management_router,
 )
@@ -84,7 +86,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             resolved_settings.authorization_cache_ttl_seconds
         )
         app.state.settings = resolved_settings
+        raw_engine = create_async_engine(
+            resolved_settings.raw_database_url, pool_pre_ping=True
+        )
+        app.state.raw_sessions = async_sessionmaker(
+            raw_engine, class_=AsyncSession, expire_on_commit=False
+        )
         yield
+        await raw_engine.dispose()
         await authentik_admin_client.close()
         await portal_oidc_client.close()
         await portal_token_validator.close()
@@ -121,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(developer_router)
     application.include_router(conformance_router)
     application.include_router(operations_router)
+    application.include_router(ingest_router)
     return application
 
 
