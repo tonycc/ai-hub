@@ -163,14 +163,7 @@ m1_login() {
     --cookie "${M1_COOKIE_JAR}" \
     --cookie-jar "${M1_COOKIE_JAR}" \
     --header 'Content-Type: application/json' \
-    --data '{"component":"ak-stage-identification","uid_field":"ai-hub-demo-user"}' \
-    --output /dev/null \
-    "${m1_executor_url}"
-  curl --fail --location --silent --show-error --max-time 15 \
-    --cookie "${M1_COOKIE_JAR}" \
-    --cookie-jar "${M1_COOKIE_JAR}" \
-    --header 'Content-Type: application/json' \
-    --data '{"component":"ak-stage-password","password":"local-only-demo-user-password"}' \
+    --data '{"component":"ak-stage-identification","uid_field":"ai-hub-demo-user","password":"local-only-demo-user-password"}' \
     --output "${m1_flow_password}" \
     "${m1_executor_url}"
   jq --exit-status '.component == "xak-flow-redirect"' \
