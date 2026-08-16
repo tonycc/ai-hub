@@ -2,7 +2,7 @@
 
 ## 1. 适用范围与停止条件
 
-本手册只发布 AI Hub 平台自身的 API、事件投影 Worker 和门户；独立业务应用仍由各自项目发布。生产基线是 `STANDARD_SINGLE_NODE`，发布顺序固定为：`expand → canary → promote`，破坏性 `contract` 必须进入至少后一个兼容版本和独立维护窗口。
+本手册只发布 AI Hub 平台自身的 API、数据汇聚组件（raw 迁移 / 摄取调度）和门户；独立业务应用仍由各自项目发布。生产基线是 `STANDARD_SINGLE_NODE`，发布顺序固定为：`expand → canary → promote`，破坏性 `contract` 必须进入至少后一个兼容版本和独立维护窗口。
 
 出现任一条件立即停止：没有 60 分钟内的完整异机验证备份、内部镜像没有“精确标签 + registry digest”、发布清单来源工作树不干净、迁移不属于已批准路径、任一门禁失败、金丝雀不健康、上线后错误率或延迟越过生产目标。停止后保持现有服务，按第 6 节选择镜像回滚、修复前进或完整恢复；不得临时执行 Alembic `downgrade`。
 
@@ -15,14 +15,14 @@
 
 ## 3. 生成不可变发布清单
 
-先完成 CI、身份/API、可靠事件、恢复、告警和凭据轮换门禁，把每项机器可读 JSON 证据保存到受控目录。创建清单时逐项传入证据；命令拒绝缺项、失败证据、过期备份、浮动生产镜像、脏工作树、秘密字段和未审核破坏性迁移。
+先完成 CI、身份/API、数据汇聚相关门禁、恢复、告警和凭据轮换门禁，把每项机器可读 JSON 证据保存到受控目录。创建清单时逐项传入证据；命令拒绝缺项、失败证据、过期备份、浮动生产镜像、脏工作树、秘密字段和未审核破坏性迁移。
 
 ~~~bash
 ai-hub-release create-manifest \
   --project-root /opt/ai-hub \
   --release-id 2026.08.14-1 \
   --environment production \
-  --profile standard-events \
+  --profile base-access \
   --platform-image registry.example/ai-hub/platform:2026.08.14-1@sha256:PLATFORM_DIGEST \
   --portal-image registry.example/ai-hub/portal:2026.08.14-1@sha256:PORTAL_DIGEST \
   --backup-receipt /mnt/ai-hub-off-host-backups/BACKUP.tar.aesgcm.verified.json \
@@ -50,14 +50,14 @@ ai-hub-release verify-manifest \
 
 ## 4. 预检与金丝雀
 
-预检确认备份仍不超过 RPO、制品已拉取、本机数据库迁移头只处于上一版或目标版、Schema 允许旧镜像读取，并执行实时数据条件检查。`base-access` 只检查和执行平台核心迁移；`standard-events` 才同时处理核心、事件登记和投影迁移，API-only 部署不会为了发布门禁启动事件组件。当前凭据扩展迁移在任何环境已经出现两行凭据后，旧版应用读取语义不再可靠；预检和回滚会失败关闭。
+预检确认备份仍不超过 RPO、制品已拉取、本机数据库迁移头只处于上一版或目标版、Schema 允许旧镜像读取，并执行实时数据条件检查。`base-access` 检查并执行平台核心迁移与 raw 贴源层迁移。当前凭据扩展迁移在任何环境已经出现两行凭据后，旧版应用读取语义不再可靠；预检和回滚会失败关闭。
 
 ~~~bash
 ai-hub-release preflight /var/lib/ai-hub-releases/2026.08.14-1.json \
   --project-root /opt/ai-hub \
   --compose-file /opt/ai-hub/deploy/compose.yaml \
   --env-file /etc/ai-hub/runtime.env \
-  --profile standard-events
+  --profile base-access
 ~~~
 
 金丝雀命令会自动重新执行完整预检，再执行获批的 expand 迁移，随后用候选 digest 启动一个不接入 Traefik、没有外部流量的临时 API 实例。它必须连接现有数据库和身份服务，通过容器健康、readiness 和 OpenAPI 探针；命令完成后删除临时容器。即使操作员已经单独运行过 `preflight`，也不能跳过这次自动复核。
@@ -66,7 +66,7 @@ ai-hub-release preflight /var/lib/ai-hub-releases/2026.08.14-1.json \
 ai-hub-release canary /var/lib/ai-hub-releases/2026.08.14-1.json \
   --compose-file /opt/ai-hub/deploy/compose.yaml \
   --env-file /etc/ai-hub/runtime.env \
-  --profile standard-events
+  --profile base-access
 ~~~
 
 若金丝雀失败，停止发布。expand Schema 留在原位但旧镜像仍运行；记录失败证据后修复前进。不要为了撤销新增 nullable 列或放宽约束执行 downgrade。
@@ -77,13 +77,13 @@ ai-hub-release canary /var/lib/ai-hub-releases/2026.08.14-1.json \
 ai-hub-release promote /var/lib/ai-hub-releases/2026.08.14-1.json \
   --compose-file /opt/ai-hub/deploy/compose.yaml \
   --env-file /etc/ai-hub/runtime.env \
-  --profile standard-events
+  --profile base-access
 ~~~
 
 提升命令会再次执行完整预检和隔离金丝雀，任一步失败都不会替换正式服务。通过后只替换平台 API、门户和所选档位的平台 Worker，不启动或替换独立应用。确认以下项目后把清单状态登记为 `DEPLOYED`：
 
 1. API、门户和 authentik readiness 正常，迁移头与清单一致。
-2. 15 分钟内 5xx、p95/p99、数据库连接和事件积压未越过 `production-targets.json`。
+2. 15 分钟内 5xx、p95/p99 与数据库连接未越过 `production-targets.json`。
 3. 用户 OIDC、服务身份、应用登记读取和通知最小事务成功。
 4. 没有新增 P0/P1 告警，审计和指标不含密钥。
 
@@ -97,7 +97,7 @@ ai-hub-release promote /var/lib/ai-hub-releases/2026.08.14-1.json \
 ai-hub-release rollback /var/lib/ai-hub-releases/2026.08.14-1.json \
   --compose-file /opt/ai-hub/deploy/compose.yaml \
   --env-file /etc/ai-hub/runtime.env \
-  --profile standard-events
+  --profile base-access
 ~~~
 
 回滚命令绝不执行数据库 downgrade。如果它报告多版本凭据状态、Schema 不兼容、上一清单摘要变化或制品缺失，禁止绕过：

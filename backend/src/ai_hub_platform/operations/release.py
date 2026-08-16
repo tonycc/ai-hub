@@ -19,27 +19,22 @@ from ai_hub_platform.operations.backup import sha256_file
 
 RELEASE_SCHEMA_VERSION = 1
 RELEASE_ENVIRONMENTS = {"local", "test", "integration", "uat", "production"}
-RELEASE_PROFILES = {"base-access", "standard-events"}
+RELEASE_PROFILES = {"base-access"}
 RELEASE_STATUSES = {"CANDIDATE", "APPROVED", "DEPLOYED", "ROLLED_BACK"}
-MIGRATION_COMPONENTS = ("core", "events", "projection")
+MIGRATION_COMPONENTS = ("core", "raw")
 PROFILE_MIGRATION_COMPONENTS = {
-    "base-access": ("core",),
-    "standard-events": MIGRATION_COMPONENTS,
+    "base-access": MIGRATION_COMPONENTS,
 }
 MIGRATION_DIRECTORIES = {
     "core": Path("backend/migrations/versions/core"),
-    "events": Path("backend/migrations/versions/events"),
-    "projection": Path("backend/migrations/versions/projection"),
+    "raw": Path("backend/migrations/versions/raw"),
 }
 MIGRATION_TABLES = {
     "core": "platform_core.alembic_version",
-    "events": "platform_core.alembic_version_events",
-    "projection": "platform_projection.alembic_version",
+    "raw": "platform_raw.alembic_version",
 }
 CONTRACT_PATHS = (
     Path("contracts/api/platform-api.openapi.yaml"),
-    Path("contracts/events/ai-hub.asyncapi.yaml"),
-    Path("contracts/events/cloud-event.schema.json"),
 )
 REQUIRED_RELEASE_GATES = frozenset(
     {
@@ -47,7 +42,6 @@ REQUIRED_RELEASE_GATES = frozenset(
         "frontend",
         "deployment",
         "identity-runtime",
-        "events-runtime",
         "recovery-runtime",
         "observability-runtime",
         "credential-rotation-runtime",
@@ -964,8 +958,7 @@ def apply_expand_migrations(manifest: Mapping[str, Any], target: ReleaseTarget) 
     migrations = _expect_object(manifest, "migrations")
     services = {
         "core": "platform-core-migrate",
-        "events": "platform-event-registration-migrate",
-        "projection": "platform-projection-migrate",
+        "raw": "platform-raw-migrate",
     }
     for component in _target_components(target):
         _run(
@@ -1085,8 +1078,6 @@ def promote_release(
     canary = _run_verified_canary(manifest_path, target)
     environment = _release_environment(manifest)
     services = ["platform-api", "portal"]
-    if target.profile == "standard-events":
-        services.append("platform-projection-worker")
     _run(
         target.command("up", "--detach", "--no-deps", *services),
         environment=environment,
@@ -1140,8 +1131,6 @@ def rollback_release(
     for reference in _expect_object(previous, "images").values():
         _ensure_release_image(str(reference), production=production)
     services = ["platform-api", "portal"]
-    if target.profile == "standard-events":
-        services.append("platform-projection-worker")
     _run(
         target.command("up", "--detach", "--no-deps", *services),
         environment=environment,

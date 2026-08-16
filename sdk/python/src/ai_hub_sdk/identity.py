@@ -78,6 +78,7 @@ class AuthorizationRequest:
     url: str
     state: str
     code_verifier: str
+    nonce: str | None = None
 
 
 class OAuthToken(BaseModel):
@@ -375,6 +376,7 @@ class OidcClient:
         redirect_uri: str,
         *,
         scopes: Sequence[str],
+        nonce: str | None = None,
     ) -> AuthorizationRequest:
         metadata = await self._metadata()
         endpoint = metadata.get("authorization_endpoint")
@@ -386,18 +388,24 @@ class OidcClient:
         verifier = secrets.token_urlsafe(64)
         digest = hashlib.sha256(verifier.encode("ascii")).digest()
         challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-        query = urlencode(
-            {
-                "response_type": "code",
-                "client_id": self.client_id,
-                "redirect_uri": redirect_uri,
-                "scope": " ".join(scopes),
-                "state": state,
-                "code_challenge": challenge,
-                "code_challenge_method": "S256",
-            }
+        query_parameters = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": redirect_uri,
+            "scope": " ".join(scopes),
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+        if nonce is not None:
+            query_parameters["nonce"] = nonce
+        query = urlencode(query_parameters)
+        return AuthorizationRequest(
+            url=f"{endpoint}?{query}",
+            state=state,
+            code_verifier=verifier,
+            nonce=nonce,
         )
-        return AuthorizationRequest(url=f"{endpoint}?{query}", state=state, code_verifier=verifier)
 
     async def _token_request(self, data: Mapping[str, str]) -> OAuthToken:
         metadata = await self._metadata()

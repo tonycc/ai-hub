@@ -30,22 +30,15 @@ BASE_REQUIRED_ROLES = (
     "authentik",
     "ai_hub_platform_migrator",
     "ai_hub_platform",
-    "ai_hub_projection_migrator",
-    "ai_hub_projection",
+    "ai_hub_raw_migrator",
+    "ai_hub_raw",
     "standalone_app_migrator",
     "standalone_app",
 )
-EVENT_REQUIRED_ROLES = (
-    "standalone_outbox_publisher",
-    "standalone_event_consumer",
-)
 MIGRATION_TABLES = (
     ("platform_db", "platform_core.alembic_version"),
-    ("platform_db", "platform_core.alembic_version_events"),
-    ("platform_db", "platform_projection.alembic_version"),
+    ("platform_db", "platform_raw.alembic_version"),
     ("standalone_app_db", "app.alembic_version"),
-    ("standalone_app_db", "app.alembic_version_event_publisher"),
-    ("standalone_app_db", "app.alembic_version_event_consumer"),
 )
 
 
@@ -359,8 +352,8 @@ with tarfile.open(fileobj=sys.stdin.buffer, mode='r|*') as archive:
 
 
 def role_names_for_profile(profile: str) -> tuple[str, ...]:
-    if profile == "standard-events":
-        return (*BASE_REQUIRED_ROLES, *EVENT_REQUIRED_ROLES)
+    if profile != "base-access":
+        raise BackupError(f"Unsupported backup profile: {profile}")
     return BASE_REQUIRED_ROLES
 
 
@@ -449,7 +442,7 @@ def create_backup(args: argparse.Namespace) -> dict[str, object]:
                     "platform_db",
                     "standalone_app_db",
                 ],
-                "rebuildable": ["RabbitMQ queues", "platform_projection"],
+                "rebuildable": ["platform_raw"],
             },
         }
         (staging / "manifest.json").write_text(
@@ -570,7 +563,7 @@ def _assert_restore_roles(target: ComposeTarget, manifest: dict[str, Any]) -> No
         raise BackupError("Backup role inventory is invalid")
     raw_roles = cast(list[object], raw_roles_value)
     required_roles: set[str] = set()
-    allowed_roles = set((*BASE_REQUIRED_ROLES, *EVENT_REQUIRED_ROLES))
+    allowed_roles = set(BASE_REQUIRED_ROLES)
     for raw_role_value in raw_roles:
         if not isinstance(raw_role_value, dict):
             raise BackupError("Backup role inventory entry is invalid")
@@ -743,7 +736,7 @@ def _target_from_args(args: argparse.Namespace) -> ComposeTarget:
 def _add_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--compose-file", default="deploy/compose.yaml")
     parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--profile", choices=("base-access", "standard-events"), required=True)
+    parser.add_argument("--profile", choices=("base-access",), required=True)
     parser.add_argument("--project-name")
 
 

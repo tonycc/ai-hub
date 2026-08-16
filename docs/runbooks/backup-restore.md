@@ -2,7 +2,7 @@
 
 ## 1. 适用范围
 
-本手册适用于 `STANDARD_SINGLE_NODE` 的 `base-access` 和 `standard-events` 部署。归档覆盖 PostgreSQL 角色清单、`authentik_db`、authentik `/data`、`platform_db` 和中性参考应用数据库；RabbitMQ 队列与平台投影按可重建数据处理。外部独立应用的数据仍由其自身团队备份，平台归档不读取外部应用数据库。
+本手册适用于 `STANDARD_SINGLE_NODE` 的 `base-access` 部署。归档覆盖 PostgreSQL 角色清单、`authentik_db`、authentik `/data`、`platform_db`（含 `platform_raw`）和中性参考应用数据库。贴源层当前态可从变更日志重建，不单独作为异机归档必需项。外部独立应用的数据仍由其自身团队备份，平台归档不读取外部应用数据库。
 
 ## 2. 生产前置条件
 
@@ -29,7 +29,7 @@ AI_HUB_BACKUP_KEY_BASE64="$(sudo sed -n 's/^AI_HUB_BACKUP_KEY_BASE64=//p' /etc/a
   /opt/ai-hub/.venv/bin/ai-hub-backup create \
   --compose-file /opt/ai-hub/deploy/compose.yaml \
   --env-file /etc/ai-hub/runtime.env \
-  --profile standard-events \
+  --profile base-access \
   --output-dir /mnt/ai-hub-off-host-backups \
   --storage-class off-host
 ```
@@ -55,22 +55,22 @@ AI_HUB_BACKUP_KEY_BASE64="$(sudo sed -n 's/^AI_HUB_BACKUP_KEY_BASE64=//p' /etc/a
 ```bash
 docker compose --project-name ai-hub-production \
   --env-file /etc/ai-hub/runtime.env -f deploy/compose.yaml \
-  --profile standard-events stop
+  --profile base-access stop
 docker compose --project-name ai-hub-production \
   --env-file /etc/ai-hub/runtime.env -f deploy/compose.yaml \
-  --profile standard-events up -d --no-deps postgres
+  --profile base-access up -d --no-deps postgres
 
 AI_HUB_BACKUP_KEY_BASE64="$(sudo sed -n 's/^AI_HUB_BACKUP_KEY_BASE64=//p' /etc/ai-hub/backup.env)" \
   /opt/ai-hub/.venv/bin/ai-hub-backup restore \
   --compose-file /opt/ai-hub/deploy/compose.yaml \
   --env-file /etc/ai-hub/runtime.env \
-  --profile standard-events \
+  --profile base-access \
   --project-name ai-hub-production \
   --confirm-replace \
   /mnt/ai-hub-off-host-backups/ai-hub-backup-YYYYMMDDTHHMMSSZ-ID.tar.aesgcm
 ```
 
-4. 恢复成功后启动完整 profile。按顺序确认所有迁移容器退出码为 0、`/health/live` 和 `/health/ready` 正常、OIDC 登录与客户端凭据正常、角色边界 SQL 通过、积压可排空。
+4. 恢复成功后启动完整 profile。按顺序确认所有迁移容器退出码为 0、`/health/live` 和 `/health/ready` 正常、OIDC 登录与客户端凭据正常、角色边界 SQL 通过；必要时对关键对象类型执行 `ai-hub-ingest-reconcile`。
 5. 对照事故开始时间记录实际 RTO；对照归档 `created_at` 与最后确认业务事实时间记录实际 RPO。RTO 超过 120 分钟或 RPO 超过 60 分钟时不得宣布恢复完成，立即升级 `data-recovery` 至 `platform-owner`。
 
 ## 5. 失败与回退

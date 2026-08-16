@@ -27,7 +27,6 @@ def _manifest(*, environment: str = "production") -> dict[str, Any]:
         "frontend",
         "deployment",
         "identity-runtime",
-        "events-runtime",
         "recovery-runtime",
         "observability-runtime",
         "credential-rotation-runtime",
@@ -41,7 +40,7 @@ def _manifest(*, environment: str = "production") -> dict[str, Any]:
             "phases": [],
             "rollback_schema_compatible": True,
         }
-        for component in ("core", "events", "projection")
+        for component in ("core", "raw")
     }
     return {
         "$schema": "../operations/release-manifest.schema.json",
@@ -53,7 +52,7 @@ def _manifest(*, environment: str = "production") -> dict[str, Any]:
         "deployment": {
             "environment": environment,
             "tier": "STANDARD_SINGLE_NODE",
-            "profile": "standard-events",
+            "profile": "base-access",
         },
         "images": {
             "platform": f"registry.example.test/ai-hub/platform:2026.08.14@sha256:{digest}",
@@ -63,8 +62,6 @@ def _manifest(*, environment: str = "production") -> dict[str, Any]:
         "migrations": migration_entries,
         "contracts": {
             "contracts/api/platform-api.openapi.yaml": digest,
-            "contracts/events/ai-hub.asyncapi.yaml": digest,
-            "contracts/events/cloud-event.schema.json": digest,
         },
         "backup": {
             "backup_id": "ai-hub-backup-20260814T095000Z-deadbeef",
@@ -73,7 +70,7 @@ def _manifest(*, environment: str = "production") -> dict[str, Any]:
             "created_at": "2026-08-14T09:50:00+00:00",
             "verified_at": "2026-08-14T09:55:00+00:00",
             "storage_class": "off-host",
-            "profile": "standard-events",
+            "profile": "base-access",
         },
         "gates": [
             {
@@ -140,23 +137,36 @@ def test_m4_credential_migration_is_expand_only_and_old_schema_compatible() -> N
         PROJECT_ROOT,
         {
             "core": "20260813_core_0003",
-            "events": "20260812_events_0001",
-            "projection": "20260812_projection_0002",
+            "raw": "20260816_raw_0001",
         },
         target_heads,
     )
 
-    assert transitions["core"].revisions == ("20260814_core_0004",)
-    assert transitions["core"].phases == ("expand",)
+    assert transitions["core"].revisions == (
+        "20260814_core_0004",
+        "20260814_core_0005",
+        "20260815_core_0006",
+        "20260816_core_0007",
+        "20260816_core_0008",
+        "20260816_core_0009",
+    )
+    assert transitions["core"].phases == (
+        "expand",
+        "expand",
+        "expand",
+        "expand",
+        "expand",
+        "expand",
+    )
     assert transitions["core"].rollback_schema_compatible is True
-    assert transitions["events"].revisions == ()
-    assert transitions["projection"].revisions == ()
+    assert transitions["raw"].revisions == ()
+    assert set(transitions) == {"core", "raw"}
 
 
 def test_expand_migration_gate_rejects_unreviewed_destructive_operation(
     tmp_path: Path,
 ) -> None:
-    for component in ("core", "events", "projection"):
+    for component in ("core", "raw"):
         directory = tmp_path / "backend" / "migrations" / "versions" / component
         directory.mkdir(parents=True)
         (directory / "base.py").write_text(
@@ -178,8 +188,14 @@ def upgrade():
     with pytest.raises(ReleaseError, match="destructive operations"):
         validate_migration_transition(
             tmp_path,
-            {"core": "base", "events": "base", "projection": "base"},
-            {"core": "breaking", "events": "base", "projection": "base"},
+            {
+                "core": "base",
+                "raw": "base",
+            },
+            {
+                "core": "breaking",
+                "raw": "base",
+            },
         )
 
 
@@ -207,7 +223,7 @@ def test_verified_backup_receipt_requires_hash_off_host_and_freshness(
         "created_at": (now - timedelta(minutes=10)).isoformat(),
         "verified_at": (now - timedelta(minutes=5)).isoformat(),
         "storage_class": "off-host",
-        "profile": "standard-events",
+        "profile": "base-access",
     }
     receipt.write_text(json.dumps(document), encoding="utf-8")
 
@@ -246,7 +262,7 @@ def test_release_runbook_and_cli_cover_canary_promote_and_safe_rollback() -> Non
     for command in ("create-manifest", "preflight", "canary", "promote", "rollback"):
         assert command in runbook
         assert command in source
-    assert "base-access` 只检查和执行平台核心迁移" in runbook
+    assert "base-access` 检查并执行平台核心迁移与 raw 贴源层迁移" in runbook
     assert "金丝雀命令会自动重新执行完整预检" in runbook
     assert "提升命令会再次执行完整预检和隔离金丝雀" in runbook
     assert "preflight = release_preflight" in source

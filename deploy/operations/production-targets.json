@@ -10,7 +10,7 @@
   },
   "deployment_tier": {
     "id": "STANDARD_SINGLE_NODE",
-    "profile": "standard-events",
+    "profile": "base-access",
     "topology": "single-host-docker-compose",
     "off_host_backup_required": true
   },
@@ -20,15 +20,11 @@
     "public_api_p99_ms": 1500,
     "minimum_test_rps": 20,
     "minimum_test_requests": 1000,
-    "maximum_server_error_percent": 1.0,
-    "event_backlog_warning": 100,
-    "event_backlog_critical": 1000,
-    "event_recovery_minutes": 15
+    "maximum_server_error_percent": 1.0
   },
   "recovery": {
     "rpo_minutes": 60,
     "rto_minutes": 120,
-    "projection_rto_minutes": 240,
     "backup_interval_minutes": 60
   },
   "retention": {
@@ -36,8 +32,6 @@
     "notification_days": 90,
     "portal_session_days_after_expiry": 7,
     "conformance_days_after_expiry": 7,
-    "published_outbox_days": 7,
-    "inbox_days": 30,
     "backup_hourly_count": 168,
     "backup_daily_days": 35
   },

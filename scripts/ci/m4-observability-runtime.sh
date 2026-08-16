@@ -11,8 +11,6 @@ M4_OBS_WORK_DIR="$(mktemp -d /tmp/ai-hub-m4-observability.XXXXXX)"
 M4_OBS_EDGE_PORT="${M4_OBS_EDGE_PORT:-18091}"
 M4_OBS_INTERNAL_PORT="${M4_OBS_INTERNAL_PORT:-18081}"
 M4_OBS_POSTGRES_PORT="${M4_OBS_POSTGRES_PORT:-15437}"
-M4_OBS_RABBITMQ_PORT="${M4_OBS_RABBITMQ_PORT:-25675}"
-M4_OBS_RABBITMQ_MANAGEMENT_PORT="${M4_OBS_RABBITMQ_MANAGEMENT_PORT:-15676}"
 M4_OBS_WEBHOOK_PORT="${M4_OBS_WEBHOOK_PORT:-18082}"
 M4_OBS_WEBHOOK_SECRET="m4-observability-webhook-secret"
 M4_OBS_MONITOR_TOKEN="local-only-monitor-token"
@@ -25,12 +23,6 @@ M4_OBS_WEBHOOK_PID=""
 export AI_HUB_EDGE_PORT="${M4_OBS_EDGE_PORT}"
 export AI_HUB_INTERNAL_API_PORT="${M4_OBS_INTERNAL_PORT}"
 export AI_HUB_POSTGRES_PORT="${M4_OBS_POSTGRES_PORT}"
-export AI_HUB_RABBITMQ_PORT="${M4_OBS_RABBITMQ_PORT}"
-export AI_HUB_RABBITMQ_MANAGEMENT_PORT="${M4_OBS_RABBITMQ_MANAGEMENT_PORT}"
-export AI_HUB_OPERATIONS_RABBITMQ_MANAGEMENT_URL="http://rabbitmq:15672"
-export AI_HUB_OPERATIONS_RABBITMQ_USERNAME="platform_observer"
-export AI_HUB_OPERATIONS_RABBITMQ_PASSWORD="local-only-rabbitmq-observer-password"
-export RABBITMQ_OBSERVER_PASSWORD="local-only-rabbitmq-observer-password"
 export AI_HUB_MONITOR_TOKEN="${M4_OBS_MONITOR_TOKEN}"
 export AI_HUB_ALERT_WEBHOOK_URL="http://127.0.0.1:${M4_OBS_WEBHOOK_PORT}/alerts"
 export AI_HUB_ALERT_WEBHOOK_SECRET="${M4_OBS_WEBHOOK_SECRET}"
@@ -40,7 +32,7 @@ m4_obs_compose() {
     --project-name "${M4_OBS_PROJECT_NAME}" \
     --env-file "${M4_OBS_ENV_FILE}" \
     -f "${M4_OBS_COMPOSE_FILE}" \
-    --profile standard-events \
+    --profile base-access \
     "$@"
 }
 
@@ -203,15 +195,14 @@ mkdir -p "${M4_OBS_BACKUP_DIR}"
 cd "${M4_OBS_PROJECT_ROOT}"
 m4_obs_start_webhook
 
-m4_obs_note "starting a fresh isolated standard-events deployment"
+m4_obs_note "starting a fresh isolated base-access deployment"
 if [[ "${M4_OBS_SKIP_BUILD:-0}" == "1" ]]; then
   m4_obs_compose up -d --no-build
 else
   m4_obs_compose up -d --build
 fi
 for m4_obs_service in postgres authentik-server platform-api portal \
-  standalone-app-events rabbitmq standalone-outbox-publisher \
-  standalone-event-consumer platform-projection-worker traefik; do
+  standalone-app platform-ingest-scheduler traefik; do
   m4_obs_wait_service "${m4_obs_service}"
 done
 m4_obs_psql -c \
@@ -253,7 +244,7 @@ curl --fail --silent --show-error \
   --header "X-AI-Hub-Monitor-Token: ${M4_OBS_MONITOR_TOKEN}" \
   "http://127.0.0.1:${M4_OBS_INTERNAL_PORT}/internal/operations/summary" \
   | jq --exit-status \
-    '.overall_status == "HEALTHY" and (.event_queues | length) >= 1' >/dev/null
+    '.overall_status == "HEALTHY"' >/dev/null
 
 m4_obs_note "verifying backup alert delivery, HMAC, and deduplication"
 m4_obs_monitor | jq --exit-status \
@@ -288,14 +279,14 @@ jq -n \
     created_at: $created_at,
     verified_at: $created_at,
     storage_class: "off-host",
-    profile: "standard-events"
+    profile: "base-access"
   }' >"${M4_OBS_BACKUP_DIR}/${m4_obs_backup_name}.verified.json"
 m4_obs_monitor | jq --exit-status '.notifications_sent == 1' >/dev/null
 [[ "$(m4_obs_webhook_count backup-rpo-breached RECOVERED)" == "1" ]] \
   || m4_obs_fail "backup RPO recovery was not delivered"
 
 m4_obs_note "verifying independent-application failure ownership and recovery"
-m4_obs_compose stop standalone-app-events >/dev/null
+m4_obs_compose stop standalone-app >/dev/null
 m4_obs_monitor | jq --exit-status '.pending_count == 1' >/dev/null
 m4_obs_application_fingerprint="$("${M4_OBS_PYTHON}" -c \
   'import hashlib; print(hashlib.sha256(b"application-entry-critical\0standalone-example:local").hexdigest()[:24])')"
@@ -313,8 +304,8 @@ jq -s --exit-status \
   '[.[] | select(.payload.rule_id == "application-entry-critical" and .payload.status == "FIRING")][0] | .payload.route == "application-integration" and .payload.owner == "application-owner" and .payload.backup_owner == "platform-operator" and .signature_valid == true' \
   "${M4_OBS_WEBHOOK_LOG}" >/dev/null \
   || m4_obs_fail "application failure responsibility route is incorrect"
-m4_obs_compose start standalone-app-events >/dev/null
-m4_obs_wait_service standalone-app-events
+m4_obs_compose start standalone-app >/dev/null
+m4_obs_wait_service standalone-app
 m4_obs_wait_webhook application-entry-critical RECOVERED
 
 jq -n \

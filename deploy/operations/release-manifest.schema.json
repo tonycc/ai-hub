@@ -45,7 +45,7 @@
           "enum": ["local", "test", "integration", "uat", "production"]
         },
         "tier": { "const": "STANDARD_SINGLE_NODE" },
-        "profile": { "enum": ["base-access", "standard-events"] }
+        "profile": { "const": "base-access" }
       }
     },
     "images": {
@@ -69,25 +69,20 @@
     "migrations": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["core", "events", "projection"],
+      "required": ["core", "raw"],
       "properties": {
         "core": { "$ref": "#/$defs/migrationTransition" },
-        "events": { "$ref": "#/$defs/migrationTransition" },
-        "projection": { "$ref": "#/$defs/migrationTransition" }
+        "raw": { "$ref": "#/$defs/migrationTransition" }
       }
     },
     "contracts": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "contracts/api/platform-api.openapi.yaml",
-        "contracts/events/ai-hub.asyncapi.yaml",
-        "contracts/events/cloud-event.schema.json"
+        "contracts/api/platform-api.openapi.yaml"
       ],
       "properties": {
-        "contracts/api/platform-api.openapi.yaml": { "$ref": "#/$defs/sha256" },
-        "contracts/events/ai-hub.asyncapi.yaml": { "$ref": "#/$defs/sha256" },
-        "contracts/events/cloud-event.schema.json": { "$ref": "#/$defs/sha256" }
+        "contracts/api/platform-api.openapi.yaml": { "$ref": "#/$defs/sha256" }
       }
     },
     "backup": {
@@ -109,12 +104,12 @@
         "created_at": { "type": "string", "format": "date-time" },
         "verified_at": { "type": "string", "format": "date-time" },
         "storage_class": { "enum": ["off-host", "local-drill"] },
-        "profile": { "enum": ["base-access", "standard-events"] }
+        "profile": { "const": "base-access" }
       }
     },
     "gates": {
       "type": "array",
-      "minItems": 8,
+      "minItems": 7,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -178,7 +173,7 @@
         "rollback_schema_compatible"
       ],
       "properties": {
-        "component": { "enum": ["core", "events", "projection"] },
+        "component": { "enum": ["core", "raw"] },
         "previous_head": { "type": "string", "minLength": 1 },
         "target_head": { "type": "string", "minLength": 1 },
         "revisions": {

@@ -120,24 +120,6 @@ def _validate_redirect_uri(value: str, *, field_name: str, strict: bool) -> None
         raise ValueError(f"{field_name} cannot use a local hostname outside local/test")
 
 
-def _validate_rabbitmq_url(value: str, *, strict: bool) -> None:
-    parsed = _parse_url(
-        value,
-        field_name="rabbitmq_url",
-        allowed_schemes={"amqp", "amqps"},
-    )
-    if not parsed.username or not parsed.password:
-        raise ValueError("rabbitmq_url must include a username and password")
-    if not parsed.path.strip("/"):
-        raise ValueError("rabbitmq_url must include an environment vhost")
-    if strict and parsed.scheme != "amqps":
-        raise ValueError("rabbitmq_url must use amqps outside local/test")
-    if strict and _is_local_hostname(parsed.hostname or ""):
-        raise ValueError("rabbitmq_url cannot use a local hostname outside local/test")
-    if strict and _has_placeholder_secret(unquote(parsed.password)):
-        raise ValueError("rabbitmq_url cannot use a placeholder password outside local/test")
-
-
 class _PlatformSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -168,6 +150,7 @@ class Settings(_PlatformSettings):
     portal_oidc_client_id: str = "ai-hub-portal"
     portal_oidc_client_secret: SecretStr = SecretStr("local-only-portal-oidc-client-secret")
     portal_oidc_redirect_uri: str = "http://platform.localhost:8088/auth/callback"
+    portal_oidc_logout_redirect_uri: str = "http://platform.localhost:8088/"
     portal_session_ttl_seconds: int = 900
     portal_login_ttl_seconds: int = 300
     portal_session_cookie_name: str = "ai_hub_portal_session"
@@ -184,10 +167,6 @@ class Settings(_PlatformSettings):
     sandbox_user_subject: str = "ai-hub-demo-user"
     monitor_token: SecretStr | None = None
     production_targets_path: str = "deploy/operations/production-targets.json"
-    operations_rabbitmq_management_url: str | None = None
-    operations_rabbitmq_vhost: str = "ai-hub-local"
-    operations_rabbitmq_username: str | None = None
-    operations_rabbitmq_password: SecretStr | None = None
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -271,30 +250,6 @@ class Settings(_PlatformSettings):
                 raise ValueError("monitor_token cannot use a placeholder outside local/test")
         if not self.production_targets_path.strip():
             raise ValueError("production_targets_path cannot be empty")
-        operations_values = (
-            self.operations_rabbitmq_management_url,
-            self.operations_rabbitmq_username,
-            self.operations_rabbitmq_password,
-        )
-        if any(value is not None for value in operations_values) and not all(
-            value is not None for value in operations_values
-        ):
-            raise ValueError(
-                "RabbitMQ operations URL, username, and password must be configured together"
-            )
-        if self.operations_rabbitmq_management_url is not None:
-            _validate_redirect_uri(
-                self.operations_rabbitmq_management_url,
-                field_name="operations_rabbitmq_management_url",
-                strict=strict,
-            )
-            if not self.operations_rabbitmq_vhost.strip():
-                raise ValueError("operations_rabbitmq_vhost cannot be empty")
-            if strict and self.operations_rabbitmq_password is not None:
-                if _has_placeholder_secret(self.operations_rabbitmq_password.get_secret_value()):
-                    raise ValueError(
-                        "operations_rabbitmq_password cannot use a placeholder outside local/test"
-                    )
         return self
 
 
@@ -314,64 +269,6 @@ class CoreMigrationSettings(_PlatformSettings):
         return self
 
 
-class ProjectionMigrationSettings(_PlatformSettings):
-    projection_migration_database_url: str = (
-        "postgresql+psycopg://ai_hub_projection_migrator:"
-        "local-only-projection-migrator-password@localhost:5433/platform_db"
-    )
-
-    @model_validator(mode="after")
-    def validate_configuration(self) -> Self:
-        _validate_database_url(
-            self.projection_migration_database_url,
-            field_name="projection_migration_database_url",
-            strict=_is_strict_environment(self.environment),
-        )
-        return self
-
-
-class ProjectionWorkerSettings(_PlatformSettings):
-    projection_database_url: str = (
-        "postgresql+psycopg://ai_hub_projection:local-only-projection-password@"
-        "localhost:5433/platform_db"
-    )
-    rabbitmq_url: str = (
-        "amqp://platform_projection:local-only-rabbitmq-projection-password@"
-        "localhost:5672/ai-hub-local"
-    )
-    queue_name: str = "ai-hub.platform.projection"
-    prefetch_count: int = 20
-    max_redeliveries: int = 5
-    connection_timeout_seconds: float = 10.0
-    processing_delay_seconds: float = 0.0
-    acknowledgement_delay_seconds: float = 0.0
-
-    @model_validator(mode="after")
-    def validate_configuration(self) -> Self:
-        strict = _is_strict_environment(self.environment)
-        _validate_database_url(
-            self.projection_database_url,
-            field_name="projection_database_url",
-            strict=strict,
-        )
-        _validate_rabbitmq_url(self.rabbitmq_url, strict=strict)
-        if self.queue_name != "ai-hub.platform.projection":
-            raise ValueError("queue_name must use the registered projection queue")
-        if not 1 <= self.prefetch_count <= 500:
-            raise ValueError("prefetch_count must be between 1 and 500")
-        if not 1 <= self.max_redeliveries <= 20:
-            raise ValueError("max_redeliveries must be between 1 and 20")
-        if self.connection_timeout_seconds <= 0:
-            raise ValueError("connection_timeout_seconds must be positive")
-        for value in (
-            self.processing_delay_seconds,
-            self.acknowledgement_delay_seconds,
-        ):
-            if not 0 <= value <= 60:
-                raise ValueError("worker diagnostic delays must be between 0 and 60 seconds")
-        return self
-
-
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
@@ -382,11 +279,75 @@ def get_core_migration_settings() -> CoreMigrationSettings:
     return CoreMigrationSettings()
 
 
-@lru_cache
-def get_projection_migration_settings() -> ProjectionMigrationSettings:
-    return ProjectionMigrationSettings()
+class RawMigrationSettings(_PlatformSettings):
+    raw_migration_database_url: str = (
+        "postgresql+psycopg://ai_hub_raw_migrator:"
+        "local-only-raw-migrator-password@localhost:5433/platform_db"
+    )
+
+    @model_validator(mode="after")
+    def validate_configuration(self) -> Self:
+        _validate_database_url(
+            self.raw_migration_database_url,
+            field_name="raw_migration_database_url",
+            strict=_is_strict_environment(self.environment),
+        )
+        return self
+
+
+class RawWorkerSettings(_PlatformSettings):
+    raw_database_url: str = (
+        "postgresql+psycopg://ai_hub_raw:local-only-raw-password@"
+        "localhost:5433/platform_db"
+    )
+    ingest_sources_path: str = "deploy/operations/ingest-sources.json"
+    tick_interval_seconds: float = 1.0
+    http_timeout_seconds: float = 30.0
+    max_concurrent_sources: int = 4
+    max_concurrent_per_application: int = 2
+    oidc_issuer: str = "http://localhost:9000/application/o/ai-hub/"
+    oidc_client_id: str = "ai-hub-platform"
+    oidc_client_secret: SecretStr = SecretStr("local-only-oidc-client-secret")
+
+    @model_validator(mode="after")
+    def validate_configuration(self) -> Self:
+        strict = _is_strict_environment(self.environment)
+        _validate_database_url(
+            self.raw_database_url,
+            field_name="raw_database_url",
+            strict=strict,
+        )
+        if not self.ingest_sources_path.strip():
+            raise ValueError("ingest_sources_path cannot be empty")
+        if self.tick_interval_seconds <= 0:
+            raise ValueError("tick_interval_seconds must be positive")
+        if self.http_timeout_seconds <= 0:
+            raise ValueError("http_timeout_seconds must be positive")
+        if not 1 <= self.max_concurrent_sources <= 64:
+            raise ValueError("max_concurrent_sources must be between 1 and 64")
+        if not 1 <= self.max_concurrent_per_application <= 16:
+            raise ValueError(
+                "max_concurrent_per_application must be between 1 and 16"
+            )
+        if self.max_concurrent_per_application > self.max_concurrent_sources:
+            raise ValueError(
+                "max_concurrent_per_application cannot exceed max_concurrent_sources"
+            )
+        _validate_oidc_issuer(self.oidc_issuer, strict=strict)
+        if not self.oidc_client_id.strip():
+            raise ValueError("oidc_client_id cannot be empty")
+        if strict and _has_placeholder_secret(self.oidc_client_secret.get_secret_value()):
+            raise ValueError(
+                "oidc_client_secret cannot use a placeholder outside local/test"
+            )
+        return self
 
 
 @lru_cache
-def get_projection_worker_settings() -> ProjectionWorkerSettings:
-    return ProjectionWorkerSettings()
+def get_raw_migration_settings() -> RawMigrationSettings:
+    return RawMigrationSettings()
+
+
+@lru_cache
+def get_raw_worker_settings() -> RawWorkerSettings:
+    return RawWorkerSettings()

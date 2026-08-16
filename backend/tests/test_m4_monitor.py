@@ -51,10 +51,16 @@ def test_alert_rules_are_schema_valid_and_route_to_approved_owners() -> None:
 
     assert len(rules) == len(config["rules"])
     assert {rule["route"] for rule in rules.values()} <= set(targets["alert_routes"])
-    assert {rule["severity"] for rule in rules.values()} == {"P0", "P1", "P2"}
+    assert {rule["severity"] for rule in rules.values()} == {"P0", "P1"}
+    assert {
+        "event-consumer-missing",
+        "event-backlog-warning",
+        "event-backlog-critical",
+        "projection-gap-open",
+    }.isdisjoint(rules)
 
 
-def test_monitor_evaluates_readiness_backlog_consumer_gap_and_backup() -> None:
+def test_monitor_evaluates_readiness_application_entry_and_backup() -> None:
     _, rules = load_alert_rules()
     observations = evaluate_observations(
         rules,
@@ -70,17 +76,6 @@ def test_monitor_evaluates_readiness_backlog_consumer_gap_and_backup() -> None:
                     "reason": "HTTP 503",
                 }
             ],
-            "event_queues": [
-                {
-                    "queue_name": "ai-hub.crm",
-                    "messages_ready": 1001,
-                    "messages_unacknowledged": 1,
-                    "consumer_count": 0,
-                }
-            ],
-            "projections": [
-                {"application_id": "crm", "open_gap_count": 1}
-            ],
         },
         backup_age_minutes=61,
         targets=load_targets(),
@@ -90,11 +85,8 @@ def test_monitor_evaluates_readiness_backlog_consumer_gap_and_backup() -> None:
     assert ("platform-api-unready", "ai-hub-platform") in active
     assert ("identity-unready", "identity") in active
     assert ("application-entry-critical", "crm:production") in active
-    assert ("event-consumer-missing", "ai-hub.crm") in active
-    assert ("event-backlog-critical", "ai-hub.crm") in active
-    assert ("projection-gap-open", "crm") in active
     assert ("backup-rpo-breached", "off-host-backup") in active
-    assert ("event-backlog-warning", "ai-hub.crm") not in active
+    assert ("portal-unready", "portal") not in active
 
 
 def test_monitor_honors_for_period_deduplicates_and_emits_recovery() -> None:
@@ -105,11 +97,7 @@ def test_monitor_honors_for_period_deduplicates_and_emits_recovery() -> None:
         readiness=False,
         readiness_request_id="request-1",
         http_probes={"identity-unready": True, "portal-unready": True},
-        operations={
-            "application_entries": [],
-            "event_queues": [],
-            "projections": [],
-        },
+        operations={"application_entries": []},
         backup_age_minutes=1,
         targets=load_targets(),
     )
@@ -148,11 +136,7 @@ def test_monitor_honors_for_period_deduplicates_and_emits_recovery() -> None:
         readiness=True,
         readiness_request_id="request-2",
         http_probes={"identity-unready": True, "portal-unready": True},
-        operations={
-            "application_entries": [],
-            "event_queues": [],
-            "projections": [],
-        },
+        operations={"application_entries": []},
         backup_age_minutes=1,
         targets=load_targets(),
     )
@@ -284,7 +268,7 @@ def test_monitor_still_routes_readiness_when_summary_is_unavailable(tmp_path: Pa
                 "created_at": "2026-08-13T12:00:00+00:00",
                 "verified_at": "2026-08-13T12:01:00+00:00",
                 "storage_class": "off-host",
-                "profile": "standard-events",
+                "profile": "base-access",
             }
         ),
         encoding="utf-8",
@@ -358,7 +342,7 @@ def test_backup_freshness_requires_matching_full_verification_receipt(
                 "created_at": "2026-08-13T12:00:00+00:00",
                 "verified_at": "2026-08-13T12:01:00+00:00",
                 "storage_class": "off-host",
-                "profile": "standard-events",
+                "profile": "base-access",
             }
         ),
         encoding="utf-8",

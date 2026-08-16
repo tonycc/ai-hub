@@ -4,9 +4,7 @@ from enum import StrEnum
 
 class IntegrationCapability(StrEnum):
     API_CLIENT = "API_CLIENT"
-    EVENT_PUBLISHER = "EVENT_PUBLISHER"
-    EVENT_CONSUMER = "EVENT_CONSUMER"
-    PROJECTION_SOURCE = "PROJECTION_SOURCE"
+    DATA_INGEST = "DATA_INGEST"
 
 
 @dataclass(frozen=True, slots=True)

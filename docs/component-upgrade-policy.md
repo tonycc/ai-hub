@@ -4,13 +4,14 @@
 
 本文档是 M0-08 的生产组件版本基线。机器可读清单位于 `deploy/component-lock.json`，Compose、Dockerfile 和根 `.env.example` 必须与该清单保持一致，并由自动化测试阻止漂移。
 
+当前生产档位仅为 `base-access`，数据汇聚采用 raw 贴源层增量拉取（ADR-032）。RabbitMQ 与 `standard-events` 已随 M7-06 退役，不再进入组件锁定范围。
+
 锁定范围包括：
 
 - PostgreSQL 运行镜像。
 - Python 后端构建与运行基础镜像。
 - Node.js 门户构建镜像。
 - Nginx 门户运行镜像。
-- RabbitMQ 标准事件档位镜像。
 - authentik 身份服务与 Worker 镜像。
 - Traefik 接入层镜像。
 - Docker 构建中安装的 uv 版本。
@@ -25,7 +26,6 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 | Python | 3.14.7 slim + OCI index digest | 后端构建和运行 | 与 Python 3.14 技术基线一致 |
 | Node.js | 24.18.1 LTS Alpine + OCI index digest | 仅门户构建 | Node.js 20 已 EOL，不能继续作为生产构建基线 |
 | Nginx | 1.30.4 stable Alpine + OCI index digest | 门户静态文件运行时 | 使用 stable 分支，避免 `nginx:alpine` 漂移到新的 mainline 内容 |
-| RabbitMQ | 4.2.9 management + OCI index digest | `standard-events` | 保持总体方案冻结的 4.2 兼容线 |
 | authentik | 2026.5.6 + OCI index digest | OIDC 身份服务与 Worker | 固定 M1 已验证的身份运行时，Server 与 Worker 使用相同制品 |
 | Traefik | 3.7.10 + OCI index digest | HTTP 统一入口 | 固定 M1 已验证的 3.7 修订版，不开放控制面或 Docker Socket |
 | uv | 0.9.8 | Python 依赖安装 | 使用精确版本；Python 包由 `uv.lock` 继续锁定 |
@@ -37,39 +37,37 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 | 组件 | 当前证据 | 状态 |
 | --- | --- | --- |
 | Python 3.14.7 | 精确摘要、平台与独立应用镜像中的运行版本 | 已验证 |
-| RabbitMQ 4.2.9 | 精确摘要、`standard-events` 健康检查、最小权限拓扑、发布确认、故障恢复与 DLQ | 已验证 |
 | PostgreSQL 18.4 | 精确摘要、服务端版本、全新数据卷迁移和数据库权限审计 | 已验证 |
 | Node.js 24.18.1 | 精确摘要、容器运行版本、`npm ci` 与门户生产构建 | 已验证 |
-| Nginx 1.30.4 | 精确摘要、门户运行版本和两个 profile 的健康检查 | 已验证 |
+| Nginx 1.30.4 | 精确摘要、门户运行版本和 `base-access` 健康检查 | 已验证 |
 | authentik 2026.5.6 | 精确摘要、空库初始化、blueprint、Discovery/JWKS、授权码 + PKCE、Client Credentials 与短时故障门禁 | 已验证 |
 | Traefik 3.7.10 | 精确摘要、统一入口、四个 Host/Path 路由、后端健康探测和安全中间件 | 已验证 |
 
 “manifest 已解析”只能证明引用存在和摘要已冻结，不能替代运行测试。本基线已经完成下述验证；以后任何标签或摘要变化都必须重新执行，未通过时不得将新清单用于生产发布：
 
 1. 从全新数据卷启动 `base-access`。
-2. 从全新数据卷启动 `standard-events`。
-3. 所有一次性迁移容器退出码为 0。
-4. 平台 API、门户、独立应用和 RabbitMQ 健康检查通过。
-5. 独立应用通过 SDK/API 访问平台成功。
-6. `role-boundaries.sql` 数据库权限审计通过。
-7. PostgreSQL 报告的服务端版本属于 18.4。
-8. authentik 的可重复 blueprint、OIDC Discovery、用户登录和服务令牌均通过真实运行验证。
-9. Traefik 是唯一公开 HTTP 入口，且平台、门户、身份和参考应用路由及健康检查通过。
-10. RabbitMQ 中断时 Outbox 保留，恢复后自动续传；重复、乱序、消费崩溃和永久失败场景通过。
+2. 所有一次性迁移容器退出码为 0（含平台核心与 raw 贴源层）。
+3. 平台 API、门户和独立应用健康检查通过。
+4. 独立应用通过 SDK/API 访问平台成功。
+5. `role-boundaries.sql` 数据库权限审计通过。
+6. PostgreSQL 报告的服务端版本属于 18.4。
+7. authentik 的可重复 blueprint、OIDC Discovery、用户登录和服务令牌均通过真实运行验证。
+8. Traefik 是唯一公开 HTTP 入口，且平台、门户、身份和参考应用路由及健康检查通过。
+9. raw 贴源层增量汇聚相关门禁通过（调度拉取、位点推进与对账；见 ADR-032 / M7）。
 
 本地因网络或缓存限制使用其他镜像时，必须通过显式环境变量覆盖并在验证记录中注明。兼容镜像验证不改变生产锁定，也不能替代上面的精确镜像门禁。
 
-2026-08-12 已使用本机缓存的 PostgreSQL 16、Node.js 20 和 Nginx 浮动旧镜像做一次 `standard-events` 兼容性验证；所有迁移退出码为 0，平台 API、门户、独立应用与 RabbitMQ 健康，独立应用到平台的 API 调用和数据库角色边界审计通过，临时容器、网络及数据卷已删除。该记录只证明当前部署结构与边界仍可运行，不计入 PostgreSQL 18.4、Node.js 24.18.1 和 Nginx 1.30.4 的精确镜像门禁。
+2026-08-12 已使用本机缓存的 PostgreSQL 16、Node.js 20 和 Nginx 浮动旧镜像做一次当时的 `standard-events` 兼容性验证；所有迁移退出码为 0，平台 API、门户、独立应用与当时的 RabbitMQ 健康，独立应用到平台的 API 调用和数据库角色边界审计通过，临时容器、网络及数据卷已删除。该记录只证明当时部署结构与边界仍可运行，不计入 PostgreSQL 18.4、Node.js 24.18.1 和 Nginx 1.30.4 的精确镜像门禁。**M7-06 / ADR-032：RabbitMQ 与 `standard-events` 已退役，该历史验证不再作为现行门禁。**
 
 同日已完成精确锁定镜像门禁：
 
 - 首次核验发现原 Node.js 摘要实际运行 24.17.0，与可读标签 24.18.1 不一致；已按精确标签重新解析并把清单修正为实际运行 24.18.1 的摘要。Docker 在标签与摘要冲突时使用摘要内容，因此不能只检查可读标签。
 - PostgreSQL 18.4 首次启动暴露官方镜像的数据目录布局变化；Compose 命名卷已从旧路径 `/var/lib/postgresql/data` 调整到 18+ 要求的 `/var/lib/postgresql`，并增加静态契约测试。
-- `base-access` 已从全新数据卷完成基础迁移；平台 API、门户与独立应用健康，独立应用到平台的 API 调用成功，API-only 数据库未创建 Outbox/Inbox。
-- `standard-events` 已从另一全新数据卷完成平台核心、事件登记、平台投影、参考应用基础和参考应用发布者五个迁移入口；全部退出码为 0，RabbitMQ 健康且 ping 成功，Outbox/Inbox 按档位存在，数据库角色边界审计通过。
-- 容器实际报告 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4 和 RabbitMQ 4.2.9。验证平台为 `linux/arm64`；两套临时环境的容器、网络和数据卷均已删除。
+- `base-access` 已从全新数据卷完成基础迁移；平台 API、门户与独立应用健康，独立应用到平台的 API 调用成功。当时记录“API-only 数据库未创建 Outbox/Inbox”；**Outbox/Inbox 随 M2 退役，现行档位不再创建这些对象。**
+- ~~`standard-events` 已从另一全新数据卷完成平台核心、事件登记、平台投影、参考应用基础和参考应用发布者五个迁移入口；全部退出码为 0，RabbitMQ 健康且 ping 成功，Outbox/Inbox 按档位存在，数据库角色边界审计通过。~~ **（历史；M7-06 / ADR-032 已退役 `standard-events`、RabbitMQ、Outbox/Inbox 与投影。）**
+- 容器实际报告 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4；当时另报告 RabbitMQ 4.2.9。验证平台为 `linux/arm64`；临时环境的容器、网络和数据卷均已删除。**RabbitMQ 版本记录仅为历史，现行锁清单不含该组件。**
 - M1 追加验证 authentik 2026.5.6 与 Traefik 3.7.10 的精确镜像；从全新数据卷通过 OIDC/JWKS、PKCE、服务身份、权限、通知、故障降级和独立重启门禁，临时环境随后删除。
-- M2 追加验证 RabbitMQ 4.2.9 的隔离 vhost、Quorum 队列、DLQ、最小权限凭据、发布确认、代理中断恢复、手动确认和消费者崩溃窗口；并完成平台投影从空 Schema 重建及对账，临时环境随后删除。
+- ~~M2 追加验证 RabbitMQ 4.2.9 的隔离 vhost、Quorum 队列、DLQ、最小权限凭据、发布确认、代理中断恢复、手动确认和消费者崩溃窗口；并完成平台投影从空 Schema 重建及对账，临时环境随后删除。~~ **（历史；M7-06 / ADR-032 已退役 M2 实时事件投影能力线。）**
 
 ## 4. 不可变引用规则
 
@@ -98,8 +96,8 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 2. 拉取候选精确标签，读取 Docker 返回的多架构 index digest，再以“精确标签 + 摘要”运行版本命令确认内容与标签一致；不以搜索结果中的单架构短摘要或另一时点的浮动标签摘要代替。
 3. 记录变更原因、修复项、已知不兼容、数据格式影响和回滚限制。
 4. 原子更新 `component-lock.json`、Compose、Dockerfile、`.env.example` 和本文档。
-5. 运行组件锁一致性测试、Python 门禁、前端生产构建和两个 Compose 配置检查。
-6. 在全新数据卷执行两个 profile 的精确镜像验证和数据库权限审计。
+5. 运行组件锁一致性测试、Python 门禁、前端生产构建和 `base-access` Compose 配置检查。
+6. 在全新数据卷执行 `base-access` 的精确镜像验证和数据库权限审计。
 7. 对有状态组件执行备份恢复或定义导出/恢复演练；在集成环境完成升级后观察约定窗口。
 8. 构建并推送内部镜像，在发布清单记录内部镜像摘要、组件锁 ID、代码提交、迁移 revision 和契约版本。
 9. 先进入 UAT，再按维护窗口进入生产；失败时按组件回滚规则处理。
@@ -116,20 +114,14 @@ M0-09 将上述静态检查接入 CI。漏洞扫描、签名/来源证明和自�
 - 启动新版本后发生写入时，不自动把旧镜像指回同一数据卷。先判断是否存在目录、扩展或修复语义影响，再选择镜像回退、时间点恢复或修复前进。
 - PostgreSQL 大版本升级必须使用独立数据目录，通过 `pg_upgrade`、dump/restore 或逻辑复制完成，并具备独立回切方案。
 
-### 7.2 RabbitMQ
-
-- 保持 4.2 兼容线内升级，升级前导出 definitions，记录队列、交换机、绑定、策略和用户权限。
-- 先暂停新的发布/消费扩容，记录积压水位，再升级测试环境并验证发布确认、手动确认、死信和重连。
-- 任何跨大版本或需要特性标志迁移的变更必须单独设计，不能直接复用补丁升级回滚步骤。
-
-### 7.3 authentik 与 Traefik
+### 7.2 authentik 与 Traefik
 
 - authentik Server 与 Worker 必须使用相同精确镜像；升级前备份 `authentik_db` 和 `/data`，在独立环境从 blueprint 重建并验证已有 issuer、client_id、严格回调、scope、签名密钥和 subject 语义不漂移。
 - authentik 升级必须验证 Discovery/JWKS、授权码 + PKCE、Client Credentials、登录/登出、令牌有效期、错误凭据、未知签名密钥和短时不可用行为。签名密钥轮换需要保留兼容窗口，不能在仍有有效旧令牌时立即移除旧公钥。
 - Traefik 升级必须验证静态/动态配置解析、唯一公开入口、Host/Path 优先级、后端健康探测、请求大小限制、安全响应头和 request_id 透传。不得为便利挂载 Docker Socket 或开启未保护 Dashboard。
 - 两者均先在全新环境验证，再在有备份的集成环境演练替换与回滚。authentik 已写入新版本不兼容数据后不能只切回旧镜像；应按官方升级路径修复前进或恢复已验证备份。
 
-### 7.4 Python、Node.js 与 Nginx
+### 7.3 Python、Node.js 与 Nginx
 
 - Python 或基础操作系统摘要变化后重新构建所有 Python 制品，并运行完整测试和迁移离线 SQL 契约测试。
 - Node.js 只存在于构建阶段，但必须使用受支持的 LTS；构建产物仍需执行前端生产构建和 Nginx 容器健康检查。
@@ -144,10 +136,10 @@ M0-09 将上述静态检查接入 CI。漏洞扫描、签名/来源证明和自�
 - `component_lock_id` 及清单内容摘要。
 - 平台、门户、Worker 和 SDK/参考应用制品版本。
 - 所有内部与第三方镜像完整 digest 引用。
-- 平台核心、投影和独立应用 Alembic revision。
-- OpenAPI、AsyncAPI 和事件信封版本。
+- 平台核心、raw 贴源层和独立应用 Alembic revision。
+- OpenAPI 与相关数据导出/汇聚契约版本。
 - 数据备份位置、恢复验证结果、升级步骤和明确回滚点。
-- 已执行的 profile、测试结果、批准人和剩余风险。
+- 已执行的 profile（现行为 `base-access`）、测试结果、批准人和剩余风险。
 
 回滚必须使用上一份已批准发布清单，不允许把环境变量改回浮动标签寻找“上一个镜像”。数据库已经执行不可逆迁移时，应用镜像回滚必须先确认旧代码仍兼容扩展后的 Schema；否则执行修复前进或已演练的数据恢复方案。
 
@@ -158,4 +150,3 @@ M0-09 将上述静态检查接入 CI。漏洞扫描、签名/来源证明和自�
 - PostgreSQL 版本支持策略：<https://www.postgresql.org/support/versioning/>
 - Node.js 支持与 EOL 状态：<https://nodejs.org/en/about/previous-releases>
 - Nginx 官方下载与 stable/mainline 版本：<https://nginx.org/en/download.html>
-- RabbitMQ 官方镜像标签：<https://hub.docker.com/_/rabbitmq>

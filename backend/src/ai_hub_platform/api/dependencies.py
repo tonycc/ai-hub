@@ -223,30 +223,56 @@ def portal_permission_dependency(
                 "Platform role does not permit this operation for the requested resource",
             )
         if require_csrf:
-            settings = request.app.state.settings
-            csrf_cookie = request.cookies.get(settings.portal_csrf_cookie_name)
-            csrf_valid = bool(
-                csrf_header
-                and csrf_cookie
-                and hmac.compare_digest(csrf_header, csrf_cookie)
-                and hmac.compare_digest(secret_hash(csrf_header), principal.csrf_hash)
+            await _validate_portal_csrf(
+                request,
+                principal,
+                csrf_header,
+                application_id=application_id,
             )
-            if not csrf_valid:
-                await _audit_portal_denial(
-                    get_database(request),
-                    request,
-                    error_code="csrf_validation_failed",
-                    actor_id=principal.subject,
-                    application_id=application_id,
-                )
-                raise ApiError(
-                    403,
-                    "csrf_validation_failed",
-                    "A matching portal CSRF token is required",
-                )
         return principal
 
     return dependency
 
 
+async def _validate_portal_csrf(
+    request: Request,
+    principal: PortalPrincipal,
+    csrf_header: str | None,
+    *,
+    application_id: str | None = None,
+) -> None:
+    settings = request.app.state.settings
+    csrf_cookie = request.cookies.get(settings.portal_csrf_cookie_name)
+    csrf_valid = bool(
+        csrf_header
+        and csrf_cookie
+        and hmac.compare_digest(csrf_header, csrf_cookie)
+        and hmac.compare_digest(secret_hash(csrf_header), principal.csrf_hash)
+    )
+    if csrf_valid:
+        return
+    await _audit_portal_denial(
+        get_database(request),
+        request,
+        error_code="csrf_validation_failed",
+        actor_id=principal.subject,
+        application_id=application_id,
+    )
+    raise ApiError(
+        403,
+        "csrf_validation_failed",
+        "A matching portal CSRF token is required",
+    )
+
+
+async def portal_csrf_principal(
+    request: Request,
+    principal: Annotated[PortalPrincipal, Depends(portal_principal)],
+    csrf_header: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> PortalPrincipal:
+    await _validate_portal_csrf(request, principal, csrf_header)
+    return principal
+
+
 PortalPrincipalDependency = Annotated[PortalPrincipal, Depends(portal_principal)]
+PortalCsrfDependency = Annotated[PortalPrincipal, Depends(portal_csrf_principal)]

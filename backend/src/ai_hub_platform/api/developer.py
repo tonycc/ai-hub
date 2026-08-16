@@ -138,10 +138,7 @@ async def sandbox_configuration(
         user_subject=settings.sandbox_user_subject,
         default_capabilities=["API_CLIENT"],
         optional_capabilities=[
-            "EVENT_PUBLISHER",
-            "EVENT_CONSUMER",
-            "PROJECTION_SOURCE",
-            "PROJECTION_READER",
+            "DATA_INGEST",
         ],
         client_secret_included=False,
     )

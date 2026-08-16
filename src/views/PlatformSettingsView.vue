@@ -40,9 +40,6 @@ const sloRows = computed(() => targets.value ? [
   { name: '最低压测速率', value: targets.value.slo.minimum_test_rps, unit: 'RPS', purpose: '发布前最低负载规模' },
   { name: '最低压测请求数', value: targets.value.slo.minimum_test_requests, unit: '次', purpose: '发布前最低样本量' },
   { name: '最大服务端错误率', value: targets.value.slo.maximum_server_error_percent, unit: '%', purpose: '压测失败门槛' },
-  { name: '事件积压告警', value: targets.value.slo.event_backlog_warning, unit: '条', purpose: '进入告警状态' },
-  { name: '事件积压严重告警', value: targets.value.slo.event_backlog_critical, unit: '条', purpose: '进入严重告警状态' },
-  { name: '事件恢复目标', value: targets.value.slo.event_recovery_minutes, unit: '分钟', purpose: '积压恢复时间目标' },
 ] : [])
 
 const retentionRows = computed(() => targets.value ? [
@@ -50,8 +47,6 @@ const retentionRows = computed(() => targets.value ? [
   { name: '站内测试通知', value: targets.value.retention.notification_days, unit: '天', owner: '平台运行' },
   { name: '到期门户会话', value: targets.value.retention.portal_session_days_after_expiry, unit: '天', owner: '身份与安全' },
   { name: '到期接入认证', value: targets.value.retention.conformance_days_after_expiry, unit: '天', owner: '接入治理' },
-  { name: '已发布 Outbox', value: targets.value.retention.published_outbox_days, unit: '天', owner: '事件运行' },
-  { name: 'Inbox 幂等记录', value: targets.value.retention.inbox_days, unit: '天', owner: '事件运行' },
   { name: '小时备份保留', value: targets.value.retention.backup_hourly_count, unit: '份', owner: '数据恢复' },
   { name: '每日备份保留', value: targets.value.retention.backup_daily_days, unit: '天', owner: '数据恢复' },
 ] : [])
@@ -136,12 +131,11 @@ onMounted(loadTargets)
               </el-descriptions>
             </section>
             <section class="surface-panel detail-panel">
-              <div class="section-heading"><div><h2>恢复目标</h2><p>备份频率与平台、投影恢复门禁。</p></div></div>
+              <div class="section-heading"><div><h2>恢复目标</h2><p>备份频率与平台恢复门禁。</p></div></div>
               <el-descriptions :column="1" border>
                 <el-descriptions-item label="备份间隔">{{ targets.recovery.backup_interval_minutes }} 分钟</el-descriptions-item>
                 <el-descriptions-item label="平台 RPO">{{ targets.recovery.rpo_minutes }} 分钟</el-descriptions-item>
                 <el-descriptions-item label="平台 RTO">{{ targets.recovery.rto_minutes }} 分钟</el-descriptions-item>
-                <el-descriptions-item label="投影 RTO">{{ targets.recovery.projection_rto_minutes }} 分钟</el-descriptions-item>
               </el-descriptions>
             </section>
           </div>
@@ -157,7 +151,7 @@ onMounted(loadTargets)
         </template>
 
         <section v-else-if="activeTab === 'retention'" class="surface-panel table-panel page-section">
-          <div class="section-heading"><div><h2>数据保留策略</h2><p>只定义平台数据和平台事件基础设施，不定义独立应用业务数据生命周期。</p></div></div>
+          <div class="section-heading"><div><h2>数据保留策略</h2><p>只定义平台数据生命周期，不定义独立应用业务数据生命周期。</p></div></div>
           <el-table :data="retentionRows" style="width: 100%">
             <el-table-column prop="name" label="平台数据" min-width="260" />
             <el-table-column prop="value" label="保留值" min-width="140" />

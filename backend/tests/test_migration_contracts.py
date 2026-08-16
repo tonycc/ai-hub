@@ -43,31 +43,32 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "REVOKE ALL ON platform_core.alembic_version FROM ai_hub_platform" in sql
     assert "('SECURITY_AUDITOR', 'platform.notification.read')" in sql
     assert "platform_projection" not in sql
+    assert "platform_raw" not in sql
     assert "integration_outbox" not in sql
     assert "integration_inbox" not in sql
     assert "event_contract_registration" not in sql
+    assert "ck_conformance_check_profile" in sql
+    assert "profile IN ('API_ONLY', 'DATA_INGEST')" in sql
+    assert "profile IN ('DATA_INGEST')" in sql
+    assert "20260816_core_0009" in sql
 
 
-def test_platform_projection_migration_does_not_create_core_objects() -> None:
-    sql = render_upgrade_sql("alembic-projection.ini")
+def test_platform_raw_migration_establishes_ingest_tables_without_core_objects() -> None:
+    sql = render_upgrade_sql("alembic-raw.ini")
 
-    assert "CREATE TABLE platform_projection.alembic_version" in sql
-    assert "CREATE TABLE platform_projection.integration_inbox" in sql
-    assert "CREATE TABLE platform_projection.projection_checkpoint" in sql
-    assert "CREATE TABLE platform_projection.example_record_projection" in sql
-    assert "CREATE TABLE platform_projection.projection_gap" in sql
+    assert "CREATE TABLE platform_raw.alembic_version" in sql
+    assert "CREATE TABLE platform_raw.raw_sync_cursor" in sql
+    assert "CREATE TABLE platform_raw.raw_ingest_batch" in sql
+    assert "CREATE TABLE platform_raw.raw_change_record" in sql
+    assert "CREATE TABLE platform_raw.raw_current_state" in sql
+    assert "uq_raw_change_record_idempotent" in sql
+    assert "payload_contract_version" in sql
     assert "platform_core" not in sql
-    assert "integration_outbox" not in sql
-
-
-def test_event_registration_migration_enables_only_registered_contracts() -> None:
-    sql = render_upgrade_sql("alembic-events.ini")
-
-    assert "CREATE TABLE platform_core.alembic_version_events" in sql
-    assert "CREATE TABLE platform_core.event_contract_registration" in sql
-    assert "EVENT_PUBLISHER" in sql
-    assert "PROJECTION_SOURCE" in sql
-    assert "company.example.record.changed.v1" in sql
-    assert "company.example.record.deleted.v1" in sql
-    assert "CREATE TABLE platform_core.application" not in sql
     assert "platform_projection" not in sql
+    assert "integration_outbox" not in sql
+    assert "REVOKE ALL ON platform_raw.alembic_version FROM ai_hub_platform, ai_hub_raw" in sql
+
+
+def test_retired_event_and_projection_migration_configs_are_gone() -> None:
+    assert not (BACKEND_ROOT / "alembic-events.ini").exists()
+    assert not (BACKEND_ROOT / "alembic-projection.ini").exists()

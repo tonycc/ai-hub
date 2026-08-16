@@ -9,6 +9,7 @@
 - [生产组件锁定与升级策略](docs/component-upgrade-policy.md)
 - [平台前端设计与复用说明](docs/frontend-prototype-design.md)
 - [管理端前端页面设计规范](docs/admin-frontend-design-spec.md)
+- [本地全流程测试指南](docs/local-full-flow-test-guide.md)
 - [M3 平台公共能力基线](docs/m3-platform-management-design.md)
 - [M3 UAT 报告](docs/m3-uat-report.md)
 
@@ -36,13 +37,33 @@ bash scripts/ci/all.sh
 本地基础接入档位：
 
 ~~~bash
-docker compose -f deploy/compose.yaml --profile base-access up -d --build
+bash scripts/local/start.sh base-access
+~~~
+
+该脚本是本地后端调试入口：平台 API 使用 Uvicorn `--reload` 与 debug 日志，脚本以前台模式运行，按 `Ctrl+C` 停止。前端在另一个终端独立启动，以获得 Vite 热更新：
+
+~~~bash
+npm run dev
+~~~
+
+需要只复用已经构建的后端镜像时可追加 `--no-build`。
+
+仅构建发布镜像、或需要不启用热更新的原始 Compose 命令：
+
+~~~bash
+docker compose --env-file .env -f deploy/compose.yaml --profile base-access up -d --build
 ~~~
 
 需要可靠事件链路时显式启用标准事件档位：
 
 ~~~bash
-docker compose -f deploy/compose.yaml --profile standard-events up -d --build
+bash scripts/local/start.sh
+~~~
+
+脚本默认启动完整 `standard-events`，自动创建缺失的本地 `.env` 并校验 Compose；不会覆盖已有 `.env`。等价的非调试原始 Compose 命令：
+
+~~~bash
+docker compose --env-file .env -f deploy/compose.yaml --profile standard-events up -d --build
 ~~~
 
 当前 Compose 使用单 PostgreSQL 服务承载三个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成身份与 API 纵向链路；M2 已完成可靠事件与可重建只读投影；M3 已完成平台公共能力；M4 已完成生产运行、恢复、发布、性能和故障韧性验收；M4.1 已完成只读生产配置、门户状态和通知边界收尾。两个档位的准确组件边界和命令见[本地部署说明](deploy/README.md)。API-only 应用不会被强制安装事件表、RabbitMQ 凭据或 Worker。

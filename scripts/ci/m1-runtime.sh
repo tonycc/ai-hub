@@ -213,7 +213,7 @@ m1_wait_url "${M1_APP_BASE}/health/live"
 m1_wait_url "${M1_AUTH_BASE}/-/health/ready/"
 m1_wait_url "${M1_AUTH_BASE}/application/o/ai-hub/.well-known/openid-configuration"
 
-for m1_migration in platform-core-migrate standalone-migrate; do
+for m1_migration in platform-core-migrate platform-raw-migrate standalone-migrate; do
   m1_container_id="$(m1_compose ps -a -q "${m1_migration}")"
   [[ -n "${m1_container_id}" ]] || m1_fail "migration container is missing: ${m1_migration}"
   m1_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "${m1_container_id}")"

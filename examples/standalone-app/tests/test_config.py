@@ -1,10 +1,15 @@
+import os
+
 import pytest
 from pydantic import ValidationError
-from standalone_app.config import EventPublisherSettings, MigrationSettings, Settings
+from standalone_app.config import MigrationSettings, Settings
 
 
-def test_local_runtime_defaults_are_valid() -> None:
-    settings = Settings()
+def test_local_runtime_defaults_are_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("STANDALONE_"):
+            monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)
 
     assert settings.environment == "local"
     assert settings.application_id == "standalone-example"
@@ -92,27 +97,15 @@ def test_migration_process_does_not_require_platform_api_configuration() -> None
     assert settings.environment == "production"
 
 
-def test_event_publisher_uses_a_distinct_database_setting() -> None:
-    settings = EventPublisherSettings()
+def test_data_ingest_capability_is_accepted() -> None:
+    settings = Settings(integration_capabilities="API_CLIENT,DATA_INGEST")
 
-    assert "standalone_outbox_publisher" in settings.publisher_database_url
-    assert not hasattr(settings, "platform_api_base_url")
+    assert "DATA_INGEST" in settings.capabilities
 
 
-def test_production_event_publisher_requires_secure_broker_and_database() -> None:
-    settings = EventPublisherSettings(
-        environment="production",
-        publisher_database_url=(
-            "postgresql+psycopg://standalone_outbox_publisher:RelaySecret-3819@"
-            "standalone-db.internal:5432/standalone_app_db"
-        ),
-        rabbitmq_url=(
-            "amqps://standalone_publisher:BrokerSecret-3819@"
-            "rabbitmq.internal:5671/production-events"
-        ),
-    )
-
-    assert settings.environment == "production"
+def test_unknown_capability_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="unsupported capability"):
+        Settings(integration_capabilities="API_CLIENT,EVENT_PUBLISHER")
 
 
 def test_jwks_stale_window_cannot_be_shorter_than_fresh_cache() -> None:

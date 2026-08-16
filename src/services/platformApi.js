@@ -1,5 +1,14 @@
 const API_PREFIX = '/portal-api/v1'
 
+let loginRedirectPending = false
+
+function redirectToLogin() {
+  if (loginRedirectPending) return
+  loginRedirectPending = true
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  window.location.assign(`/auth/login?return_to=${encodeURIComponent(returnTo)}`)
+}
+
 export class PlatformApiError extends Error {
   constructor(status, code, message, requestId = null, details = {}) {
     super(message)
@@ -59,6 +68,7 @@ export async function apiRequest(path, options = {}) {
       ? options.body
       : JSON.stringify(options.body),
   })
+  if (response.status === 401) redirectToLogin()
   if (!response.ok) throw await parseError(response)
   if (response.status === 204) return null
   return response.json()
@@ -79,6 +89,15 @@ export async function downloadAsset(path, filename) {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+export async function fetchAssetText(path) {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  })
+  if (!response.ok) throw await parseError(response)
+  return response.text()
 }
 
 export function queryString(values) {

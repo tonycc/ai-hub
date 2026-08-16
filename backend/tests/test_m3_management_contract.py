@@ -4,7 +4,6 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -18,9 +17,6 @@ from ai_hub_platform.modules.developer.service import (
     DeveloperAssetNotFoundError,
     DeveloperCatalogService,
 )
-from ai_hub_platform.modules.operations.service import OperationsService
-from pydantic import SecretStr
-from sqlalchemy.ext.asyncio import AsyncSession
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -65,6 +61,13 @@ def test_m3_management_openapi_exposes_required_server_authorized_resources() ->
         "/portal-api/v1/applications/{application_id}/conformance-runs": {"post"},
         "/portal-api/v1/operations/targets": {"get"},
         "/portal-api/v1/operations/summary": {"get"},
+        "/portal-api/v1/data/objects": {"get"},
+        "/portal-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}": {
+            "get"
+        },
+        "/portal-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}/history": {
+            "get"
+        },
     }
     for path, methods in expected_methods.items():
         assert path in paths
@@ -303,112 +306,15 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
     await http_client.aclose()
 
 
-@pytest.mark.asyncio
-async def test_operations_queue_diagnostics_use_read_only_metrics_and_thresholds() -> None:
-    requests: list[httpx.Request] = []
+def test_operations_summary_exposes_application_entries_without_event_queues() -> None:
+    source = (
+        PROJECT_ROOT / "backend/src/ai_hub_platform/modules/operations/service.py"
+    ).read_text(encoding="utf-8")
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "name": "ai-hub.platform.projection",
-                    "messages_ready": 101,
-                    "messages_unacknowledged": 1,
-                    "consumers": 1,
-                },
-                {
-                    "name": "ai-hub.platform.projection.dlq",
-                    "messages_ready": 3,
-                    "messages_unacknowledged": 0,
-                    "consumers": 0,
-                },
-                {
-                    "name": "unrelated.queue",
-                    "messages_ready": 9,
-                    "messages_unacknowledged": 0,
-                    "consumers": 0,
-                },
-            ],
-        )
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    session_mock = AsyncMock()
-    session_mock.scalar.side_effect = [True, True]
-    session = cast(AsyncSession, session_mock)
-    rows = await OperationsService()._event_health(  # pyright: ignore[reportPrivateUsage]
-        session,
-        rabbitmq_management_url="https://rabbitmq.test",
-        rabbitmq_vhost="ai-hub-local",
-        rabbitmq_username="observer",
-        rabbitmq_password=SecretStr("observer-password"),
-        http_client=client,
-        backlog_warning=100,
-        backlog_critical=1000,
-    )
-    assert rows == [
-        {
-            "queue_name": "ai-hub.platform.projection",
-            "messages_ready": 101,
-            "messages_unacknowledged": 1,
-            "consumer_count": 1,
-            "status": "WARNING",
-            "reason": "Event backlog exceeds the warning threshold",
-        }
-    ]
-    assert requests[0].method == "GET"
-    assert requests[0].url.path.endswith("/api/queues/ai-hub-local")
-    await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_operations_skip_rabbitmq_only_when_no_event_contract_is_registered() -> None:
-    session_mock = AsyncMock()
-    session_mock.scalar.return_value = False
-    session = cast(AsyncSession, session_mock)
-    client = httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda _request: pytest.fail("RabbitMQ must not be called for API-only deployments")
-        )
-    )
-
-    rows = await OperationsService()._event_health(  # pyright: ignore[reportPrivateUsage]
-        session,
-        rabbitmq_management_url="http://rabbitmq:15672",
-        rabbitmq_vhost="ai-hub-local",
-        rabbitmq_username="observer",
-        rabbitmq_password=SecretStr("observer-password"),
-        http_client=client,
-        backlog_warning=100,
-        backlog_critical=1000,
-    )
-
-    assert rows == []
-    await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_operations_report_missing_observer_for_registered_events() -> None:
-    session_mock = AsyncMock()
-    session_mock.scalar.side_effect = [True, True]
-    session = cast(AsyncSession, session_mock)
-    client = httpx.AsyncClient()
-
-    rows = await OperationsService()._event_health(  # pyright: ignore[reportPrivateUsage]
-        session,
-        rabbitmq_management_url=None,
-        rabbitmq_vhost="ai-hub-local",
-        rabbitmq_username=None,
-        rabbitmq_password=None,
-        http_client=client,
-        backlog_warning=100,
-        backlog_critical=1000,
-    )
-
-    assert rows[0]["status"] == "CRITICAL"
-    assert rows[0]["reason"] == "RabbitMQ read-only observer is not configured"
-    await client.aclose()
+    assert '"application_entries": applications' in source
+    assert "event_queues" not in source
+    assert "projections" not in source
+    assert "rabbitmq" not in source.lower()
 
 
 def test_runtime_evidence_document_requires_typed_profiles() -> None:
@@ -418,15 +324,15 @@ def test_runtime_evidence_document_requires_typed_profiles() -> None:
         {
             "application_id": "standalone-example",
             "environment": "local",
-            "contract_version": "m3-conformance-0.2.0",
-            "source": "scripts/ci/m2-runtime.sh",
+            "contract_version": "m7-conformance-0.1.0",
+            "source": "examples/sdk/data_ingest_evidence.py",
             "verified_at": datetime.now(UTC),
             "profiles": {
-                "EVENT_CONSUMER": {
+                "DATA_INGEST": {
                     "status": "PASSED",
-                    "evidence": {"application_inbox_atomic": True},
+                    "evidence": {"export_scope_enforced": True},
                 }
             },
         }
     )
-    assert document.profiles["EVENT_CONSUMER"].status == "PASSED"
+    assert document.profiles["DATA_INGEST"].status == "PASSED"

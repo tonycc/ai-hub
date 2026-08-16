@@ -7,17 +7,21 @@ from pathlib import Path
 from typing import Any, Literal
 
 import uvicorn
-from ai_hub_sdk import ExampleRecordSnapshot, json_log_config
+from ai_hub_sdk import json_log_config
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ai_hub_platform.config import get_projection_worker_settings, get_settings
+from ai_hub_platform.config import (
+    get_raw_worker_settings,
+    get_settings,
+)
 from ai_hub_platform.modules.conformance.service import (
     ConformanceProfile,
     ConformanceService,
 )
-from ai_hub_platform.modules.projection.service import rebuild_from_snapshot, reconcile_snapshot
-from ai_hub_platform.modules.projection.worker import run_projection_worker
+from ai_hub_platform.modules.ingest.rebuild import rebuild
+from ai_hub_platform.modules.ingest.reconcile import RebuildMode, reconcile_source
+from ai_hub_platform.modules.ingest.scheduler import run_ingest_scheduler
 
 
 def run() -> None:
@@ -30,38 +34,63 @@ def run() -> None:
     )
 
 
-def run_projection_worker_cli() -> None:
+def run_ingest_scheduler_cli() -> None:
     logging.config.dictConfig(json_log_config())
-    asyncio.run(run_projection_worker(get_projection_worker_settings()))
+    asyncio.run(run_ingest_scheduler(get_raw_worker_settings()))
 
 
-async def _with_snapshot(operation: str, snapshot_json: str) -> None:
-    settings = get_projection_worker_settings()
-    snapshot = ExampleRecordSnapshot.model_validate_json(snapshot_json)
-    engine = create_async_engine(settings.projection_database_url, pool_pre_ping=True)
+def _parse_ingest_pair(usage: str) -> tuple[str, str]:
+    if len(sys.argv) != 3:
+        raise SystemExit(usage)
+    return sys.argv[1], sys.argv[2]
+
+
+async def _run_ingest_reconcile(source_application_id: str, object_type: str) -> int:
+    settings = get_raw_worker_settings()
+    engine = create_async_engine(settings.raw_database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     try:
-        if operation == "rebuild":
-            await rebuild_from_snapshot(sessions, snapshot)
-            print(json.dumps({"rebuilt": True, "snapshot_id": str(snapshot.snapshot_id)}))
-        else:
-            print(json.dumps(await reconcile_snapshot(sessions, snapshot), sort_keys=True))
+        report = await reconcile_source(
+            sessions,
+            source_application_id=source_application_id,
+            object_type=object_type,
+        )
+        print(json.dumps(report.as_dict(), sort_keys=True))
+        return 1 if report.drifted else 0
     finally:
         await engine.dispose()
 
 
-def run_projection_rebuild_cli() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: ai-hub-projection-rebuild SNAPSHOT.json")
-    snapshot_json = Path(sys.argv[1]).read_text(encoding="utf-8")
-    asyncio.run(_with_snapshot("rebuild", snapshot_json))
+def run_ingest_reconcile_cli() -> None:
+    logging.config.dictConfig(json_log_config())
+    source_application_id, object_type = _parse_ingest_pair(
+        "usage: ai-hub-ingest-reconcile SOURCE_APPLICATION_ID OBJECT_TYPE"
+    )
+    raise SystemExit(asyncio.run(_run_ingest_reconcile(source_application_id, object_type)))
 
 
-def run_projection_reconcile_cli() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: ai-hub-projection-reconcile SNAPSHOT.json")
-    snapshot_json = Path(sys.argv[1]).read_text(encoding="utf-8")
-    asyncio.run(_with_snapshot("reconcile", snapshot_json))
+async def _run_ingest_rebuild(
+    mode: RebuildMode, source_application_id: str, object_type: str
+) -> None:
+    settings = get_raw_worker_settings()
+    result = await rebuild(
+        settings,
+        mode=mode,
+        source_application_id=source_application_id,
+        object_type=object_type,
+    )
+    print(json.dumps(result, sort_keys=True, default=str))
+
+
+def run_ingest_rebuild_cli() -> None:
+    logging.config.dictConfig(json_log_config())
+    if len(sys.argv) != 4 or sys.argv[1] not in {"log", "source"}:
+        raise SystemExit(
+            "usage: ai-hub-ingest-rebuild MODE SOURCE_APPLICATION_ID OBJECT_TYPE\n"
+            "MODE is 'log' (replay change log) or 'source' (force full export pull)"
+        )
+    mode: RebuildMode = "log" if sys.argv[1] == "log" else "source"
+    asyncio.run(_run_ingest_rebuild(mode, sys.argv[2], sys.argv[3]))
 
 
 class RuntimeEvidenceProfile(BaseModel):

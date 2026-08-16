@@ -10,7 +10,7 @@ export const platformCapabilityGroups = [
       { code: 'APP-REGISTRY', name: '应用注册', description: '登记环境、入口、回调、健康、版本和接入能力', route: '/applications', phase: 'V0.1', status: '已具备' },
       { code: 'PORTAL-APP', name: '平台门户', description: '按权限展示应用入口和平台治理入口', route: '/', phase: 'V0.1', status: '已具备' },
       { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、scope、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
-      { code: 'EVENT-KIT', name: '按需事件接入', description: 'RabbitMQ、Outbox、Inbox、幂等和投影重建模板', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
+      { code: 'DATA-INGEST', name: '增量数据接入', description: '应用导出契约、版本水位、平台拉取与对账', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
     ],
   },
   {
@@ -35,8 +35,7 @@ export const platformCapabilityGroups = [
     color: '#836b48',
     items: [
       { code: 'MSG-NOTIFY', name: '站内测试通知', description: '验证通知配置、幂等、状态查询和审计链路；不代表外部消息渠道', route: '/platform/notifications', phase: 'V0.5', status: '已具备' },
-      { code: 'XAPP-CATALOG', name: '契约目录', description: 'OpenAPI、AsyncAPI、能力、版本和消费方登记', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
-      { code: 'PROJECTION', name: '只读投影', description: '字段白名单、版本水位、对账和从空库重建', route: '/platform/operations', phase: 'V0.5', status: '已具备' },
+      { code: 'XAPP-CATALOG', name: '契约目录', description: 'OpenAPI、能力、版本和消费方登记', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
       { code: 'PLATFORM-CONFIG', name: '平台配置', description: '运行目标、保留策略、责任路由和高可用触发条件的只读配置即代码视图', route: '/platform/settings', phase: 'V1.0', status: '已具备' },
     ],
   },
@@ -47,10 +46,10 @@ export const platformCapabilityGroups = [
     icon: 'SetUp',
     color: '#58667b',
     items: [
-      { code: 'OBS-CENTER', name: '运行诊断', description: '应用入口、事件积压和投影新鲜度的只读诊断', route: '/platform/operations', phase: 'V0.5', status: '已具备' },
+      { code: 'OBS-CENTER', name: '运行诊断', description: '应用入口健康与平台只读诊断', route: '/platform/operations', phase: 'V0.5', status: '已具备' },
       { code: 'BACKUP-RECOVERY', name: '备份恢复', description: '备份、恢复演练、RPO、RTO 和运行手册', route: '/platform/operations', phase: 'V1.0', status: '已具备' },
       { code: 'DEV-CONTRACT', name: '开发者中心', description: '公开契约、SDK、沙箱、本地替身和接入文档', route: '/platform/developer', phase: 'V0.5', status: '已具备' },
-      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与按需事件配置的一致性测试', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
+      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与 DATA_INGEST 配置的一致性测试', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
     ],
   },
   {
