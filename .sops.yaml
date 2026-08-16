@@ -1,0 +1,15 @@
+# SOPS + age secret management for AI Hub production (M8-02).
+#
+# Only files under deploy/secrets/ are encrypted. The age PUBLIC key below is
+# safe to commit; the matching private key lives at deploy/secrets/age-key.txt
+# (git-ignored) on the operator's machine and at /etc/ai-hub/age-key.txt on the
+# target host. Rotate by re-encrypting with a new recipient and updating the key.
+#
+# Generate a keypair once:
+#   age-keygen -o deploy/secrets/age-key.txt
+#   # prints:  Public key: age1...
+# Then replace the placeholder below with that public key.
+
+creation_rules:
+  - path_regex: deploy/secrets/.*\.enc\.(env|yaml|yml|json)$
+    age: age1REPLACE_WITH_YOUR_PUBLIC_KEY

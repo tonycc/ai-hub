@@ -1,0 +1,50 @@
+name: ai-hub-production
+#
+# Production overlay (M8-03): HTTPS edge via Traefik ACME (Let's Encrypt).
+#
+# Layer on top of deploy/compose.yaml:
+#   docker compose \
+#     --env-file /etc/ai-hub/runtime.env \
+#     -f deploy/compose.yaml \
+#     -f deploy/compose.production.yaml \
+#     --profile base-access up -d
+#
+# It only changes the edge (Traefik) and public hostname wiring; all runtime
+# services, migration ordering, and the base-access profile are unchanged.
+# Required env (from /etc/ai-hub/runtime.env or the deploy environment):
+#   AI_HUB_PLATFORM_HOST   public portal/API host, e.g. platform.example.internal
+#   AI_HUB_AUTH_HOST       public identity host,  e.g. auth.example.internal
+#   AI_HUB_APP_HOST        public reference app host, e.g. app.example.internal
+#   AI_HUB_ACME_EMAIL      ACME account email for Let's Encrypt
+
+services:
+  traefik:
+    command: ["--configFile=/etc/traefik/traefik.yaml"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      AI_HUB_PLATFORM_HOST: ${AI_HUB_PLATFORM_HOST:?Set AI_HUB_PLATFORM_HOST}
+      AI_HUB_AUTH_HOST: ${AI_HUB_AUTH_HOST:?Set AI_HUB_AUTH_HOST}
+      AI_HUB_APP_HOST: ${AI_HUB_APP_HOST:?Set AI_HUB_APP_HOST}
+    volumes:
+      - type: bind
+        source: ./traefik/traefik.production.yaml
+        target: /etc/traefik/traefik.yaml
+        read_only: true
+      - type: bind
+        source: ./traefik/dynamic.production.yaml
+        target: /etc/traefik/dynamic.yaml
+        read_only: true
+      - type: volume
+        source: traefik-acme
+        target: /etc/traefik/acme
+    networks:
+      default:
+        aliases: !override
+          - ${AI_HUB_PLATFORM_HOST:?Set AI_HUB_PLATFORM_HOST}
+          - ${AI_HUB_AUTH_HOST:?Set AI_HUB_AUTH_HOST}
+          - ${AI_HUB_APP_HOST:?Set AI_HUB_APP_HOST}
+
+volumes:
+  traefik-acme:
