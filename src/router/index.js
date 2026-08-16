@@ -64,7 +64,7 @@ const routes = [
         path: 'platform/ingest',
         name: 'ingest',
         component: () => import('../views/IngestView.vue'),
-        meta: { title: '数据汇聚', breadcrumb: ['运行与研发', '数据汇聚'] },
+        meta: { title: '数据接入', breadcrumb: ['运行与研发', '数据接入'] },
       },
       {
         path: 'platform/settings',
