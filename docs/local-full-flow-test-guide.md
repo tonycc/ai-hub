@@ -129,15 +129,15 @@ bash scripts/ci/deploy.sh
 
 ## 6. 第二阶段：真实容器自动验收
 
-### 6.1 一次运行 M1 和 M2
+### 6.1 一次运行 M1 和 M7
 
 先停止可能占用 8088 的持久环境：
 
 ```bash
-docker compose --env-file .env -f deploy/compose.yaml --profile standard-events down
+docker compose --env-file .env -f deploy/compose.yaml --profile base-access down
 ```
 
-随后执行包含静态门禁、M1 和 M2 的完整自动化：
+随后执行包含静态门禁、M1 和 M7 的完整自动化：
 
 ```bash
 AI_HUB_RUN_RUNTIME_GATES=1 bash scripts/ci/all.sh
@@ -169,30 +169,22 @@ M1 从全新 `base-access` 环境验证：
 M1 runtime gate: all M1 runtime scenarios passed
 ```
 
-### 6.3 M2 可靠事件门禁
+### 6.3 M7 数据汇聚门禁
 
 单独执行：
 
 ```bash
-bash scripts/ci/m2-runtime.sh
+bash scripts/ci/m7-runtime.sh
 ```
 
-M2 从全新 `standard-events` 环境验证：
+M7 从全新 `base-access` 环境验证：
 
-- `base-access` 不安装事件表或启动 RabbitMQ/Worker。
-- 业务数据与 Outbox 同事务提交，回滚时两者都不落库。
-- RabbitMQ 中断期间保留 Outbox，恢复后继续发布。
-- 发布确认、有限重试、重复投递和消费者崩溃窗口。
-- 应用 Inbox 与副作用同事务，提交后才确认消息。
-- 乱序、版本缺口、删除墓碑、永久错误和 DLQ。
-- 一致水位快照、空投影重建、增量续接和对账。
-- 平台 API 对来源投影只读，平台不读取应用业务数据库。
-
-通过标志是最后输出：
-
-```text
-M2 runtime gate: all reliable-event, failure, capability, and rebuild scenarios passed
-```
+- 平台按周期从参考应用导出接口增量拉取，位点推进。
+- 变更记录幂等写入，重复拉取/重发不产生重复副作用。
+- 删除通过 delete 操作传播，当前态同步维护。
+- 失败时位点不推进，恢复后从原位点重拉。
+- 对账能发现漂移，支持从空库重建。
+- 平台只读汇聚数据，不直连应用业务数据库。
 
 ### 6.4 失败诊断
 
@@ -200,7 +192,7 @@ M2 runtime gate: all reliable-event, failure, capability, and rebuild scenarios 
 
 ```bash
 M1_KEEP_ENV=1 bash scripts/ci/m1-runtime.sh
-M2_KEEP_ENV=1 bash scripts/ci/m2-runtime.sh
+M7_KEEP_ENV=1 bash scripts/ci/m7-runtime.sh
 ```
 
 脚本会打印精确的 Compose project name。诊断完成后，必须使用打印出的名称清理对应环境，例如：
@@ -210,24 +202,23 @@ docker compose \
   --project-name '<脚本打印的项目名>' \
   --env-file .env.example \
   -f deploy/compose.yaml \
-  --profile standard-events \
+  --profile base-access \
   down --volumes --remove-orphans
 ```
 
-M1 保留环境时把 profile 改为 `base-access`。已经成功构建过当前代码镜像时，可用 `M1_SKIP_BUILD=1` 或 `M2_SKIP_BUILD=1` 缩短后续诊断时间。
+已经成功构建过当前代码镜像时，可用 `M1_SKIP_BUILD=1` 或 `M7_SKIP_BUILD=1` 缩短后续诊断时间。
 
 ## 7. 第三阶段：启动持久的人工 UAT 环境
 
-完整人工验收推荐使用 `standard-events`，因为它同时覆盖 API-only 和事件能力：
+使用 `base-access` 档位启动人工 UAT 环境：
 
 ```bash
 bash scripts/local/start.sh
 ```
 
-脚本会自动创建缺失的 `.env`、校验 Compose，并以前台本地后端调试模式构建和启动容器：平台 API 使用 Uvicorn reload/debug 日志，前端不由 Compose 启动。另开一个终端执行 `npm run dev` 获得 Vite 热更新；后端脚本按 `Ctrl+C` 停止。已有 `.env` 不会被覆盖。只启动基础接入档位或复用已经构建的应用镜像时使用：
+脚本会自动创建缺失的 `.env`、校验 Compose，并以前台本地后端调试模式构建和启动容器：平台 API 使用 Uvicorn reload/debug 日志，前端不由 Compose 启动。另开一个终端执行 `npm run dev` 获得 Vite 热更新；后端脚本按 `Ctrl+C` 停止。已有 `.env` 不会被覆盖。复用已经构建的应用镜像时使用：
 
 ```bash
-bash scripts/local/start.sh base-access
 bash scripts/local/start.sh --no-build
 npm run dev
 ```
@@ -239,20 +230,20 @@ npm run dev
 ```bash
 test -f .env || cp .env.example .env
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events config --quiet
+  --profile base-access config --quiet
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events up -d --build
+  --profile base-access up -d --build
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events ps -a
+  --profile base-access ps -a
 ```
 
 首次启动 authentik 可能比其他服务慢。`ps -a` 中应满足：
 
 - 长期服务最终为 `running` 或 `healthy`。
-- 所有迁移、数据库角色 bootstrap、RabbitMQ topology bootstrap 和 authentik 存储初始化容器为 `Exited (0)`。
+- 所有迁移、数据库角色 bootstrap 和 authentik 存储初始化容器为 `Exited (0)`。
 - 不应出现 `unhealthy`、反复重启或非零退出的迁移容器。
 
-只验证 API-only 档位时，可把上述三处 `standard-events` 改为 `base-access`。该档位不应出现 RabbitMQ、事件迁移、Outbox 发布器、事件消费者或平台投影 Worker。
+`base-access` 为唯一部署档位，包含平台 API、门户、ingest 调度器与参考应用。
 
 ## 8. 服务健康与基础冒烟
 
@@ -283,9 +274,9 @@ curl -fsS http://127.0.0.1:18080/internal/metrics | sed -n '1,20p'
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events ps -a
+  --profile base-access ps -a
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events logs --tail 200 platform-api authentik-server authentik-worker traefik
+  --profile base-access logs --tail 200 platform-api authentik-server authentik-worker traefik
 ```
 
 不要把完整 `.env`、访问令牌、Cookie、客户端密钥或数据库连接串复制到缺陷记录中。
@@ -311,7 +302,6 @@ docker compose --env-file .env -f deploy/compose.yaml \
 
 - 平台门户（本地调试）：`http://localhost:4173`
 - 独立参考应用登录：`http://app.localhost:8088/auth/login`
-- RabbitMQ 管理端：`http://localhost:15672`
 
 不同角色之间应完整退出登录，或使用相互隔离的浏览器配置文件/无痕窗口，避免复用 authentik 和平台会话 Cookie。
 
@@ -347,8 +337,8 @@ docker compose --env-file .env -f deploy/compose.yaml \
 
 1. 应用中心只能查看其作用域内的 `standalone-example`，不能创建任意全局应用。
 2. 能查看应用授权、通知、审计、开发者资产和接入认证，但不能进入全局用户管理。
-3. 在开发者中心下载 OpenAPI、AsyncAPI、Python SDK 示例和接入指南，确认每项都有版本及 SHA-256。
-4. 在接入治理查看或运行 `standalone-example/local` 的认证；`API_CLIENT` 不应依赖 RabbitMQ。
+3. 在开发者中心下载 OpenAPI、Python SDK 示例和接入指南，确认每项都有版本及 SHA-256。
+4. 在接入治理查看或运行 `standalone-example/local` 的认证。
 5. 在通知中心选择应用范围内的收件人并发送测试通知。
 6. 直接访问全局身份写接口应返回 `403`，且审计中心存在拒绝记录。
 
@@ -368,10 +358,8 @@ docker compose --env-file .env -f deploy/compose.yaml \
 
 1. 能访问应用只读信息、通知、审计、开发者中心、运维中心和平台配置。
 2. “用户与组织”和“权限与安全”导航不可见；直接访问时数据 API 返回 `403`。
-3. 运维中心可在“应用入口、事件队列、投影新鲜度”之间切换。
-4. 标准事件档位中，平台投影和参考消费者队列应有消费者；正常空闲时待消费与处理中数量为 0。
-5. 投影在长时间没有新事件时可以显示“过期/警告”；若队列已排空、消费者在线且没有开放缺口，这不等同于平台故障。
-6. 平台配置必须是只读“配置即代码”视图，来源为 `deploy/operations/production-targets.json`，页面不提供在线编辑按钮。
+3. 运维中心可在“应用入口、数据来源、同步新鲜度”之间切换。
+4. 平台配置必须是只读“配置即代码”视图，来源为 `deploy/operations/production-targets.json`，页面不提供在线编辑按钮。
 
 ### 10.6 通知与后续能力边界
 
@@ -406,7 +394,7 @@ unset AI_HUB_LOCAL_TEST_TOKEN
 
 服务身份的错误密钥、缺少 scope、应用绑定、撤销后旧令牌失败和通知幂等由 M1 自动门禁覆盖，不建议在需要长期保留的手工环境中重复撤销种子凭据。
 
-## 12. 独立应用和事件链路检查
+## 12. 独立应用与数据汇聚检查
 
 ### 12.1 API-only 独立接入
 
@@ -416,23 +404,12 @@ unset AI_HUB_LOCAL_TEST_TOKEN
 4. 访问 `http://app.localhost:8088/api/v1/platform-status`，确认独立应用通过公开平台 API 获取状态。
 5. 停止独立应用时平台 API 和门户仍应可用；停止平台 API 时独立应用自身 live 检查仍应响应，但平台能力调用失败应有明确错误。
 
-### 12.2 标准事件档位
+### 12.2 数据汇聚链路
 
-查看 RabbitMQ 队列：
-
-```bash
-docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events exec -T rabbitmq \
-  rabbitmqctl -q list_queues --vhost ai-hub-local \
-  name messages_ready messages_unacknowledged consumers
-```
-
-正常空闲状态下，业务队列的 `messages_ready` 和 `messages_unacknowledged` 应为 0，平台投影和参考消费者队列各有消费者；DLQ 正常应为空。
-
-完整事件写入、Outbox 发布、应用 Inbox、平台投影、重复/乱序、DLQ 和重建不要用人工 SQL 代替，使用权威运行门禁：
+完整数据汇聚的拉取、幂等、删除传播、对账与重建不要用人工 SQL 代替，使用权威运行门禁：
 
 ```bash
-bash scripts/ci/m2-runtime.sh
+bash scripts/ci/m7-runtime.sh
 ```
 
 该脚本使用独立数据卷，不会污染人工 UAT 数据。
@@ -455,7 +432,7 @@ bash scripts/ci/m4-resilience-runtime.sh
 | 可观测性 | OpenMetrics、只读摘要、告警去重、恢复事件和责任路由 |
 | 发布 | 清单、预检、expand 迁移、隔离金丝雀、提升和安全回滚 |
 | 凭据轮换 | 新旧版本重叠、切换、吊销和旧令牌即时失败 |
-| 韧性 | 1000 请求性能、安全拒绝、慢依赖、依赖中断、积压排空和 DLQ |
+| 韧性 | 1000 请求性能、安全拒绝、慢依赖和依赖中断 |
 
 每个脚本退出码必须为 0，并输出包含 `passed: true` 的 JSON 证据。仅在诊断失败时使用对应的保留变量：
 
@@ -472,16 +449,16 @@ bash scripts/ci/m4-resilience-runtime.sh
 一个本地发布候选满足以下条件时，可以记录为通过：
 
 - `scripts/ci/all.sh` 全部通过。
-- M1 与 M2 真实运行门禁全部通过。
+- M1 与 M7 真实运行门禁全部通过。
 - 四类角色的导航、读取、写入和拒绝边界符合本指南。
-- 平台、身份、独立应用和标准事件服务健康。
+- 平台、身份和独立应用服务健康。
 - API 错误包含稳定错误码和 Request ID。
 - 通知、凭据和审计不泄露密钥、令牌、Cookie 或连接串。
-- 平台不读取独立应用业务数据库，API-only 不被强制安装事件能力。
+- 平台不读取独立应用业务数据库，API-only 不被强制安装数据导出能力。
 - 没有未关闭的 P0/P1 缺陷。
 - 发布候选需要的 M4 深度演练通过。
 
-人工 UAT 中的“运维整体状态降级”不能单独判为失败，应展开具体对象，区分未上报应用健康、投影长时间无新事件和真实消费者/队列故障。
+人工 UAT 中的“运维整体状态降级”不能单独判为失败，应展开具体对象，区分未上报应用健康、数据长时间未同步和真实服务故障。
 
 ## 15. 测试记录模板
 
@@ -496,7 +473,7 @@ Docker / Compose 版本：
 
 代码与部署门禁：PASS / FAIL
 M1 身份与 API：PASS / FAIL
-M2 可靠事件：PASS / FAIL
+M7 数据汇聚：PASS / FAIL
 平台管理员 UAT：PASS / FAIL
 应用开发者 UAT：PASS / FAIL
 安全审计员 UAT：PASS / FAIL
@@ -532,7 +509,7 @@ docker compose \
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events down --remove-orphans
+  --profile base-access down --remove-orphans
 bash scripts/local/start.sh
 ```
 
@@ -550,7 +527,7 @@ bash scripts/local/start.sh
 
 ### 16.5 运维页面显示降级
 
-检查具体原因：应用入口是否执行过健康检查、队列是否有消费者、是否存在消息积压、投影是否仅因长时间没有事件而过期。以对象级诊断为准，不以卡片颜色替代故障判断。
+检查具体原因：应用入口是否执行过健康检查、数据是否长时间未同步、是否仅因周期性同步间隔而显示滞后。以对象级诊断为准，不以卡片颜色替代故障判断。
 
 ## 17. 停止与清理
 
@@ -558,24 +535,24 @@ bash scripts/local/start.sh
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events down
+  --profile base-access down
 ```
 
 重新启动时：
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events up -d
+  --profile base-access up -d
 ```
 
 确认所有本地测试数据都不需要后，才执行不可恢复的本地重置：
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml \
-  --profile standard-events down --volumes --remove-orphans
+  --profile base-access down --volumes --remove-orphans
 ```
 
-该命令会删除当前 `ai-hub-local` project 的 PostgreSQL、RabbitMQ 和 authentik 命名卷；Git 提交和远端仓库不受影响。
+该命令会删除当前 `ai-hub-local` project 的 PostgreSQL 和 authentik 命名卷；Git 提交和远端仓库不受影响。
 
 ## 18. 相关文档
 

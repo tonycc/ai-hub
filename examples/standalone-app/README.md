@@ -9,7 +9,7 @@
 | `API_CLIENT`（默认） | `alembic.ini` | `app.example_record` |
 | `DATA_INGEST`（可选） | 同上（`base_0004`） | `app.ingest_change_log`、`app.ingest_version_counter` |
 
-M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、用户和权限查询、版本化授权缓存、对象级最终校验、服务身份测试通知与故障边界认证。增量数据接入通过应用侧导出契约与平台拉取实现，不依赖消息队列或事件 Outbox。
+M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、用户和权限查询、版本化授权缓存、对象级最终校验、服务身份测试通知与故障边界认证。增量数据接入通过应用侧导出契约与平台拉取实现。
 
 ~~~bash
 cp .env.example .env

@@ -49,7 +49,7 @@ bash scripts/ci/m4-release-runtime.sh
 }
 ```
 
-`base-access` 只检查并执行核心迁移；`standard-events` 才增加事件登记和投影迁移。发布命令只替换平台 API、门户和所选档位的平台 Worker，不发布或回滚任何独立业务应用。
+`base-access` 检查并执行核心与 raw 贴源层迁移。发布命令只替换平台 API、门户和 ingest 调度器，不发布或回滚任何独立业务应用。
 
 ## 3. 凭据轮换演练
 

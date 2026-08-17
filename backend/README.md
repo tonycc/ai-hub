@@ -2,7 +2,7 @@
 
 Python 模块化单体。HTTP API 与增量 ingest Worker 使用同一组领域和应用模块，但以不同进程运行和扩缩容。
 
-实施顺序、数据库逻辑隔离、身份/API 门禁见[方案实施计划](../docs/implementation-plan.md)。M1 已完成 authentik、Traefik、正式 OIDC/JWKS 本地验证、应用登记、身份权限、服务身份、测试通知和追加式审计；不使用临时身份实现替代。M2 实时事件/投影路径已退役，由 M7 增量拉取 ingest 替代。
+实施顺序、数据库逻辑隔离、身份/API 门禁见[方案实施计划](../docs/implementation-plan.md)。M1 已完成 authentik、Traefik、正式 OIDC/JWKS 本地验证、应用登记、身份权限、服务身份、测试通知和追加式审计；不使用临时身份实现替代。M7 提供应用数据的增量拉取接入（ingest）。
 
 完整容器化启动：
 
