@@ -1,0 +1,53 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ":80"
+    forwardedHeaders:
+      insecure: false
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    forwardedHeaders:
+      insecure: false
+    http:
+      tls:
+        certResolver: letsencrypt
+  ping:
+    address: ":8082"
+
+ping:
+  entryPoint: ping
+
+api:
+  dashboard: false
+
+log:
+  format: json
+  level: INFO
+
+accessLog:
+  format: json
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # Substituted at deploy time; see compose.production.yaml which renders
+      # this file with the ACME account email from the runtime env.
+      email: "ACME_EMAIL_PLACEHOLDER"
+      storage: /etc/traefik/acme/acme.json
+      # TLS-ALPN-01 over 443 only; port 80 may stay closed at the firewall.
+      tlsChallenge: {}
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yaml
+    watch: true
+    goTemplate: true
