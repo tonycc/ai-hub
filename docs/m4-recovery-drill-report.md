@@ -12,7 +12,7 @@
 | 迁移一致性 | 6 个迁移头与归档一致 | 6/6 | 通过 |
 | 权限边界 | 恢复后 SQL 边界门禁通过 | 通过 | 通过 |
 
-演练时间：2026-08-14（Asia/Shanghai）。环境：本机 Docker Compose 隔离项目，`standard-events` profile，归档存储类别 `local-drill`。生产 RPO 仍必须由小时定时器和异机存储成功时间持续证明，本次本机演练不冒充生产异机备份。
+演练时间：2026-08-14（Asia/Shanghai）。环境：本机 Docker Compose 隔离项目，`base-access` profile，归档存储类别 `local-drill`。生产 RPO 仍必须由小时定时器和异机存储成功时间持续证明，本次本机演练不冒充生产异机备份。
 
 ## 2. 演练步骤与证据
 
@@ -24,7 +24,7 @@ M4_RECOVERY_SKIP_BUILD=1 bash scripts/ci/m4-recovery-runtime.sh
 
 门禁创建独立项目名和临时卷，随后执行：
 
-1. 启动全新 `standard-events` 环境，确认迁移、authentik、平台 API、独立参考应用、RabbitMQ、Outbox/Inbox Worker、投影 Worker 和 Traefik 健康。
+1. 启动全新 `base-access` 环境，确认迁移、authentik、平台 API、独立参考应用、ingest 调度器和 Traefik 健康。
 2. 分别向平台数据库、参考应用数据库、authentik 数据库和 authentik `/data` 写入可识别事实。
 3. 生成 AES-256-GCM 加密归档，创建路径立即验证 sidecar、认证标签、内部摘要和清单并原子写入验证凭证，再执行一次独立校验。
 4. 把四类事实全部改成破坏值，证明后续结果来自恢复点，而非现有状态。

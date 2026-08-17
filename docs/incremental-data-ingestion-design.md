@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 | --- | --- |
 | 版本 | V1.0（M7 已实施） |
-| 本次变更 | 新增"数据汇聚"能力线：以贴源层（Raw/ODS）+ 定期增量拉取实现各业务应用数据向平台的汇聚，支撑统一治理与 AI 消费；**同时下线并删除 M2 实时事件投影能力线** |
+| 本次变更 | 新增"数据汇聚"能力线：以贴源层（Raw/ODS）+ 定期增量拉取实现各业务应用数据向平台的汇聚，支撑统一治理与 AI 消费 |
 | 适用对象 | 产品、架构、前后端、数据、安全、运维团队 |
-| 关联基线 | [总体设计与实施](unified-internal-app-platform-product-and-implementation.md)、[实施计划](implementation-plan.md)、[ADR-032](adr/ADR-032-incremental-ingestion-replaces-m2.md) |
+| 关联基线 | [总体设计与实施](unified-internal-app-platform-product-and-implementation.md)、[实施计划](implementation-plan.md) |
 | 状态 | **已实施并合入 main**（M7-01～06）；第 8 节开放问题已冻结为决策（界面化配置见 2.5.1，已实现） |
 
 ## 1. 背景与目标
@@ -20,29 +20,17 @@
 - **平台统一治理**：平台侧对多来源数据进行检索、对齐、审计、口径管理。
 - **供 AI 使用**：AI 消费治理后的数据视图，需要"干净、有来源、有版本、可回溯"的数据。
 
-### 1.2 为什么用数据平台思路替代实时事件投影
+### 1.2 为什么用数据平台思路做汇聚
 
-沿用数据平台（数仓）的**贴源层（Raw / ODS）**模式，**替代** M2 的实时事件投影：
+沿用数据平台（数仓）的**贴源层（Raw / ODS）**模式：
 
-- 贴源层**原样接收**各应用数据，平台端不为每种业务对象定制建表，**接入新应用/新对象的边际成本趋近于零**（M2 要求每接入一种对象就在平台端建专属投影表、写投影逻辑，耦合重）。
-- 定期增量比 M2 的实时事件链路**省传输、基础设施更轻**（不需要 RabbitMQ/Outbox/Inbox）。
-- 贴源层天然**可重放、可审计、可回溯**任意时间点状态，契合治理与 AI 审计需求。
-- 实际业务**无实时性需求**：定期增量即可满足，M2 为零丢失/秒级时效付出的复杂度在本场景是净负担。
+- 贴源层**原样接收**各应用数据，平台端不为每种业务对象定制建表，**接入新应用/新对象的边际成本趋近于零**。
+- 定期增量**省传输、基础设施更轻**，且天然**可重放、可审计、可回溯**任意时间点状态，契合治理与 AI 审计需求。
+- 实际业务**无实时性需求**：定期增量即可满足，简单可靠优先。
 
-### 1.3 退役 M2 实时事件投影（重要决策）
+### 1.3 定位
 
-本方案**下线并删除** M2 实时事件投影能力线，由本方案的增量数据汇聚承接其"应用数据向平台汇聚"的职责。
-
-**退役对象**
-
-- 能力：`EVENT_PUBLISHER`、`EVENT_CONSUMER`、`PROJECTION_SOURCE`、`PROJECTION_READER` 四种事件/投影能力。
-- 组件：RabbitMQ 基础设施、应用侧 Outbox/Inbox、平台投影 Worker、`platform_projection` Schema。
-- 部署：`standard-events` 档位（退役后仅保留 `base-access` 基础接入档位）。
-- 配套：M2 运行时门禁（`scripts/ci/m2-runtime.sh`）、事件契约（AsyncAPI / CloudEvents schema）、参考应用的事件部分、SDK 的 `events.py`。
-
-**退役后对应用的影响**：原需"可靠传播业务事实给平台"的场景，改为通过本方案的**定期增量同步**承载（时效性从秒级降为同步周期级，已确认满足业务需求）。平台不再提供实时事件订阅能力。
-
-**退役范围与影响清单详见第 9 节。**
+本方案是企业内部应用数据的**定期增量汇聚**能力线，承接"应用数据向平台汇聚"的职责。平台不提供实时订阅能力；时效以同步周期为准，已确认满足业务需求。
 
 ### 1.4 目标与非目标
 
@@ -55,7 +43,7 @@
 
 **非目标**
 
-- 不做实时同步（实时事件能力随 M2 一并退役）。
+- 不做实时同步。
 - 不做通用 ETL/可视化建模工具（治理加工按需，逐步建设）。
 - 第一阶段不做跨应用的语义对齐（语义层仍按既有规划按需启用）。
 
@@ -263,7 +251,7 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 
 ### 2.5 汇聚调度器（Pull 模式）
 
-平台侧新增一个**汇聚调度器**组件（独立进程，与 HTTP API / M2 Worker 分离）：
+平台侧新增一个**汇聚调度器**组件（独立进程，与 HTTP API 分离）：
 
 **职责**
 
@@ -318,8 +306,7 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 | 应用注册（`app_registry`/`app_management`） | 接入应用先登记，声明其启用"数据汇聚"；同步所需的服务凭据沿用既有签发/轮换/吊销机制 |
 | 身份与服务身份（M1） | 平台拉取应用导出接口时，用平台服务身份令牌认证 |
 | 审计（`audit`） | 每次批次、位点变更、失败、重建均落审计 |
-| 运维（`operations`） | 同步健康（位点滞后、批次失败率）纳入运维摘要与 OpenMetrics；移除原投影/RabbitMQ 健康项 |
-| M2 事件投影 | **下线删除**：实时事件与投影能力整体退役，由本方案承接数据汇聚职责（见第 9 节） |
+| 运维（`operations`） | 同步健康（位点滞后、批次失败率）纳入运维摘要与 OpenMetrics |
 
 ## 4. 安全与边界
 
@@ -340,13 +327,13 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 
 ## 5. 与 SDK / 接入指南的联动
 
-- **SDK**：为接入应用提供"增量导出接口"的参考实现/辅助（版本序列生成、导出分页、信封构造、服务身份校验），降低应用侧实现成本；同时**移除事件相关模块（`events.py`）**。
-- **接入指南**：新增"数据汇聚"一节，说明导出接口契约、`operation`/`version` 语义、删除捕获要求、首次全量建基线流程；**删除"按需启用事件"一节**。
-- **一致性认证**：为"数据汇聚"能力新增认证检查：**导出接口可达且校验专用 scope `ai_hub.ingest.export`**、**version 在 (应用,对象类型) 全序单调**、**并发写入场景下无漏拉**（位点稳定性，2.2.1）、**删除可捕获并显式上报**、**幂等正确**、**payload 符合已登记契约**（2.2.2）；**移除事件发布/消费/投影的认证配置**。
+- **SDK**：为接入应用提供"增量导出接口"的参考实现/辅助（版本序列生成、导出分页、信封构造、服务身份校验），降低应用侧实现成本。
+- **接入指南**：新增"数据汇聚"一节，说明导出接口契约、`operation`/`version` 语义、删除捕获要求、首次全量建基线流程。
+- **一致性认证**：为"数据汇聚"能力提供认证检查：**导出接口可达且校验专用 scope `ai_hub.ingest.export`**、**version 在 (应用,对象类型) 全序单调**、**并发写入场景下无漏拉**（位点稳定性，2.2.1）、**删除可捕获并显式上报**、**幂等正确**、**payload 符合已登记契约**（2.2.2）。
 
 ## 6. 实施方案（分阶段）
 
-> 本方案建议作为新的工作线编号（暂定 M7：数据汇聚）。M7-01 ~ M7-05 建设增量汇聚能力并验证达标后，M7-06 执行 M2 退役。每阶段给出任务、产物与验证。
+> 本方案工作线编号为 M7：数据汇聚。M7-01 ~ M7-05 建设增量汇聚能力并验证达标。每阶段给出任务、产物与验证。
 
 ### M7-01 贴源层与位点（地基）
 
@@ -368,7 +355,7 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 
 ### M7-04 SDK 导出辅助 + 接入指南 + 认证
 
-- 任务：SDK 提供导出接口辅助并移除 `events.py`；接入指南新增"数据汇聚"章节、删除"按需启用事件"一节；一致性认证新增数据汇聚检查、移除事件类认证。
+- 任务：SDK 提供导出接口辅助；接入指南新增"数据汇聚"章节；一致性认证新增数据汇聚检查。
 - 产物：SDK 版本、文档、认证用例。
 - 验证：参考应用通过数据汇聚接入认证；文档与 SDK 一致。
 
@@ -378,20 +365,11 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 - 产物：`modules/ingest/reconcile.py` / `rebuild.py`；CLI `ai-hub-ingest-reconcile`（漂移退出码 1）与 `ai-hub-ingest-rebuild log|source`；运维手册 `docs/runbooks/ingest-reconcile.md`（定时对账 + 漂移告警约定）。
 - 验证：人为制造漂移能对账发现；从空 Raw 层经 full 重建后与源一致。
 
-### M7-06 退役 M2 实时事件投影
-
-- 前置条件：M7-01 ~ M7-05 验收通过，增量汇聚能力已在至少一个参考场景验证达标；确认无在运行的应用依赖 M2 事件/投影能力。
-- 任务：按下线清单（第 9 节）删除 M2 代码、迁移、部署组件、CI 门禁、契约、SDK 事件模块与参考应用事件部分；从 `compose.yaml` 移除 RabbitMQ 与 `standard-events` 档位；清理 `platform_projection` Schema。**删除前打 git tag 归档（如 `archive/m2-event-projection`），并将事件契约（AsyncAPI / CloudEvents schema）归档保存**，供未来若出现实时需求时考古。
-- 产物：删除变更集；git tag `archive/m2-event-projection`；契约归档于 `docs/archive/m2-event-projection/`；唯一部署档位 `base-access`；静态门禁、单元测试与 `scripts/ci/m7-runtime.sh` 通过。
-- 验证：`base-access` 档位从全新数据卷完整启动并通过 M1 及 M7 运行时门禁；代码/配置路径无 RabbitMQ、Outbox、Inbox、projection、`standard-events` 能力残留（负向门禁测试除外）；备份/恢复流程不再包含 RabbitMQ 与投影库。
-- 状态：**已完成**（合入 `main`，PR #7）。
-
 ### 回滚与降级
 
-- 贴源层与调度器为**新增独立组件**，可整体停用而不影响既有 M0–M4.1 能力。
+- 贴源层与调度器为**新增独立组件**，可整体停用而不影响既有能力。
 - 当前态表可从 Raw 日志重放重建；强类型表删除后可从当前态恢复。
 - 不使用跨数据库两阶段提交；所有写入限定在平台库内单事务。
-- **M2 退役为单向操作**：M7-06 执行后事件链路不可恢复，须以"先建成增量汇聚并验证达标"为退役前置，避免能力真空期；事件契约经 git tag 归档，可在确有需要时考古人恢复。
 
 ## 7. 验收标准
 
@@ -401,7 +379,6 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 4. 当前态表与源数据一致（经对账重放验证），历史可回溯；当前态批内事务维护、无刷新窗口。
 5. 平台故障后恢复，同步从位点续传无重复。
 6. AI/治理通过当前态查询接口消费数据，按权限码 `platform.data.read` 鉴权且权限边界正确（应用不可读他应用数据）、全程审计。
-7. **M2 实时事件投影能力线已完整下线删除**：无 RabbitMQ/Outbox/Inbox/投影/`standard-events` 残留，`base-access` 成为唯一部署档位，全部静态与运行时门禁通过；事件契约已归档。
 
 ## 8. 开放问题（已冻结决策）
 
@@ -409,65 +386,5 @@ incremental 批次不合成墓碑（删除由应用显式上报）。
 2. **历史保留策略**：每对象保留**最近 100 个版本**，可选叠加「保留最近 90 天」作为第二道闸；提供**裁剪**运维动作（默认 dry-run 预览、确认后应用），经界面/CLI 触发。**快照压实与对象存储暂不引入**，后续按需评估。全局策略见 2.5.1。
 3. **大对象/大批量**：`page_limit` 默认 200、硬上限 5000（可配置）；单条 `payload` 超过 1 MiB 拒绝写入（上限可配置）。超大 payload 的对象存储方案**暂不引入**，按需评估。
 4. **全量重建的触发方式**：**手动运维触发**（界面/CLI，二次确认）；允许**定时对账**（开关 + 周期可配），但**漂移后自动 rebuild 首期不开放**——对账仅呈现漂移清单，由人工决定是否重建。
-5. **M5（多消费方治理）调整**：M2 退役后，实施计划 M5 中与事件相关的验证项需相应改为围绕数据汇聚能力（多消费方对导出契约、scope、位点隔离的复用验证），建议在实施计划中同步标注。
+5. **多消费方治理**：实施计划 M5 中的验证项围绕数据汇聚能力展开（多消费方对导出契约、scope、位点隔离的复用验证）。
 6. **应用主动推送（后续增强，首期不做）**：为降低同步延迟，可采用**混合模式**——应用只向平台推送一条「有变更」的轻量提示（webhook/事件），平台收到后**立即对相应源触发一次拉取**；权威数据仍以拉取与对账为准，推送仅作加速信号，不承载业务数据。如此兼顾时效与幂等/背压/乱序安全。首期不实现，需要时单独立项。
-
-## 9. M2 实时事件投影下线清单
-
-以下为 M7-06 退役 M2 时需删除/修改的完整影响面（基于代码基线梳理）。
-
-### 9.1 后端代码
-
-- 删除模块 `backend/src/ai_hub_platform/modules/projection/`（`service.py`、`worker.py`）。
-- 删除/调整引用：`modules/operations/service.py` 中投影与 RabbitMQ 健康检查、`api/operations.py` 中事件/投影相关摘要项、`operations/backup.py` 与 `operations/release.py` 中对投影库/RabbitMQ 的处理。
-- 配置项清理：`config.py` 中 `RABBITMQ_URL`、`INTEGRATION_CAPABILITIES` 等事件相关配置；`.env.example`、`backend/.env.example` 同步清理。
-- 能力枚举：移除 `EVENT_PUBLISHER`、`EVENT_CONSUMER`、`PROJECTION_SOURCE`、`PROJECTION_READER`（应用注册、接入能力登记、认证配置中的相关项）。
-
-### 9.2 数据库与迁移
-
-- 删除 `backend/migrations/versions/projection/`（投影 Schema 迁移）；清理 `migrations/env.py`、`test_migration_contracts.py` 中的 projection 相关逻辑。
-- 删除 `platform_projection` Schema 及其中立参考投影（`example_record_summary`）、`projection_inbox` 等表。
-- 更新 `deploy/postgres/verify/role-boundaries.sql`：移除投影写入角色与 RabbitMQ 相关的权限校验。
-
-### 9.3 部署与基础设施
-
-- `deploy/compose.yaml`：移除 RabbitMQ 服务、投影 Worker 服务及 `standard-events` profile；保留唯一档位 `base-access`。
-- 删除 `deploy/rabbitmq/`（含 `bootstrap.sh`）。
-- `deploy/component-lock.json` 与 `docs/component-upgrade-policy.md`：移除 RabbitMQ 组件锁定项。
-- `deploy/operations/`：`production-targets.json`、`release-manifest.schema.json`、`alert-rules.json` 中移除事件积压、DLQ、投影滞后、RabbitMQ 健康等指标与告警项。
-- `.env.example`、部署文档中移除 RabbitMQ 凭据与事件档位说明。
-
-### 9.4 CI / 门禁
-
-- 删除 `scripts/ci/m2-runtime.sh`（M2 运行时门禁）。
-- `scripts/ci/all.sh`、`scripts/ci/deploy.sh`、`scripts/local/start.sh`：移除 `standard-events` 档位与 M2 相关步骤；`start.sh` 默认档位改为 `base-access`。
-- 更新 `.github/workflows/ci.yml`：移除 M2 运行时作业；`Required gate` 汇总调整。
-- 移除 M4 各运行时脚本（`m4-resilience-runtime.sh`、`m4-recovery-runtime.sh`、`m4-observability-runtime.sh`、`m4-release-runtime.sh` 等）中对 RabbitMQ/事件积压/投影的演练步骤，备份/恢复脚本不再含 RabbitMQ 与投影库。
-
-### 9.5 SDK 与参考应用
-
-- SDK：删除 `sdk/python/src/ai_hub_sdk/events.py` 及对应测试 `test_event_contracts.py`；`client.py`/`__init__.py` 移除事件导出。
-- 参考应用 `examples/standalone-app/`：移除事件部分（`events.py`、`consumer.py`、`alembic-event-*.ini`、事件迁移、Outbox/Inbox 表），保留 API-only 接入。
-- 删除 `examples/sdk/api_only.py` 之外的事件示例（若有）。
-
-### 9.6 契约与前端
-
-- 删除 `contracts/events/`（`ai-hub.asyncapi.yaml`、`cloud-event.schema.json`、`example-record-*.schema.json`）。
-- 开发者中心资产目录（`modules/developer/service.py` 的 `ASSETS`）：移除 `platform-asyncapi`、`cloud-event-schema` 两项。
-- 前端：`src/data/platformCapabilities.js`、`OperationsCenterView.vue`、`PlatformSettingsView.vue` 中移除事件/投影能力项与健康展示；开发者中心"可选能力"移除四个事件/投影能力标签。
-
-### 9.7 文档
-
-- 更新总体设计文档与实施计划：移除 M2 章节与事件/投影契约描述，登记"数据汇聚"能力，标注 M2 已退役及退役版本。
-- 删除/归档 M2 相关验收报告引用；`deploy/README.md`、各 runbook（`backup-restore.md`、`alert-response.md`）移除 RabbitMQ/投影/事件相关操作。
-- `docs/local-full-flow-test-guide.md`、开发者接入指南：移除事件接入内容。
-
-### 9.8 退役验证门禁
-
-- 全仓检索 `rabbitmq|RabbitMQ|RABBITMQ|Outbox|Inbox|projection|standard-events|EVENT_PUBLISHER|EVENT_CONSUMER|PROJECTION_SOURCE|PROJECTION_READER` 无残留，**检索范围限定代码与配置路径**（`backend/`、`sdk/`、`deploy/`、`contracts/`、`scripts/`、`src/`、`examples/`），避免对文档叙述性文字（如 `Inbox`）误伤；历史验收报告等归档文档除外。
-- `base-access` 从全新数据卷启动，M1 与 M7 全部门禁通过。
-- 备份/恢复演练确认不再依赖 RabbitMQ 与投影库。
-
----
-
-**下一步**：M7 能力线已交付。后续优先：生产环境实例化（密钥/HTTPS/异机备份）；拍板第 8 节开放问题（同步周期、历史保留、大批量、重建触发）；按改口后的 M5 开展多消费方治理验证。事件契约考古见 `docs/archive/m2-event-projection/` 与 tag `archive/m2-event-projection`。

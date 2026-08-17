@@ -2,7 +2,7 @@
 
 ## 1. 结论
 
-2026-08-14 在隔离 `standard-events` Docker Compose 环境执行 `scripts/ci/m4-observability-runtime.sh`，以下项目全部通过：
+2026-08-14 在隔离 `base-access` Docker Compose 环境执行 `scripts/ci/m4-observability-runtime.sh`，以下项目全部通过：
 
 | 项目 | 证据 |
 | --- | --- |

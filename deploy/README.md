@@ -14,7 +14,7 @@ Compose 使用单一显式 profile：`base-access`。直接运行不带 `--profi
 | authentik Server/Worker | 是 | OIDC/OAuth2、会话、令牌与可重复 blueprint |
 | Traefik | 是 | 唯一 HTTP 入口、Host/Path 路由、请求大小与安全响应头 |
 
-`base-access` 是完整的身份接入与 raw 摄取档位：不使用临时登录替代 authentik，也不启动 RabbitMQ、事件发布/消费或投影 Worker。
+`base-access` 是完整的身份接入与 raw 摄取档位：不使用临时登录替代 authentik。
 
 ## Configuration boundary
 
@@ -133,7 +133,7 @@ bash scripts/ci/m1-runtime.sh
 | --- | --- |
 | `API_CLIENT` / `DATA_INGEST` | `alembic -c examples/standalone-app/alembic.ini upgrade head` |
 
-参考应用固定启用 `API_CLIENT,DATA_INGEST`，通过导出接口向平台提供增量数据，不再安装 Outbox/Inbox 或事件消费能力。
+参考应用固定启用 `API_CLIENT,DATA_INGEST`，通过导出接口向平台提供增量数据。
 
 ## Database boundary
 

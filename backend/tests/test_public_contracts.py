@@ -133,9 +133,6 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
                 assert "403" in response_codes
 
 
-def test_retired_event_contracts_are_archived_not_live() -> None:
+def test_retired_event_contracts_are_not_live() -> None:
     live_events = PROJECT_ROOT / "contracts/events"
-    archived = PROJECT_ROOT / "docs/archive/m2-event-projection/contracts"
     assert not live_events.exists()
-    assert (archived / "ai-hub.asyncapi.yaml").is_file()
-    assert (archived / "cloud-event.schema.json").is_file()

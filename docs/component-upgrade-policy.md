@@ -4,7 +4,7 @@
 
 本文档是 M0-08 的生产组件版本基线。机器可读清单位于 `deploy/component-lock.json`，Compose、Dockerfile 和根 `.env.example` 必须与该清单保持一致，并由自动化测试阻止漂移。
 
-当前生产档位仅为 `base-access`，数据汇聚采用 raw 贴源层增量拉取（ADR-032）。RabbitMQ 与 `standard-events` 已随 M7-06 退役，不再进入组件锁定范围。
+当前生产档位仅为 `base-access`，数据汇聚采用 raw 贴源层增量拉取。
 
 锁定范围包括：
 
@@ -53,21 +53,17 @@ Python 依赖继续由 `uv.lock` 锁定，Node.js 依赖继续由 `package-lock.
 6. PostgreSQL 报告的服务端版本属于 18.4。
 7. authentik 的可重复 blueprint、OIDC Discovery、用户登录和服务令牌均通过真实运行验证。
 8. Traefik 是唯一公开 HTTP 入口，且平台、门户、身份和参考应用路由及健康检查通过。
-9. raw 贴源层增量汇聚相关门禁通过（调度拉取、位点推进与对账；见 ADR-032 / M7）。
+9. raw 贴源层增量汇聚相关门禁通过（调度拉取、位点推进与对账）。
 
 本地因网络或缓存限制使用其他镜像时，必须通过显式环境变量覆盖并在验证记录中注明。兼容镜像验证不改变生产锁定，也不能替代上面的精确镜像门禁。
 
-2026-08-12 已使用本机缓存的 PostgreSQL 16、Node.js 20 和 Nginx 浮动旧镜像做一次当时的 `standard-events` 兼容性验证；所有迁移退出码为 0，平台 API、门户、独立应用与当时的 RabbitMQ 健康，独立应用到平台的 API 调用和数据库角色边界审计通过，临时容器、网络及数据卷已删除。该记录只证明当时部署结构与边界仍可运行，不计入 PostgreSQL 18.4、Node.js 24.18.1 和 Nginx 1.30.4 的精确镜像门禁。**M7-06 / ADR-032：RabbitMQ 与 `standard-events` 已退役，该历史验证不再作为现行门禁。**
-
-同日已完成精确锁定镜像门禁：
+已完成精确锁定镜像门禁：
 
 - 首次核验发现原 Node.js 摘要实际运行 24.17.0，与可读标签 24.18.1 不一致；已按精确标签重新解析并把清单修正为实际运行 24.18.1 的摘要。Docker 在标签与摘要冲突时使用摘要内容，因此不能只检查可读标签。
 - PostgreSQL 18.4 首次启动暴露官方镜像的数据目录布局变化；Compose 命名卷已从旧路径 `/var/lib/postgresql/data` 调整到 18+ 要求的 `/var/lib/postgresql`，并增加静态契约测试。
-- `base-access` 已从全新数据卷完成基础迁移；平台 API、门户与独立应用健康，独立应用到平台的 API 调用成功。当时记录“API-only 数据库未创建 Outbox/Inbox”；**Outbox/Inbox 随 M2 退役，现行档位不再创建这些对象。**
-- ~~`standard-events` 已从另一全新数据卷完成平台核心、事件登记、平台投影、参考应用基础和参考应用发布者五个迁移入口；全部退出码为 0，RabbitMQ 健康且 ping 成功，Outbox/Inbox 按档位存在，数据库角色边界审计通过。~~ **（历史；M7-06 / ADR-032 已退役 `standard-events`、RabbitMQ、Outbox/Inbox 与投影。）**
-- 容器实际报告 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4；当时另报告 RabbitMQ 4.2.9。验证平台为 `linux/arm64`；临时环境的容器、网络和数据卷均已删除。**RabbitMQ 版本记录仅为历史，现行锁清单不含该组件。**
+- `base-access` 已从全新数据卷完成基础迁移；平台 API、门户与独立应用健康，独立应用到平台的 API 调用成功。
+- 容器实际报告 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4。验证平台为 `linux/arm64`；临时环境的容器、网络和数据卷均已删除。
 - M1 追加验证 authentik 2026.5.6 与 Traefik 3.7.10 的精确镜像；从全新数据卷通过 OIDC/JWKS、PKCE、服务身份、权限、通知、故障降级和独立重启门禁，临时环境随后删除。
-- ~~M2 追加验证 RabbitMQ 4.2.9 的隔离 vhost、Quorum 队列、DLQ、最小权限凭据、发布确认、代理中断恢复、手动确认和消费者崩溃窗口；并完成平台投影从空 Schema 重建及对账，临时环境随后删除。~~ **（历史；M7-06 / ADR-032 已退役 M2 实时事件投影能力线。）**
 
 ## 4. 不可变引用规则
 

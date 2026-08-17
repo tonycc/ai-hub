@@ -1,6 +1,6 @@
 # ADR-032：以定期增量数据汇聚替代 M2 实时事件投影
 
-- 状态：已接受并已实施（M7-01 ~ M7-06；git tag `archive/m2-event-projection`；契约归档于 `docs/archive/m2-event-projection/`）
+- 状态：已接受并已实施（M7-01 ~ M7-06）
 - 决策日期：2026-08-16
 - 决策范围：平台"应用数据向平台汇聚"能力的实现方式与 M2 实时事件投影能力线的存续
 - 详细方案：[`../incremental-data-ingestion-design.md`](../incremental-data-ingestion-design.md)
@@ -28,7 +28,7 @@ M2 解决的是"实时、不丢、不错"的问题，而当前需求只需要"�
 5. **payload 契约化**：每个 `object_type` 的 payload 为显式登记的版本化契约（字段筛选/脱敏），不退化为共享数据库集成。
 6. **纯 HTTP**：不引入 RabbitMQ / Outbox / Inbox；部署只保留 `base-access` 档位。
 
-**退役执行顺序**：先建成增量汇聚并验收达标（M7-01 ~ M7-05），再执行 M2 退役（M7-06），避免能力真空期。M2 退役为**单向操作**，删除前打 git tag（`archive/m2-event-projection`）并归档事件契约（AsyncAPI / CloudEvents schema），供未来确有需要时考古。
+**退役执行顺序**：先建成增量汇聚并验收达标（M7-01 ~ M7-05），再执行 M2 退役（M7-06），避免能力真空期。M2 退役为**单向操作**，须先建成增量汇聚并验证达标。
 
 ## 备选方案（未选择）
 

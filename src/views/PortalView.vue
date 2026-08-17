@@ -97,8 +97,8 @@ onMounted(loadApplications)
           <li><el-icon><CircleCheck /></el-icon><span>平台只提供通用机制与治理</span></li>
           <li><el-icon><CircleCheck /></el-icon><span>独立应用拥有自己的数据与规则</span></li>
           <li><el-icon><CircleCheck /></el-icon><span>跨项目只依赖版本化公开契约</span></li>
-          <li><el-icon><CircleCheck /></el-icon><span>平台投影只读且可以从来源重建</span></li>
-          <li><el-icon><CircleCheck /></el-icon><span>API-only 应用不强制安装事件组件</span></li>
+          <li><el-icon><CircleCheck /></el-icon><span>平台汇聚数据只读且可以从来源重建</span></li>
+          <li><el-icon><CircleCheck /></el-icon><span>API-only 应用不强制建设数据导出</span></li>
         </ul>
       </section>
     </div>
