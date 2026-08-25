@@ -24,6 +24,14 @@ class ApplicationManagementValidationError(ValueError):
     pass
 
 
+def _format_owner_display(display_name: str, email: str | None) -> str:
+    # Phone-number accounts have no email; appending the brackets
+    # unconditionally would persist a literal `<None>` snapshot.
+    if email:
+        return f"{display_name} <{email}>"
+    return display_name
+
+
 class ApplicationManagementService:
     async def list_applications(
         self,
@@ -38,7 +46,13 @@ class ApplicationManagementService:
                 await session.execute(
                     sa.text(
                         """
-                    SELECT a.application_id, a.name, a.description, a.owner, a.status,
+                    SELECT a.application_id, a.name, a.description,
+                           a.owner_id::text AS owner_id,
+                           COALESCE(
+                               u.display_name || COALESCE(' <' || u.email || '>', ''),
+                               a.owner
+                           ) AS owner,
+                           a.status,
                            a.capabilities, a.created_at, a.updated_at,
                            COUNT(DISTINCT e.environment)::integer AS environment_count,
                            COALESCE(
@@ -47,6 +61,8 @@ class ApplicationManagementService:
                                ARRAY[]::varchar[]
                            ) AS scopes
                     FROM platform_core.application AS a
+                    LEFT JOIN platform_core.identity_user AS u
+                      ON u.user_id = a.owner_id
                     LEFT JOIN platform_core.application_environment AS e
                       ON e.application_id = a.application_id
                     LEFT JOIN platform_core.application_scope_grant AS sg
@@ -56,10 +72,13 @@ class ApplicationManagementService:
                       AND (CAST(:query AS varchar) IS NULL
                            OR a.application_id ILIKE '%' || :query || '%'
                            OR a.name ILIKE '%' || :query || '%'
-                           OR a.owner ILIKE '%' || :query || '%')
+                           OR a.owner ILIKE '%' || :query || '%'
+                           OR u.display_name ILIKE '%' || :query || '%'
+                           OR u.email ILIKE '%' || :query || '%')
                       AND (CAST(:status AS varchar) IS NULL OR a.status = :status)
-                    GROUP BY a.application_id, a.name, a.description, a.owner,
-                             a.status, a.capabilities, a.created_at, a.updated_at
+                    GROUP BY a.application_id, a.name, a.description, a.owner_id,
+                             a.owner, a.status, a.capabilities, a.created_at,
+                             a.updated_at, u.display_name, u.email
                     ORDER BY a.name, a.application_id
                     """
                     ),
@@ -90,10 +109,18 @@ class ApplicationManagementService:
                 await session.execute(
                     sa.text(
                         """
-                    SELECT application_id, name, description, owner, status,
-                           capabilities, created_at, updated_at
-                    FROM platform_core.application
-                    WHERE application_id = :application_id
+                    SELECT a.application_id, a.name, a.description,
+                           a.owner_id::text AS owner_id,
+                           COALESCE(
+                               u.display_name || COALESCE(' <' || u.email || '>', ''),
+                               a.owner
+                           ) AS owner,
+                           a.status,
+                           a.capabilities, a.created_at, a.updated_at
+                    FROM platform_core.application AS a
+                    LEFT JOIN platform_core.identity_user AS u
+                      ON u.user_id = a.owner_id
+                    WHERE a.application_id = :application_id
                     """
                     ),
                     {"application_id": application_id},
@@ -212,7 +239,7 @@ class ApplicationManagementService:
         application_id: str,
         name: str,
         description: str,
-        owner: str,
+        owner_id: str | UUID,
         capabilities: list[str],
     ) -> dict[str, Any]:
         if await session.scalar(
@@ -227,22 +254,44 @@ class ApplicationManagementService:
             {"application_id": application_id},
         ):
             raise ApplicationManagementConflictError("Application identifier already exists")
+
+        owner_row = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT display_name, email
+                    FROM platform_core.identity_user
+                    WHERE user_id = :owner_id AND status = 'ACTIVE'
+                    """
+                ),
+                {"owner_id": owner_id},
+            )
+        ).first()
+        if owner_row is None:
+            raise ApplicationManagementValidationError(
+                "Selected owner is not an active platform user"
+            )
+
         await session.execute(
             sa.text(
                 """
                 INSERT INTO platform_core.application
-                    (application_id, name, description, owner, status,
+                    (application_id, name, description, owner, owner_id, status,
                      capabilities, service_subject)
                 VALUES
-                    (:application_id, :name, :description, :owner, 'DRAFT',
-                     :capabilities, NULL)
+                    (:application_id, :name, :description, :owner, :owner_id,
+                     'DRAFT', :capabilities, NULL)
                 """
             ),
             {
                 "application_id": application_id,
                 "name": name,
                 "description": description,
-                "owner": owner,
+                # The legacy display string is kept populated so old images
+                # keep working during the expand window; the service layer now
+                # renders the owner from the owner_id join.
+                "owner": _format_owner_display(owner_row.display_name, owner_row.email),
+                "owner_id": owner_id,
                 "capabilities": sorted(set(capabilities)),
             },
         )
@@ -255,15 +304,39 @@ class ApplicationManagementService:
         application_id: str,
         name: str,
         description: str,
-        owner: str,
+        owner_id: str | UUID | None,
         status: str,
         capabilities: list[str],
     ) -> dict[str, Any]:
+        if owner_id is not None:
+            owner_row = (
+                await session.execute(
+                    sa.text(
+                        """
+                        SELECT display_name, email
+                        FROM platform_core.identity_user
+                        WHERE user_id = :owner_id AND status = 'ACTIVE'
+                        """
+                    ),
+                    {"owner_id": owner_id},
+                )
+            ).first()
+            if owner_row is None:
+                raise ApplicationManagementValidationError(
+                    "Selected owner is not an active platform user"
+                )
+            owner = _format_owner_display(owner_row.display_name, owner_row.email)
+        else:
+            # 保留原负责人
+            owner = None
+
         updated = await session.scalar(
             sa.text(
                 """
                 UPDATE platform_core.application
-                SET name = :name, description = :description, owner = :owner,
+                SET name = :name, description = :description,
+                    owner = COALESCE(:owner, owner),
+                    owner_id = COALESCE(:owner_id, owner_id),
                     status = :status, capabilities = :capabilities,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE application_id = :application_id
@@ -275,6 +348,7 @@ class ApplicationManagementService:
                 "name": name,
                 "description": description,
                 "owner": owner,
+                "owner_id": owner_id,
                 "status": status,
                 "capabilities": sorted(set(capabilities)),
             },
@@ -534,7 +608,14 @@ class ApplicationManagementService:
         )
         if credential["status"] != "ACTIVE":
             raise ApplicationManagementValidationError("Only an active credential can be rotated")
-        if credential["provider_external_id"] is None:
+        provider_external_id = credential["provider_external_id"]
+        if provider_external_id is None:
+            # A NULL provider link means the credential was seeded by a
+            # deployment migration rather than provisioned through this
+            # service. Rotating it would risk patching a shared Authentik
+            # provider (e.g. the platform-wide client), so it stays
+            # read-only until the startup reconciliation links the dedicated
+            # provider explicitly.
             raise ApplicationManagementValidationError(
                 "Bootstrap credentials are deployment-managed and cannot be rotated here"
             )
@@ -673,7 +754,10 @@ class ApplicationManagementService:
         )
         if credential["status"] == "REVOKED":
             return credential
-        if credential["provider_external_id"] is None:
+        provider_external_id = credential["provider_external_id"]
+        if provider_external_id is None:
+            # Same guard as rotation: deployment-managed bootstrap credentials
+            # must not touch a shared provider through the UI.
             raise ApplicationManagementValidationError(
                 "Bootstrap credentials are deployment-managed and cannot be revoked here"
             )

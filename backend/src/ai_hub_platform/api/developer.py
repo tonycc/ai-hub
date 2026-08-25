@@ -128,13 +128,19 @@ async def sandbox_configuration(
     ],
 ) -> SandboxResponse:
     settings = request.app.state.settings
-    issuer = f"{settings.public_identity_base_url.rstrip('/')}/application/o/ai-hub/"
+    # The sandbox developer copies these values into their app's environment,
+    # so they must describe the sandbox application's own dedicated provider,
+    # not the shared platform issuer/audience.
+    issuer = (
+        f"{settings.public_identity_base_url.rstrip('/')}"
+        f"/application/o/{settings.sandbox_application_id}/"
+    )
     return SandboxResponse(
         application_id=settings.sandbox_application_id,
         platform_base_url=settings.public_platform_base_url,
         oidc_issuer=issuer,
         oidc_discovery_url=f"{issuer}.well-known/openid-configuration",
-        oidc_audience=settings.oidc_audience,
+        oidc_audience=settings.sandbox_application_id,
         user_subject=settings.sandbox_user_subject,
         default_capabilities=["API_CLIENT"],
         optional_capabilities=[

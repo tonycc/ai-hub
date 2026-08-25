@@ -25,12 +25,6 @@ const routes = [
         meta: { title: '应用中心', breadcrumb: ['平台能力', '应用中心'] },
       },
       {
-        path: 'platform',
-        name: 'platform-capabilities',
-        component: () => import('../views/PlatformCapabilitiesView.vue'),
-        meta: { title: '平台统一能力', breadcrumb: ['平台能力', '能力总览'] },
-      },
-      {
         path: 'platform/identity',
         name: 'identity',
         component: () => import('../views/IdentityManagementView.vue'),
@@ -55,6 +49,12 @@ const routes = [
         meta: { title: '开发者中心', breadcrumb: ['运行与研发', '开发者中心'] },
       },
       {
+        path: 'platform/platform-users',
+        name: 'platform-users',
+        component: () => import('../views/PlatformUsersView.vue'),
+        meta: { title: '平台用户', breadcrumb: ['运行与研发', '平台用户'] },
+      },
+      {
         path: 'platform/operations',
         name: 'operations',
         component: () => import('../views/OperationsCenterView.vue'),
@@ -77,6 +77,10 @@ const routes = [
         name: 'integrations',
         component: () => import('../views/CollaborationView.vue'),
         meta: { title: '接入治理', breadcrumb: ['平台治理', '接入治理'] },
+      },
+      {
+        path: 'platform',
+        redirect: '/platform/developer',
       },
       {
         path: 'semantics',

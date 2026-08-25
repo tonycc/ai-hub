@@ -86,6 +86,34 @@ def test_ci_versions_and_scripts_match_the_repository_lock() -> None:
     assert jobs["m7-runtime"]["steps"][-1]["run"] == "bash scripts/ci/m7-runtime.sh"
 
 
+def test_m4_rotation_runtime_script_passes_owner_id_uuid() -> None:
+    """The M4 credential rotation gate must match the service signature.
+
+    The service layer takes an ``owner_id`` UUID, not a free-form ``owner``
+    string; the runtime script embeds a Python program that would raise a
+    TypeError on the wrong keyword before any fixture is created.
+    """
+    import inspect
+
+    from ai_hub_platform.modules.app_management.service import ApplicationManagementService
+
+    create_signature = inspect.signature(ApplicationManagementService.create_application)
+    update_signature = inspect.signature(ApplicationManagementService.update_application)
+    assert "owner_id" in create_signature.parameters
+    assert "owner" not in create_signature.parameters
+    assert "owner_id" in update_signature.parameters
+    assert "owner" not in update_signature.parameters
+
+    script = (
+        PROJECT_ROOT / "scripts/ci/m4-credential-rotation-runtime.sh"
+    ).read_text(encoding="utf-8")
+    assert "owner_id=os.environ" in script
+    assert "owner=" not in script
+    # The seeded platform admin user is guaranteed ACTIVE in the isolated
+    # deployment, so it is a valid owner for the fixture application.
+    assert "11000000-0000-4000-8000-000000000001" in script
+
+
 def test_local_ci_scripts_fail_fast_and_cover_every_m0_09_gate() -> None:
     scripts = {
         name: (PROJECT_ROOT / f"scripts/ci/{name}.sh").read_text(encoding="utf-8")

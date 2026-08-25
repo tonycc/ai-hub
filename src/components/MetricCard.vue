@@ -82,7 +82,7 @@ defineProps({
 .metric-card__label {
   display: block;
   color: var(--ink-500);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .metric-card__value-row {
@@ -94,7 +94,7 @@ defineProps({
 
 .metric-card__value-row strong {
   color: var(--ink-900);
-  font-size: 25px;
+  font-size: var(--font-metric);
   font-weight: 720;
   letter-spacing: -0.04em;
   line-height: 1;
@@ -102,7 +102,7 @@ defineProps({
 
 .metric-card__value-row span {
   color: var(--ink-500);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .metric-card__hint {
@@ -110,7 +110,7 @@ defineProps({
   margin-top: 6px;
   overflow: hidden;
   color: var(--ink-500);
-  font-size: 12px;
+  font-size: var(--font-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

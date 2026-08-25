@@ -9,7 +9,7 @@
 - authentik OIDC、平台 API、门户会话、权限、通知和审计链路。
 - 独立参考应用通过公开 API 接入平台的边界。
 - 增量数据汇聚（导出、拉取、删除传播、对账与重建）；见 `scripts/ci/m7-runtime.sh`。
-- 平台管理员、应用开发者、安全审计员和平台运维四类角色的人工 UAT。
+- 平台管理员和应用开发者两类角色的人工 UAT。
 - 发布前可选的恢复、监控、发布回滚、凭据轮换和韧性演练。
 
 本文只适用于仓库内的 `local` 环境。根 `.env.example` 中的账号和密码都是可识别的本地测试值，禁止用于集成、UAT 或生产环境。
@@ -22,7 +22,7 @@
 2. 执行代码与部署静态门禁。
 3. 执行隔离的 M1 身份/API 和 M7 数据汇聚运行门禁。
 4. 启动一个持久的 `base-access` 本地环境。
-5. 完成健康检查、四角色浏览器 UAT 和 API 冒烟测试。
+5. 完成健康检查、两角色浏览器 UAT 和 API 冒烟测试。
 6. 发布前按需执行 M4 深度演练。
 7. 保存结果并停止或重置本地环境。
 
@@ -283,14 +283,12 @@ docker compose --env-file .env -f deploy/compose.yaml \
 
 ## 9. 本地测试账号
 
-以下账号只存在于本地 blueprint。四个门户角色默认共用 `.env` 中的 `AI_HUB_UAT_USER_PASSWORD`；未修改示例时为 `local-only-uat-user-password`。
+以下账号只存在于本地 blueprint。两个门户角色默认共用 `.env` 中的 `AI_HUB_UAT_USER_PASSWORD`；未修改示例时为 `local-only-uat-user-password`。
 
 | 角色 | 用户名 | 主要验证范围 |
 | --- | --- | --- |
-| 平台管理员 | `ai-hub-platform-admin` | 全平台配置、身份、授权和应用管理 |
+| 平台管理员 | `ai-hub-platform-admin` | 全平台配置、身份、授权、应用、凭据、审计和运维诊断 |
 | 应用开发者 | `ai-hub-app-developer` | 仅 `standalone-example` 范围的应用接入 |
-| 安全审计员 | `ai-hub-security-auditor` | 只读治理、审计和凭据操作 |
-| 平台运维 | `ai-hub-platform-operator` | 通知、审计、开发者资产和运行诊断 |
 
 独立参考应用使用：
 
@@ -305,7 +303,7 @@ docker compose --env-file .env -f deploy/compose.yaml \
 
 不同角色之间应完整退出登录，或使用相互隔离的浏览器配置文件/无痕窗口，避免复用 authentik 和平台会话 Cookie。
 
-## 10. 四角色人工 UAT 清单
+## 10. 两角色人工 UAT 清单
 
 ### 10.1 公共检查
 
@@ -323,13 +321,15 @@ docker compose --env-file .env -f deploy/compose.yaml \
 使用 `ai-hub-platform-admin`：
 
 1. 打开平台首页，确认身份、应用、通知、审计、运维、平台配置和开发者入口可见。
-2. 在“用户与组织”检查四个种子用户、组织、四类平台角色和角色分配。
-3. 新建一个临时组织和用户映射，确认保存后列表刷新、授权版本和审计记录存在。
+2. 在“平台用户”页面检查两个种子平台用户、平台角色和角色分配。
+3. 在“用户与组织”页面检查种子组织与业务用户视图；新建一个临时组织，确认保存后列表刷新、授权版本和审计记录存在。
 4. 在“应用中心”确认 `standalone-example` 详情、环境、Scope 和能力来自真实 API。
 5. 可选：注册 `local-uat-app`，默认只选择 `API_CLIENT`；新增 `local` 环境，可分别使用 `http://app.localhost:8088`、`http://app.localhost:8088/api/v1`、`http://app.localhost:8088/health/live` 和 `http://app.localhost:8088/auth/callback` 作为本地入口、API、健康检查和回调地址。该操作会留下本地测试数据，建议只在可重置的数据卷中执行。
 6. 创建凭据时确认 Client Secret 只显示一次；关闭弹窗后不能再次读取明文。
 7. 在“权限与安全”确认权限、应用角色、分配和数据范围可以读取，写操作仅管理员可见。
 8. 在“审计中心”查询刚才操作，确认结果、Request ID 和目标对象完整，密钥、Cookie 和令牌未进入元数据。
+9. 在“运维中心”切换“应用入口、数据来源、同步新鲜度”，确认对象级诊断可展开。
+10. 在“平台配置”确认只读“配置即代码”视图来源为 `deploy/operations/production-targets.json`，页面不提供在线编辑按钮。
 
 ### 10.3 应用开发者
 
@@ -342,26 +342,48 @@ docker compose --env-file .env -f deploy/compose.yaml \
 5. 在通知中心选择应用范围内的收件人并发送测试通知。
 6. 直接访问全局身份写接口应返回 `403`，且审计中心存在拒绝记录。
 
-### 10.4 安全审计员
+### 10.4 安全审计与运维职责
 
-使用 `ai-hub-security-auditor`：
+安全审计和平台运维不再是独立角色，其职责由平台管理员承担。管理员在 UAT 中额外验证：
 
-1. 可以读取用户、权限、应用、审计、运维和只读平台配置。
-2. 用户、组织、平台角色和应用元数据写按钮不可见。
-3. 应用凭据创建/轮换/吊销入口按权限显示；完整轮换时序优先由 `m4-credential-rotation-runtime.sh` 验证，避免人工等待重叠窗口。
-4. 审计记录中只出现凭据版本和状态，不出现 Client Secret。
-5. 尝试无权写操作时服务端必须返回 `403`，不能只依赖前端隐藏按钮。
+1. 读取用户、权限、应用、审计、运维和只读平台配置。
+2. 应用凭据创建/轮换/吊销入口可用；完整轮换时序优先由 `m4-credential-rotation-runtime.sh` 验证，避免人工等待重叠窗口。
+3. 审计记录中只出现凭据版本和状态，不出现 Client Secret。
+4. 运维中心可在“应用入口、数据来源、同步新鲜度”之间切换；平台配置为只读“配置即代码”视图，来源为 `deploy/operations/production-targets.json`，页面不提供在线编辑按钮。
 
-### 10.5 平台运维
+### 10.5 平台用户管理（Authentik 用户）
 
-使用 `ai-hub-platform-operator`：
+平台管理员在“平台用户”页面直接管理 Authentik 用户，无需访问 Authentik 管理后台：
 
-1. 能访问应用只读信息、通知、审计、开发者中心、运维中心和平台配置。
-2. “用户与组织”和“权限与安全”导航不可见；直接访问时数据 API 返回 `403`。
-3. 运维中心可在“应用入口、数据来源、同步新鲜度”之间切换。
-4. 平台配置必须是只读“配置即代码”视图，来源为 `deploy/operations/production-targets.json`，页面不提供在线编辑按钮。
+1. **查看用户列表**：显示所有 Authentik 用户的用户名、显示名称、邮箱和状态。
+2. **创建用户**：输入用户名、显示名称、邮箱和初始密码（至少8位）。
+3. **编辑用户**：更新显示名称、邮箱或启用/禁用状态。
+4. **重置密码**：为用户设置新密码。
+5. **删除用户**：删除用户后该用户将无法登录。
 
-### 10.6 通知与后续能力边界
+此功能通过平台后端调用 Authentik Admin API 实现，管理员无需直接访问 Authentik 管理界面。
+
+### 10.6 统一用户管理（推荐）
+
+平台管理员在“平台用户”页面的“用户”标签页中统一管理平台用户：
+
+1. **创建用户**：一步完成 Authentik 账户创建、平台映射和角色分配
+   - 登录账号：手机号或邮箱（用于登录）
+   - 用户姓名：界面显示名称
+   - 初始密码：至少8位
+   - 所属组织：仅可选 ACTIVE 状态的组织
+   - 平台角色：**必选**，分配后立即可用；选择 `APPLICATION_DEVELOPER` 时还需指定应用
+2. **查看用户**：显示用户姓名、登录账号、组织、平台角色和状态
+3. **编辑用户**：修改用户姓名、所属组织和启停状态（Authentik 与本地同步生效）
+4. **重置密码**：为用户设置新密码
+
+业务用户（无平台角色）在“用户与组织”页面中创建与管理，同样走统一创建端点。
+
+**字段说明**：
+- **登录账号**：用户登录时使用的账号，必须是手机号或邮箱格式，创建后不可修改
+- **用户姓名**：在平台界面中显示的名称，默认可与登录账号相同
+
+### 10.7 通知与后续能力边界
 
 - 当前通知仅实现 `IN_APP / LOCAL_REFERENCE` 站内测试通道。
 - 页面显示“测试已记录”或状态 `DELIVERED`，只表示本地通知记录成功，不表示邮件、短信、Teams 或企业微信已经送达。
@@ -369,12 +391,14 @@ docker compose --env-file .env -f deploy/compose.yaml \
 
 ## 11. 公共 API 冒烟测试
 
-以下命令使用 `.env.example` 的本地 Client Credentials。若修改过 `.env`，应替换为实际本地测试凭据；不要把令牌复制到日志或文档。
+以下命令使用 `standalone-example` 的独立 OAuth2 凭据。若修改过 `.env` 中的 `STANDALONE_OIDC_CLIENT_SECRET`，应替换为实际值；不要把令牌复制到日志或文档。
+
+> **注意**：`standalone-example` 应用使用独立的 OAuth2 Provider（`standalone-example`），其服务令牌可用于访问该应用范围内的平台 API。平台自身凭据（`ai-hub-platform`）仅用于平台管理面内部调用。
 
 ```bash
 AI_HUB_LOCAL_TEST_TOKEN="$(
   curl -fsS \
-    --user 'ai-hub-platform:local-only-oidc-client-secret' \
+    --user 'standalone-example:local-only-standalone-oidc-client-secret' \
     --data-urlencode 'grant_type=client_credentials' \
     --data-urlencode 'scope=openid ai_hub.identity platform.application.read' \
     http://auth.localhost:8088/application/o/token/ \
@@ -450,7 +474,7 @@ bash scripts/ci/m4-resilience-runtime.sh
 
 - `scripts/ci/all.sh` 全部通过。
 - M1 与 M7 真实运行门禁全部通过。
-- 四类角色的导航、读取、写入和拒绝边界符合本指南。
+- 两类角色的导航、读取、写入和拒绝边界符合本指南。
 - 平台、身份和独立应用服务健康。
 - API 错误包含稳定错误码和 Request ID。
 - 通知、凭据和审计不泄露密钥、令牌、Cookie 或连接串。
@@ -476,8 +500,6 @@ M1 身份与 API：PASS / FAIL
 M7 数据汇聚：PASS / FAIL
 平台管理员 UAT：PASS / FAIL
 应用开发者 UAT：PASS / FAIL
-安全审计员 UAT：PASS / FAIL
-平台运维 UAT：PASS / FAIL
 M4 深度演练：PASS / FAIL / NOT RUN
 
 失败用例与 Request ID：

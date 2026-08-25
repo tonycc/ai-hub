@@ -110,11 +110,14 @@ m4_rotation_psql() {
     psql -v ON_ERROR_STOP=1 -U postgres -d platform_db "$@"
 }
 
+M4_ROTATION_PLATFORM_ADMIN_USER_ID="11000000-0000-4000-8000-000000000001"
+
 m4_rotation_provision() {
   m4_rotation_compose exec -T \
     -e M4_ROTATION_OPERATION=provision \
     -e M4_ROTATION_APPLICATION_ID="${M4_ROTATION_APPLICATION_ID}" \
     -e M4_ROTATION_ENVIRONMENT="${M4_ROTATION_ENVIRONMENT}" \
+    -e M4_ROTATION_OWNER_ID="${M4_ROTATION_PLATFORM_ADMIN_USER_ID}" \
     platform-api python -c "${M4_ROTATION_SERVICE_PROGRAM}"
 }
 
@@ -194,7 +197,7 @@ async def main():
                     application_id=application_id,
                     name="M4 credential rotation fixture",
                     description="Business-neutral credential rotation verification",
-                    owner="platform-security",
+                    owner_id=os.environ["M4_ROTATION_OWNER_ID"],
                     capabilities=["API_CLIENT"],
                 )
                 await service.upsert_environment(
@@ -220,7 +223,7 @@ async def main():
                     application_id=application_id,
                     name="M4 credential rotation fixture",
                     description="Business-neutral credential rotation verification",
-                    owner="platform-security",
+                    owner_id=os.environ["M4_ROTATION_OWNER_ID"],
                     status="ACTIVE",
                     capabilities=["API_CLIENT"],
                 )

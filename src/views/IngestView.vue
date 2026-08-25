@@ -498,12 +498,12 @@ onMounted(loadAll)
       </template>
     </ApiState>
 
-    <el-dialog
+    <el-drawer
       v-model="sourceDialogVisible"
       :title="sourceDialogMode === 'edit' ? '编辑数据来源' : '新增数据来源'"
-      width="520px"
+      size="min(520px, 96vw)"
     >
-      <el-form label-width="130px" label-position="left">
+      <el-form label-position="top">
         <el-form-item label="应用 ID" required>
           <el-input v-model="sourceForm.source_application_id" :disabled="sourceDialogMode === 'edit'" placeholder="如 order-center" />
         </el-form-item>
@@ -530,7 +530,7 @@ onMounted(loadAll)
         <el-button @click="sourceDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveSource">保存</el-button>
       </template>
-    </el-dialog>
+    </el-drawer>
   </div>
 </template>
 

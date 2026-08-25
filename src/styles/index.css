@@ -34,6 +34,19 @@
   --el-menu-active-color: #ffffff;
   --content-gutter: 12px;
   --header-gutter: 24px;
+  /* 排版标尺 — 所有页面字体必须引用这些变量，不得硬编码像素值 */
+  --font-eyebrow: 11px;       /* 眉题/标签前缀 */
+  --font-caption: 12px;       /* 辅助说明、提示、时间戳 */
+  --font-body: 13px;          /* 正文、表格内容 */
+  --font-body-lg: 14px;       /* 卡片标题、强调正文、提醒条标题 */
+  --font-heading: 16px;       /* 区块标题 h2/h3 */
+  --font-page-title: 18px;    /* 页面主标题 */
+  --font-metric: 25px;        /* 指标数值 */
+  /* 间距标尺 */
+  --space-card: 15px;         /* 卡片内边距 */
+  --space-card-lg: 17px;      /* 大卡片内边距 */
+  --space-gap: 12px;          /* 元素间距 */
+  --space-gap-lg: 14px;       /* 网格间距 */
 }
 
 * {
@@ -97,15 +110,15 @@ a {
 .section-heading h3 {
   margin: 0;
   color: var(--ink-900);
-  font-size: 17px;
-  font-weight: 680;
+  font-size: var(--font-heading);
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .section-heading p {
   margin: 4px 0 0;
   color: var(--ink-500);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .surface-panel {
@@ -137,7 +150,7 @@ a {
 .eyebrow {
   margin: 0 0 8px;
   color: var(--accent-600);
-  font-size: 11px;
+  font-size: var(--font-eyebrow);
   font-weight: 750;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -174,7 +187,7 @@ a {
   --el-table-border-color: #e7ebee;
   --el-table-header-text-color: #576774;
   --el-table-text-color: #2d3942;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .el-table th.el-table__cell {
@@ -186,19 +199,16 @@ a {
   padding: 11px 0;
 }
 
-.el-dialog,
 .el-drawer {
-  --el-dialog-border-radius: 10px;
+  --el-drawer-border-radius: 10px;
 }
 
-.el-dialog__header,
 .el-drawer__header {
   margin: 0;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--line);
 }
 
-.el-dialog__body,
 .el-drawer__body {
   padding-top: 20px;
 }
@@ -206,13 +216,13 @@ a {
 .el-breadcrumb__inner,
 .el-breadcrumb__inner a {
   color: #87939c !important;
-  font-size: 12px;
+  font-size: var(--font-caption);
   font-weight: 500 !important;
 }
 
 .el-breadcrumb__item:last-child .el-breadcrumb__inner {
   color: var(--ink-900) !important;
-  font-size: 16px;
+  font-size: var(--font-heading);
   font-weight: 700 !important;
 }
 
@@ -226,6 +236,9 @@ a {
   }
 
   .el-dialog {
-    width: calc(100vw - 28px) !important;
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px);
+    margin-right: auto;
+    margin-left: auto;
   }
 }

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ApiState from '../components/ApiState.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -13,34 +13,60 @@ const loading = ref(false)
 const error = ref(null)
 const users = ref([])
 const organizations = ref([])
-const roles = ref([])
-const assignments = ref([])
+const positions = ref([])
+// Unfiltered position options for the user form / assignment selectors: the
+// management list follows the search keyword, but the selectors must keep
+// offering every active position while a user search is in progress.
+const allPositions = ref([])
+const allOrganizations = ref([])
 const keyword = ref('')
 const userVisible = ref(false)
 const orgVisible = ref(false)
-const assignmentVisible = ref(false)
+const positionVisible = ref(false)
+const userPositionVisible = ref(false)
 const saving = ref(false)
 const editingUser = ref(null)
 const editingOrg = ref(null)
+const editingPosition = ref(null)
+const selectedUser = ref(null)
 
-const userForm = reactive({ subject: '', display_name: '', email: '', organization_id: '', status: 'ACTIVE' })
+const userForm = reactive({
+  login_account: '',
+  user_name: '',
+  password: '',
+  email: '',
+  organization_id: '',
+  position_code: '',
+  status: 'ACTIVE'
+})
 const orgForm = reactive({ organization_id: '', name: '', parent_organization_id: null, status: 'ACTIVE' })
-const assignmentForm = reactive({ user_id: '', role_code: 'APPLICATION_DEVELOPER', application_id: null })
+const positionForm = reactive({ position_code: '', name: '', description: '' })
+const userPositionForm = reactive({ organization_id: '', position_code: '', is_primary: false })
 const canWrite = computed(() => session.hasPermission('platform.identity.write'))
+
+// 业务用户 = 无平台角色的用户
+const businessUsers = computed(() => users.value.filter((user) => user.platform_roles.length === 0))
+
+// 用户职位列表
+const userPositions = ref([])
 
 async function loadAll() {
   loading.value = true
   error.value = null
   try {
     const suffix = queryString({ query: keyword.value })
-    const [userResponse, orgResponse, roleResponse, assignmentResponse] = await Promise.all([
-      apiRequest(`users${suffix}`), apiRequest(`organizations${suffix}`),
-      apiRequest('platform-roles'), apiRequest('platform-role-assignments'),
+    const [userResponse, orgResponse, positionResponse, allPositionResponse, allOrgResponse] = await Promise.all([
+      apiRequest(`users${suffix}`),
+      apiRequest(`organizations${suffix}`),
+      apiRequest(`positions${suffix}`),
+      apiRequest('positions?status=ACTIVE'),
+      apiRequest('organizations?status=ACTIVE'),
     ])
     users.value = userResponse.items
     organizations.value = orgResponse.items
-    roles.value = roleResponse.items
-    assignments.value = assignmentResponse.items
+    positions.value = positionResponse.items
+    allPositions.value = allPositionResponse.items
+    allOrganizations.value = allOrgResponse.items
   } catch (caught) {
     error.value = caught
   } finally {
@@ -48,24 +74,92 @@ async function loadAll() {
   }
 }
 
+async function loadUserPositions(userId) {
+  try {
+    userPositions.value = await apiRequest(`users/${userId}/positions`)
+  } catch (caught) {
+    ElMessage.error('加载用户职位失败: ' + caught.message)
+  }
+}
+
 function openUser(row = null) {
   editingUser.value = row
-  Object.assign(userForm, row ? {
-    subject: row.subject, display_name: row.display_name, email: row.email || '',
-    organization_id: row.primary_organization_id, status: row.status,
-  } : { subject: '', display_name: '', email: '', organization_id: organizations.value[0]?.organization_id || '', status: 'ACTIVE' })
+  selectedUser.value = row
+  if (row) {
+    // 编辑模式：加载用户职位
+    loadUserPositions(row.user_id)
+    const primaryPosition = row.positions?.find(p => p.is_primary) || row.positions?.[0]
+    Object.assign(userForm, {
+      login_account: row.subject,
+      user_name: row.display_name,
+      password: '',
+      email: row.email || '',
+      organization_id: row.primary_organization_id,
+      position_code: primaryPosition?.position_code || '',
+      status: row.status,
+    })
+  } else {
+    Object.assign(userForm, {
+      login_account: '',
+      user_name: '',
+      password: '',
+      email: '',
+      organization_id: allOrganizations.value[0]?.organization_id || '',
+      position_code: '',
+      status: 'ACTIVE'
+    })
+  }
   userVisible.value = true
 }
 
 async function saveUser() {
   saving.value = true
   try {
-    const path = editingUser.value ? `users/${editingUser.value.user_id}` : 'users'
-    const body = { ...userForm, email: userForm.email || null }
-    if (editingUser.value) delete body.subject
-    await apiRequest(path, { method: editingUser.value ? 'PUT' : 'POST', body })
+    if (editingUser.value) {
+      const body = {
+        user_name: userForm.user_name,
+        email: userForm.email || null,
+        organization_id: userForm.organization_id,
+        status: userForm.status,
+        is_active: userForm.status === 'ACTIVE',
+      }
+      if (userForm.password) body.password = userForm.password
+      await apiRequest(`unified-users/${editingUser.value.user_id}`, { method: 'PUT', body })
+      // 更新职位：职位或组织变化时写入；显式清空时删除原主职位，否则页面
+      // 提示成功但旧职位仍保留。
+      const currentPrimary = editingUser.value.positions?.find(p => p.is_primary) || editingUser.value.positions?.[0]
+      const positionChanged = userForm.position_code && userForm.position_code !== currentPrimary?.position_code
+      const orgChanged = userForm.organization_id !== currentPrimary?.organization_id
+      const positionCleared = !userForm.position_code && Boolean(currentPrimary)
+      if (positionChanged || (userForm.position_code && orgChanged)) {
+        await apiRequest(`users/${editingUser.value.user_id}/positions`, {
+          method: 'POST',
+          body: {
+            organization_id: userForm.organization_id,
+            position_code: userForm.position_code,
+            is_primary: true
+          }
+        })
+      } else if (positionCleared) {
+        await apiRequest(
+          `users/${editingUser.value.user_id}/positions/${currentPrimary.assignment_id}`,
+          { method: 'DELETE' }
+        )
+      }
+      ElMessage.success('业务用户已更新')
+    } else {
+      const body = {
+        login_account: userForm.login_account,
+        user_name: userForm.user_name,
+        password: userForm.password,
+        organization_id: userForm.organization_id,
+        position_code: userForm.position_code || undefined
+      }
+      if (userForm.email) body.email = userForm.email
+      await apiRequest('unified-users', { method: 'POST', body })
+      ElMessage.success('业务用户已创建')
+    }
     userVisible.value = false
-    ElMessage.success(editingUser.value ? '用户映射已更新' : '用户映射已创建')
     await loadAll()
   } catch (caught) {
     ElMessage.error(caught.message)
@@ -94,17 +188,81 @@ async function saveOrg() {
   } catch (caught) { ElMessage.error(caught.message) } finally { saving.value = false }
 }
 
-async function saveAssignment() {
+// 职位管理
+function openPosition(row = null) {
+  editingPosition.value = row
+  Object.assign(positionForm, row ? {
+    position_code: row.position_code,
+    name: row.name,
+    description: row.description || '',
+  } : { position_code: '', name: '', description: '' })
+  positionVisible.value = true
+}
+
+async function savePosition() {
   saving.value = true
   try {
-    await apiRequest('platform-role-assignments', {
-      method: 'POST',
-      body: { ...assignmentForm, application_id: assignmentForm.application_id || null },
-    })
-    assignmentVisible.value = false
-    ElMessage.success('平台角色已分配')
+    const path = editingPosition.value ? `positions/${editingPosition.value.position_code}` : 'positions'
+    const body = { ...positionForm }
+    if (editingPosition.value) delete body.position_code
+    await apiRequest(path, { method: editingPosition.value ? 'PUT' : 'POST', body })
+    positionVisible.value = false
+    ElMessage.success('职位已保存')
     await loadAll()
   } catch (caught) { ElMessage.error(caught.message) } finally { saving.value = false }
+}
+
+async function deletePosition(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除职位 "${row.name}" 吗？`, '确认删除', { type: 'warning' })
+  } catch { return }
+  try {
+    await apiRequest(`positions/${row.position_code}`, { method: 'DELETE' })
+    ElMessage.success('职位已删除')
+    await loadAll()
+  } catch (caught) { ElMessage.error(caught.message) }
+}
+
+// 用户职位管理
+function openUserPosition(row) {
+  selectedUser.value = row
+  userPositionForm.organization_id = row.primary_organization_id
+  userPositionForm.position_code = ''
+  userPositionForm.is_primary = false
+  userPositionVisible.value = true
+}
+
+async function saveUserPosition() {
+  saving.value = true
+  try {
+    await apiRequest(`users/${selectedUser.value.user_id}/positions`, {
+      method: 'POST',
+      body: { ...userPositionForm }
+    })
+    userPositionVisible.value = false
+    ElMessage.success('职位分配成功')
+    await loadAll()
+    await loadUserPositions(selectedUser.value.user_id)
+  } catch (caught) { ElMessage.error(caught.message) } finally { saving.value = false }
+}
+
+async function removeUserPosition(position) {
+  const user = selectedUser.value
+  try {
+    await ElMessageBox.confirm(
+      `确定将用户「${user?.display_name}」在组织「${position.organization_name || position.organization_id}」的职位「${position.position_name || position.position_code}」移除吗？`,
+      '确认移除职位',
+      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await apiRequest(`users/${user.user_id}/positions/${position.assignment_id}`, { method: 'DELETE' })
+    ElMessage.success('职位已移除')
+    await loadAll()
+    await loadUserPositions(user.user_id)
+  } catch (caught) { ElMessage.error(caught.message) }
 }
 
 onMounted(loadAll)
@@ -112,21 +270,211 @@ onMounted(loadAll)
 
 <template>
   <div class="page-shell">
-    <PageHeader title="用户与组织" description="管理 authentik 身份映射、组织关系和平台角色分配；认证凭据仍由身份提供方负责。">
-      <template #tabs><div class="management-tabs"><button v-for="item in [['users','用户映射'],['organizations','组织'],['roles','平台角色'],['assignments','角色分配']]" :key="item[0]" :class="{ active: activeTab === item[0] }" @click="activeTab = item[0]">{{ item[1] }}</button></div></template>
+    <PageHeader title="用户与组织" description="管理业务用户和组织架构；业务用户仅用于登录业务应用，无平台管理权限。">
+      <template #tabs>
+        <div class="management-tabs">
+          <button v-for="item in [['users','业务用户'],['organizations','组织'],['positions','职位']]" :key="item[0]" :class="{ active: activeTab === item[0] }" @click="activeTab = item[0]">{{ item[1] }}</button>
+        </div>
+      </template>
       <el-input v-model="keyword" clearable prefix-icon="Search" placeholder="搜索名称或编号" style="width: 280px" @keyup.enter="loadAll" @clear="loadAll" />
-      <template #actions><el-button @click="loadAll"><el-icon><Refresh /></el-icon>刷新</el-button><el-button v-if="canWrite && activeTab === 'users'" type="primary" @click="openUser()"><el-icon><Plus /></el-icon>新增用户映射</el-button><el-button v-if="canWrite && activeTab === 'organizations'" type="primary" @click="openOrg()"><el-icon><Plus /></el-icon>新增组织</el-button><el-button v-if="canWrite && activeTab === 'assignments'" type="primary" @click="assignmentVisible = true"><el-icon><Plus /></el-icon>分配角色</el-button></template>
+      <template #actions>
+        <el-button @click="loadAll"><el-icon><Refresh /></el-icon>刷新</el-button>
+        <el-button v-if="canWrite && activeTab === 'users'" type="primary" @click="openUser()"><el-icon><Plus /></el-icon>新增业务用户</el-button>
+        <el-button v-if="canWrite && activeTab === 'organizations'" type="primary" @click="openOrg()"><el-icon><Plus /></el-icon>新增组织</el-button>
+        <el-button v-if="canWrite && activeTab === 'positions'" type="primary" @click="openPosition()"><el-icon><Plus /></el-icon>新增职位</el-button>
+      </template>
     </PageHeader>
-    <section class="surface-panel page-section list-panel"><ApiState :loading="loading" :error="error" @retry="loadAll">
-      <el-table v-if="activeTab === 'users'" :data="users" style="width: 100%"><el-table-column prop="display_name" label="显示名称" min-width="170" /><el-table-column prop="subject" label="身份主体" min-width="210"><template #default="scope"><code>{{ scope.row.subject }}</code></template></el-table-column><el-table-column prop="email" label="邮箱" min-width="190"><template #default="scope">{{ scope.row.email || '—' }}</template></el-table-column><el-table-column prop="organization_name" label="组织" min-width="150" /><el-table-column label="平台角色" min-width="220"><template #default="scope"><el-tag v-for="role in scope.row.platform_roles" :key="role" size="small" effect="plain" class="inline-tag">{{ role }}</el-tag><span v-if="!scope.row.platform_roles.length">—</span></template></el-table-column><el-table-column prop="authorization_version" label="授权版本" width="100" align="center" /><el-table-column prop="status" label="状态" width="100"><template #default="scope"><StatusTag :status="scope.row.status" /></template></el-table-column><el-table-column v-if="canWrite" label="操作" width="80" fixed="right"><template #default="scope"><el-button type="primary" link @click="openUser(scope.row)">编辑</el-button></template></el-table-column></el-table>
-      <el-table v-else-if="activeTab === 'organizations'" :data="organizations" style="width: 100%"><el-table-column prop="name" label="组织名称" min-width="220" /><el-table-column prop="organization_id" label="组织编号" min-width="200"><template #default="scope"><code>{{ scope.row.organization_id }}</code></template></el-table-column><el-table-column prop="parent_organization_name" label="上级组织" min-width="180"><template #default="scope">{{ scope.row.parent_organization_name || '—' }}</template></el-table-column><el-table-column prop="user_count" label="用户数" width="100" align="center" /><el-table-column prop="status" label="状态" width="100"><template #default="scope"><StatusTag :status="scope.row.status" /></template></el-table-column><el-table-column v-if="canWrite" label="操作" width="80" fixed="right"><template #default="scope"><el-button type="primary" link @click="openOrg(scope.row)">编辑</el-button></template></el-table-column></el-table>
-      <el-table v-else-if="activeTab === 'roles'" :data="roles" style="width: 100%"><el-table-column prop="name" label="角色名称" min-width="180" /><el-table-column prop="role_code" label="角色编码" min-width="190"><template #default="scope"><code>{{ scope.row.role_code }}</code></template></el-table-column><el-table-column prop="description" label="职责" min-width="300" /><el-table-column label="权限数" width="100" align="center"><template #default="scope">{{ scope.row.permissions.length }}</template></el-table-column><el-table-column prop="status" label="状态" width="100"><template #default="scope"><StatusTag :status="scope.row.status" /></template></el-table-column></el-table>
-      <el-table v-else :data="assignments" style="width: 100%"><el-table-column prop="display_name" label="用户" min-width="180" /><el-table-column prop="role_name" label="平台角色" min-width="180" /><el-table-column prop="role_code" label="角色编码" min-width="190"><template #default="scope"><code>{{ scope.row.role_code }}</code></template></el-table-column><el-table-column prop="application_name" label="资源范围" min-width="180"><template #default="scope">{{ scope.row.application_name || '全平台' }}</template></el-table-column><el-table-column prop="created_at" label="分配时间" min-width="190" /></el-table>
-    </ApiState></section>
 
-    <el-dialog v-model="userVisible" :title="editingUser ? '编辑用户映射' : '新增用户映射'" width="560px"><el-form label-position="top"><el-form-item v-if="!editingUser" label="OIDC Subject" required><el-input v-model="userForm.subject" /></el-form-item><el-form-item label="显示名称" required><el-input v-model="userForm.display_name" /></el-form-item><el-form-item label="邮箱"><el-input v-model="userForm.email" /></el-form-item><el-form-item label="所属组织" required><el-select v-model="userForm.organization_id" style="width: 100%"><el-option v-for="item in organizations" :key="item.organization_id" :label="item.name" :value="item.organization_id" /></el-select></el-form-item><el-form-item label="状态"><el-switch v-model="userForm.status" active-value="ACTIVE" inactive-value="DISABLED" /></el-form-item></el-form><template #footer><el-button @click="userVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">保存</el-button></template></el-dialog>
-    <el-dialog v-model="orgVisible" :title="editingOrg ? '编辑组织' : '新增组织'" width="560px"><el-form label-position="top"><el-form-item v-if="!editingOrg" label="组织编号" required><el-input v-model="orgForm.organization_id" /></el-form-item><el-form-item label="组织名称" required><el-input v-model="orgForm.name" /></el-form-item><el-form-item label="上级组织"><el-select v-model="orgForm.parent_organization_id" clearable style="width: 100%"><el-option v-for="item in organizations.filter((org) => org.organization_id !== editingOrg?.organization_id)" :key="item.organization_id" :label="item.name" :value="item.organization_id" /></el-select></el-form-item><el-form-item label="状态"><el-switch v-model="orgForm.status" active-value="ACTIVE" inactive-value="DISABLED" /></el-form-item></el-form><template #footer><el-button @click="orgVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveOrg">保存</el-button></template></el-dialog>
-    <el-dialog v-model="assignmentVisible" title="分配平台角色" width="560px"><el-form label-position="top"><el-form-item label="用户" required><el-select v-model="assignmentForm.user_id" filterable style="width: 100%"><el-option v-for="item in users" :key="item.user_id" :label="`${item.display_name} · ${item.subject}`" :value="item.user_id" /></el-select></el-form-item><el-form-item label="角色" required><el-select v-model="assignmentForm.role_code" style="width: 100%"><el-option v-for="item in roles" :key="item.role_code" :label="item.name" :value="item.role_code" /></el-select></el-form-item><el-form-item label="应用编号"><el-input v-model="assignmentForm.application_id" placeholder="仅应用开发者需要；全局角色留空" /></el-form-item></el-form><template #footer><el-button @click="assignmentVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveAssignment">分配</el-button></template></el-dialog>
+    <section class="surface-panel page-section list-panel">
+      <ApiState :loading="loading" :error="error" @retry="loadAll">
+        <!-- 业务用户表格 -->
+        <el-table v-if="activeTab === 'users'" :data="businessUsers" style="width: 100%">
+          <el-table-column prop="display_name" label="用户姓名" min-width="150" />
+          <el-table-column prop="subject" label="登录账号" min-width="180">
+            <template #default="scope"><code>{{ scope.row.subject }}</code></template>
+          </el-table-column>
+          <el-table-column prop="email" label="邮箱" min-width="180">
+            <template #default="scope">{{ scope.row.email || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="组织/职位" min-width="200">
+            <template #default="scope">
+              <div v-if="scope.row.positions?.length">
+                <el-tag v-for="pos in scope.row.positions" :key="pos.assignment_id" size="small" effect="plain" class="inline-tag">
+                  {{ pos.organization_name }} · {{ pos.position_name }}
+                  <el-icon v-if="pos.is_primary" class="primary-icon"><Star /></el-icon>
+                </el-tag>
+              </div>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="90">
+            <template #default="scope"><StatusTag :status="scope.row.status" /></template>
+          </el-table-column>
+          <el-table-column v-if="canWrite" label="操作" width="150" fixed="right">
+            <template #default="scope">
+              <el-button type="primary" link @click="openUser(scope.row)">编辑</el-button>
+              <el-button type="primary" link @click="openUserPosition(scope.row)">分配职位</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 组织表格 -->
+        <el-table v-else-if="activeTab === 'organizations'" :data="organizations" style="width: 100%">
+          <el-table-column prop="name" label="组织名称" min-width="220" />
+          <el-table-column prop="organization_id" label="组织编号" min-width="200">
+            <template #default="scope"><code>{{ scope.row.organization_id }}</code></template>
+          </el-table-column>
+          <el-table-column prop="parent_organization_name" label="上级组织" min-width="180">
+            <template #default="scope">{{ scope.row.parent_organization_name || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="user_count" label="用户数" width="100" align="center" />
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="scope"><StatusTag :status="scope.row.status" /></template>
+          </el-table-column>
+          <el-table-column v-if="canWrite" label="操作" width="80" fixed="right">
+            <template #default="scope">
+              <el-button type="primary" link @click="openOrg(scope.row)">编辑</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 职位表格 -->
+        <el-table v-else-if="activeTab === 'positions'" :data="positions" style="width: 100%">
+          <el-table-column prop="name" label="职位名称" min-width="180" />
+          <el-table-column prop="position_code" label="职位编码" min-width="150">
+            <template #default="scope"><code>{{ scope.row.position_code }}</code></template>
+          </el-table-column>
+          <el-table-column prop="description" label="描述" min-width="200">
+            <template #default="scope">{{ scope.row.description || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="scope"><StatusTag :status="scope.row.status" /></template>
+          </el-table-column>
+          <el-table-column v-if="canWrite" label="操作" width="150" fixed="right">
+            <template #default="scope">
+              <el-button type="primary" link @click="openPosition(scope.row)">编辑</el-button>
+              <el-button type="danger" link @click="deletePosition(scope.row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </ApiState>
+    </section>
+
+    <!-- 新增/编辑业务用户 -->
+    <el-drawer v-model="userVisible" :title="editingUser ? '编辑业务用户' : '新增业务用户'" size="min(560px, 96vw)">
+      <el-form label-position="top">
+        <el-form-item v-if="!editingUser" label="登录账号" required>
+          <el-input v-model="userForm.login_account" placeholder="手机号或邮箱" />
+        </el-form-item>
+        <el-form-item label="用户姓名" required>
+          <el-input v-model="userForm.user_name" placeholder="界面显示名称" />
+        </el-form-item>
+        <el-form-item v-if="!editingUser" label="初始密码" required>
+          <el-input v-model="userForm.password" type="password" show-password placeholder="至少8位" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="userForm.email" />
+        </el-form-item>
+        <el-form-item label="所属组织" required>
+          <el-select v-model="userForm.organization_id" style="width: 100%">
+            <el-option v-for="item in allOrganizations" :key="item.organization_id" :label="item.name" :value="item.organization_id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="职位">
+          <el-select v-model="userForm.position_code" clearable style="width: 100%" placeholder="选择职位">
+            <el-option v-for="item in allPositions" :key="item.position_code" :label="item.name" :value="item.position_code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingUser" label="状态">
+          <el-switch v-model="userForm.status" active-value="ACTIVE" inactive-value="DISABLED" />
+        </el-form-item>
+
+        <!-- 编辑模式下显示已分配职位 -->
+        <template v-if="editingUser && userPositions.length">
+          <el-divider>已分配职位</el-divider>
+          <div class="position-list">
+            <div v-for="pos in userPositions" :key="pos.assignment_id" class="position-item">
+              <span>{{ pos.organization_name }} · {{ pos.position_name }}</span>
+              <el-tag v-if="pos.is_primary" size="small" type="warning">主职位</el-tag>
+              <el-button type="danger" link size="small" @click="removeUserPosition(pos)">移除</el-button>
+            </div>
+          </div>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="userVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveUser">保存</el-button>
+      </template>
+    </el-drawer>
+
+    <!-- 新增/编辑组织 -->
+    <el-dialog v-model="orgVisible" :title="editingOrg ? '编辑组织' : '新增组织'" width="560px">
+      <el-form label-position="top">
+        <el-form-item v-if="!editingOrg" label="组织编号" required>
+          <el-input v-model="orgForm.organization_id" />
+        </el-form-item>
+        <el-form-item label="组织名称" required>
+          <el-input v-model="orgForm.name" />
+        </el-form-item>
+        <el-form-item label="上级组织">
+          <el-select v-model="orgForm.parent_organization_id" clearable style="width: 100%">
+            <el-option v-for="item in organizations.filter((org) => org.organization_id !== editingOrg?.organization_id)" :key="item.organization_id" :label="item.name" :value="item.organization_id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="orgForm.status" active-value="ACTIVE" inactive-value="DISABLED" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="orgVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveOrg">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新增/编辑职位 -->
+    <el-dialog v-model="positionVisible" :title="editingPosition ? '编辑职位' : '新增职位'" width="480px">
+      <el-form label-position="top">
+        <el-form-item v-if="!editingPosition" label="职位编码" required>
+          <el-input v-model="positionForm.position_code" placeholder="如: MANAGER" />
+        </el-form-item>
+        <el-form-item label="职位名称" required>
+          <el-input v-model="positionForm.name" placeholder="如: 部门经理" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="positionForm.description" type="textarea" :rows="2" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="positionVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="savePosition">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 分配用户职位 -->
+    <el-dialog v-model="userPositionVisible" title="分配职位" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="用户">
+          <el-input :model-value="selectedUser?.display_name" disabled />
+        </el-form-item>
+        <el-form-item label="组织" required>
+          <el-select v-model="userPositionForm.organization_id" style="width: 100%">
+            <el-option v-for="item in allOrganizations" :key="item.organization_id" :label="item.name" :value="item.organization_id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="职位" required>
+          <el-select v-model="userPositionForm.position_code" style="width: 100%">
+            <el-option v-for="item in allPositions" :key="item.position_code" :label="item.name" :value="item.position_code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="userPositionForm.is_primary">设为主职位</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userPositionVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveUserPosition">分配</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -137,4 +485,7 @@ onMounted(loadAll)
 .management-tabs button.active::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-500); content: ''; }
 .list-panel { min-height: 520px; overflow: hidden; }
 .inline-tag { margin: 2px 4px 2px 0; }
+.primary-icon { margin-left: 2px; color: var(--warning); }
+.position-list { display: grid; gap: 8px; }
+.position-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border-radius: 6px; }
 </style>

@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -21,6 +22,60 @@ class GovernanceValidationError(ValueError):
 
 
 class GovernanceService:
+    async def list_accessible_applications(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: UUID,
+        preferred_environment: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT DISTINCT a.application_id, a.name, a.description,
+                           COALESCE(
+                               u.display_name || COALESCE(' <' || u.email || '>', ''),
+                               a.owner
+                           ) AS owner,
+                           a.status, a.capabilities,
+                           a.created_at, a.updated_at,
+                           e.portal_url
+                    FROM platform_core.application AS a
+                    JOIN platform_core.authorization_role AS r
+                      ON r.application_id = a.application_id
+                    JOIN platform_core.authorization_role_assignment AS ra
+                      ON ra.role_id = r.role_id
+                    LEFT JOIN platform_core.identity_user AS u
+                      ON u.user_id = a.owner_id
+                    LEFT JOIN LATERAL (
+                        SELECT portal_url
+                        FROM platform_core.application_environment
+                        WHERE application_id = a.application_id
+                          AND status = 'ACTIVE'
+                        ORDER BY CASE WHEN environment = :preferred_environment
+                                      THEN 0 ELSE 1 END,
+                                 environment
+                        LIMIT 1
+                    ) AS e ON true
+                    WHERE ra.user_id = :user_id
+                      AND a.status = 'ACTIVE'
+                      AND r.status = 'ACTIVE'
+                    ORDER BY a.name, a.application_id
+                    """
+                    ),
+                    {
+                        "user_id": user_id,
+                        "preferred_environment": preferred_environment or "",
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows]
+
     async def list_organizations(
         self,
         session: AsyncSession,
@@ -203,12 +258,31 @@ class GovernanceService:
                                array_agg(DISTINCT pra.role_code)
                                FILTER (WHERE pra.role_code IS NOT NULL),
                                ARRAY[]::varchar[]
-                           ) AS platform_roles
+                           ) AS platform_roles,
+                           COALESCE(
+                               json_agg(
+                                   DISTINCT jsonb_build_object(
+                                       'assignment_id', uop.assignment_id,
+                                       'organization_id', uop.organization_id,
+                                       'organization_name', org.name,
+                                       'position_code', uop.position_code,
+                                       'position_name', pd.name,
+                                       'is_primary', uop.is_primary
+                                   )
+                               ) FILTER (WHERE uop.assignment_id IS NOT NULL),
+                               '[]'::json
+                           ) AS positions
                     FROM platform_core.identity_user AS u
                     JOIN platform_core.organization AS o
                       ON o.organization_id = u.primary_organization_id
                     LEFT JOIN platform_core.platform_role_assignment AS pra
                       ON pra.user_id = u.user_id
+                    LEFT JOIN platform_core.user_organization_position AS uop
+                      ON uop.user_id = u.user_id
+                    LEFT JOIN platform_core.organization AS org
+                      ON org.organization_id = uop.organization_id
+                    LEFT JOIN platform_core.position_definition AS pd
+                      ON pd.position_code = uop.position_code
                     WHERE (CAST(:query AS varchar) IS NULL
                            OR u.subject ILIKE '%' || :query || '%'
                            OR u.display_name ILIKE '%' || :query || '%'
@@ -243,6 +317,7 @@ class GovernanceService:
         email: str | None,
         organization_id: str,
         status: str,
+        position_code: str | None = None,
     ) -> dict[str, Any]:
         if await session.scalar(
             sa.text(
@@ -256,6 +331,7 @@ class GovernanceService:
         ):
             raise GovernanceConflictError("OIDC subject is already mapped")
         await self._require_organization(session, organization_id)
+        user_id = uuid4()
         row = (
             (
                 await session.execute(
@@ -273,7 +349,7 @@ class GovernanceService:
                     """
                     ),
                     {
-                        "user_id": uuid4(),
+                        "user_id": user_id,
                         "subject": subject,
                         "display_name": display_name,
                         "email": email,
@@ -285,6 +361,16 @@ class GovernanceService:
             .mappings()
             .one()
         )
+        # 如果指定了职位，先校验职位存在且为 ACTIVE
+        if position_code:
+            await self._require_position(session, position_code)
+            await self._assign_user_position(
+                session,
+                user_id=user_id,
+                organization_id=organization_id,
+                position_code=position_code,
+                is_primary=True,
+            )
         return dict(row)
 
     async def update_user(
@@ -292,13 +378,37 @@ class GovernanceService:
         session: AsyncSession,
         *,
         user_id: UUID,
-        display_name: str,
-        email: str | None,
-        organization_id: str,
-        status: str,
+        display_name: str | None = None,
+        email: str | None = None,
+        clear_email: bool = False,
+        organization_id: str | None = None,
+        status: str | None = None,
     ) -> dict[str, Any]:
-        await self._require_organization(session, organization_id)
-        if status == "DISABLED":
+        existing = await self._get_user(session, user_id)
+        if existing is None:
+            raise GovernanceNotFoundError("User was not found")
+        resolved_display_name = (
+            display_name if display_name is not None else str(existing["display_name"])
+        )
+        # Explicit clear wins over a value; an omitted field keeps the stored
+        # address.
+        resolved_email = None if clear_email else (
+            email if email is not None else existing["email"]
+        )
+        resolved_organization_id = (
+            organization_id
+            if organization_id is not None
+            else str(existing["primary_organization_id"])
+        )
+        resolved_status = status if status is not None else str(existing["status"])
+        if resolved_status == "ACTIVE":
+            # The portal session requires an ACTIVE organization, so enabling a
+            # user under a disabled organization would produce an account that
+            # can never sign in.
+            await self._require_active_organization(session, resolved_organization_id)
+        else:
+            await self._require_organization(session, resolved_organization_id)
+        if resolved_status == "DISABLED":
             await self._ensure_not_last_platform_admin(session, user_id=user_id)
         row = (
             (
@@ -320,10 +430,10 @@ class GovernanceService:
                     ),
                     {
                         "user_id": user_id,
-                        "display_name": display_name,
-                        "email": email,
-                        "organization_id": organization_id,
-                        "status": status,
+                        "display_name": resolved_display_name,
+                        "email": resolved_email,
+                        "organization_id": resolved_organization_id,
+                        "status": resolved_status,
                     },
                 )
             )
@@ -332,11 +442,14 @@ class GovernanceService:
         )
         if row is None:
             raise GovernanceNotFoundError("Platform user was not found")
+        await self._enqueue_version_sync(session, user_ids=[user_id])
         return dict(row)
 
     async def list_platform_roles(
         self,
         session: AsyncSession,
+        *,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         rows = (
             (
@@ -353,11 +466,16 @@ class GovernanceService:
                     FROM platform_core.platform_role_definition AS r
                     LEFT JOIN platform_core.platform_role_permission AS p
                       ON p.role_code = r.role_code
+                    WHERE (CAST(:query AS varchar) IS NULL
+                           OR r.role_code ILIKE '%' || :query || '%'
+                           OR r.name ILIKE '%' || :query || '%'
+                           OR r.description ILIKE '%' || :query || '%')
                     GROUP BY r.role_code, r.name, r.description, r.status,
                              r.created_at, r.updated_at
                     ORDER BY r.role_code
                     """
-                    )
+                    ),
+                    {"query": query},
                 )
             )
             .mappings()
@@ -370,6 +488,7 @@ class GovernanceService:
         session: AsyncSession,
         *,
         user_id: UUID | None,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         rows = (
             (
@@ -386,10 +505,15 @@ class GovernanceService:
                     LEFT JOIN platform_core.application AS app
                       ON app.application_id = a.application_id
                     WHERE (CAST(:user_id AS uuid) IS NULL OR a.user_id = :user_id)
+                      AND (CAST(:query AS varchar) IS NULL
+                           OR u.subject ILIKE '%' || :query || '%'
+                           OR u.display_name ILIKE '%' || :query || '%'
+                           OR a.role_code ILIKE '%' || :query || '%'
+                           OR r.name ILIKE '%' || :query || '%')
                     ORDER BY u.display_name, a.role_code, a.application_id
                     """
                     ),
-                    {"user_id": user_id},
+                    {"user_id": user_id, "query": query},
                 )
             )
             .mappings()
@@ -1002,6 +1126,30 @@ class GovernanceService:
         if not exists:
             raise GovernanceNotFoundError("Organization was not found")
 
+    async def _require_active_organization(
+        self,
+        session: AsyncSession,
+        organization_id: str,
+    ) -> None:
+        # The portal session requires an ACTIVE organization, so creating an
+        # ACTIVE user under a DISABLED organization would produce an account
+        # that can never sign in.
+        status = await session.scalar(
+            sa.text(
+                """
+                SELECT status FROM platform_core.organization
+                WHERE organization_id = :organization_id
+                """
+            ),
+            {"organization_id": organization_id},
+        )
+        if status is None:
+            raise GovernanceNotFoundError("Organization was not found")
+        if status != "ACTIVE":
+            raise GovernanceValidationError(
+                "Cannot create an active user under a disabled organization"
+            )
+
     async def _require_organization_absent(
         self,
         session: AsyncSession,
@@ -1105,6 +1253,7 @@ class GovernanceService:
             ),
             {"user_id": user_id},
         )
+        await self._enqueue_version_sync(session, user_ids=[user_id])
 
     async def _bump_role_users(self, session: AsyncSession, role_id: UUID) -> None:
         await session.execute(
@@ -1121,6 +1270,7 @@ class GovernanceService:
             ),
             {"role_id": role_id},
         )
+        await self._enqueue_version_sync_for_role(session, role_id=role_id)
 
     async def _bump_role_users_for_permission(
         self,
@@ -1145,6 +1295,74 @@ class GovernanceService:
             ),
             {"permission_code": permission_code},
         )
+        await self._enqueue_version_sync_for_permission(
+            session, permission_code=permission_code
+        )
+
+    async def _enqueue_version_sync(
+        self, session: AsyncSession, *, user_ids: list[UUID]
+    ) -> None:
+        # Write one outbox row per bumped user in the same transaction, so a
+        # crash cannot leave the identity provider behind. The reconciler
+        # replays PENDING rows until Authentik accepts them.
+        if not user_ids:
+            return
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO platform_core.authorization_version_outbox
+                    (outbox_id, user_id, version)
+                SELECT gen_random_uuid(), u.user_id, u.authorization_version
+                FROM platform_core.identity_user AS u
+                WHERE u.user_id = ANY(:user_ids)
+                """
+            ),
+            {"user_ids": [str(user_id) for user_id in user_ids]},
+        )
+
+    async def _enqueue_version_sync_for_role(
+        self, session: AsyncSession, *, role_id: UUID
+    ) -> None:
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO platform_core.authorization_version_outbox
+                    (outbox_id, user_id, version)
+                SELECT gen_random_uuid(), user_id, authorization_version
+                FROM (
+                    SELECT DISTINCT u.user_id, u.authorization_version
+                    FROM platform_core.identity_user AS u
+                    JOIN platform_core.authorization_role_assignment AS ra
+                      ON ra.user_id = u.user_id
+                    WHERE ra.role_id = :role_id
+                ) AS bumped
+                """
+            ),
+            {"role_id": role_id},
+        )
+
+    async def _enqueue_version_sync_for_permission(
+        self, session: AsyncSession, *, permission_code: str
+    ) -> None:
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO platform_core.authorization_version_outbox
+                    (outbox_id, user_id, version)
+                SELECT gen_random_uuid(), user_id, authorization_version
+                FROM (
+                    SELECT DISTINCT u.user_id, u.authorization_version
+                    FROM platform_core.identity_user AS u
+                    JOIN platform_core.authorization_role_assignment AS ra
+                      ON ra.user_id = u.user_id
+                    JOIN platform_core.authorization_role_permission AS rp
+                      ON rp.role_id = ra.role_id
+                    WHERE rp.permission_code = :permission_code
+                ) AS bumped
+                """
+            ),
+            {"permission_code": permission_code},
+        )
 
     async def _ensure_not_last_platform_admin(
         self,
@@ -1153,6 +1371,15 @@ class GovernanceService:
         user_id: UUID,
         assignment_id: UUID | None = None,
     ) -> None:
+        # Serialize every platform-admin removal path through a transaction-
+        # scoped advisory lock so two concurrent requests cannot both observe a
+        # surviving admin and then disable/delete the last one in parallel
+        # transactions. The lock is held until commit/rollback.
+        await session.execute(
+            sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            # Stable namespaced key for the platform-admin lifecycle.
+            {"lock_key": 0xA11B_0001},
+        )
         user_is_admin = await session.scalar(
             sa.text(
                 """
@@ -1194,3 +1421,398 @@ class GovernanceService:
             raise GovernanceValidationError(
                 "At least one active global platform administrator must remain"
             )
+
+    # ==================== 职位管理 ====================
+
+    async def list_positions(
+        self,
+        session: AsyncSession,
+        *,
+        query: str | None,
+        status: str | None,
+    ) -> list[dict[str, Any]]:
+        rows = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT position_code, name, description, status,
+                           created_at, updated_at
+                    FROM platform_core.position_definition
+                    WHERE (CAST(:query AS varchar) IS NULL
+                           OR position_code ILIKE '%' || :query || '%'
+                           OR name ILIKE '%' || :query || '%')
+                      AND (CAST(:status AS varchar) IS NULL OR status = :status)
+                    ORDER BY name, position_code
+                    """
+                    ),
+                    {"query": query, "status": status},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows]
+
+    async def create_position(
+        self,
+        session: AsyncSession,
+        *,
+        position_code: str,
+        name: str,
+        description: str | None,
+    ) -> dict[str, Any]:
+        if await session.scalar(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM platform_core.position_definition
+                    WHERE position_code = :position_code
+                )
+                """
+            ),
+            {"position_code": position_code},
+        ):
+            raise GovernanceConflictError("Position code already exists")
+        row = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    INSERT INTO platform_core.position_definition
+                        (position_code, name, description, status)
+                    VALUES (:position_code, :name, :description, 'ACTIVE')
+                    RETURNING position_code, name, description, status,
+                              created_at, updated_at
+                    """
+                    ),
+                    {"position_code": position_code, "name": name, "description": description},
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return dict(row)
+
+    async def update_position(
+        self,
+        session: AsyncSession,
+        *,
+        position_code: str,
+        name: str | None,
+        description: str | None,
+        status: str | None,
+    ) -> dict[str, Any]:
+        updates: list[str] = []
+        params: dict[str, Any] = {"position_code": position_code}
+        if name is not None:
+            updates.append("name = :name")
+            params["name"] = name
+        if description is not None:
+            updates.append("description = :description")
+            params["description"] = description
+        if status is not None:
+            updates.append("status = :status")
+            params["status"] = status
+        if not updates:
+            raise GovernanceValidationError("No fields to update")
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        row = (
+            (
+                await session.execute(
+                    sa.text(
+                        f"""
+                    UPDATE platform_core.position_definition
+                    SET {', '.join(updates)}
+                    WHERE position_code = :position_code
+                    RETURNING position_code, name, description, status,
+                              created_at, updated_at
+                    """
+                    ),
+                    params,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            raise GovernanceNotFoundError("Position was not found")
+        return dict(row)
+
+    async def delete_position(
+        self,
+        session: AsyncSession,
+        *,
+        position_code: str,
+    ) -> None:
+        # 检查是否有用户使用该职位
+        in_use = await session.scalar(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM platform_core.user_organization_position
+                    WHERE position_code = :position_code
+                )
+                """
+            ),
+            {"position_code": position_code},
+        )
+        if in_use:
+            raise GovernanceValidationError("Cannot delete position that is assigned to users")
+        try:
+            result = await session.execute(
+                sa.text(
+                    """
+                    DELETE FROM platform_core.position_definition
+                    WHERE position_code = :position_code
+                    """
+                ),
+                {"position_code": position_code},
+            )
+            await session.flush()
+        except IntegrityError as error:
+            # A concurrent assignment inserted between the occupancy check and
+            # the delete now trips the RESTRICT foreign key; surface the same
+            # conflict the check promised instead of a 500.
+            await session.rollback()
+            raise GovernanceValidationError(
+                "Cannot delete position that is assigned to users"
+            ) from error
+        if result.rowcount == 0:  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
+            raise GovernanceNotFoundError("Position was not found")
+
+    # ==================== 用户职位分配 ====================
+
+    async def list_user_positions(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: UUID,
+    ) -> list[dict[str, Any]]:
+        rows = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT uop.assignment_id, uop.user_id, uop.organization_id,
+                           o.name AS organization_name, uop.position_code,
+                           pd.name AS position_name, uop.is_primary, uop.created_at
+                    FROM platform_core.user_organization_position AS uop
+                    JOIN platform_core.organization AS o
+                      ON o.organization_id = uop.organization_id
+                    JOIN platform_core.position_definition AS pd
+                      ON pd.position_code = uop.position_code
+                    WHERE uop.user_id = :user_id
+                    ORDER BY uop.is_primary DESC, o.name, pd.name
+                    """
+                    ),
+                    {"user_id": user_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows]
+
+    async def assign_user_position(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: UUID,
+        organization_id: str,
+        position_code: str,
+        is_primary: bool = False,
+    ) -> dict[str, Any]:
+        await self._require_user(session, user_id)
+        await self._require_organization(session, organization_id)
+        await self._require_position(session, position_code)
+        # Serialize concurrent primary-position writes for the same user so the
+        # clear-then-insert below cannot interleave and violate the partial
+        # unique index (uq_user_primary_position).
+        if is_primary:
+            await session.execute(
+                sa.text("SELECT pg_advisory_xact_lock(hashtext(:user_id::text))"),
+                {"user_id": user_id},
+            )
+            await session.execute(
+                sa.text(
+                    """
+                UPDATE platform_core.user_organization_position
+                SET is_primary = false
+                WHERE user_id = :user_id AND is_primary = true
+                """
+                ),
+                {"user_id": user_id},
+            )
+        # 复用已有的 (user, org, position) 分配，避免唯一约束冲突
+        existing = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT assignment_id FROM platform_core.user_organization_position
+                    WHERE user_id = :user_id
+                      AND organization_id = :organization_id
+                      AND position_code = :position_code
+                    """
+                    ),
+                    {
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "position_code": position_code,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if existing is not None:
+            row = (
+                (
+                    await session.execute(
+                        sa.text(
+                            """
+                        UPDATE platform_core.user_organization_position
+                        SET is_primary = :is_primary
+                        WHERE assignment_id = :assignment_id
+                        RETURNING assignment_id, user_id, organization_id, position_code,
+                                  is_primary, created_at
+                        """
+                        ),
+                        {
+                            "assignment_id": existing["assignment_id"],
+                            "is_primary": is_primary,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            return dict(row)
+        row = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    INSERT INTO platform_core.user_organization_position
+                        (assignment_id, user_id, organization_id, position_code, is_primary)
+                    VALUES (:assignment_id, :user_id, :organization_id, :position_code, :is_primary)
+                    RETURNING assignment_id, user_id, organization_id, position_code,
+                              is_primary, created_at
+                    """
+                    ),
+                    {
+                        "assignment_id": uuid4(),
+                        "user_id": user_id,
+                        "organization_id": organization_id,
+                        "position_code": position_code,
+                        "is_primary": is_primary,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return dict(row)
+
+    async def remove_user_position(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: UUID,
+        assignment_id: UUID,
+    ) -> None:
+        result = await session.execute(
+            sa.text(
+                """
+                DELETE FROM platform_core.user_organization_position
+                WHERE assignment_id = :assignment_id
+                  AND user_id = :user_id
+                """
+            ),
+            {"assignment_id": assignment_id, "user_id": user_id},
+        )
+        if result.rowcount == 0:  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
+            raise GovernanceNotFoundError("User position assignment was not found")
+
+    async def _get_user(
+        self,
+        session: AsyncSession,
+        user_id: UUID,
+    ) -> dict[str, Any] | None:
+        row = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT user_id, subject, display_name, email, status,
+                           primary_organization_id, authorization_version,
+                           created_at, updated_at
+                    FROM platform_core.identity_user
+                    WHERE user_id = :user_id
+                    """
+                    ),
+                    {"user_id": user_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return dict(row) if row is not None else None
+
+    async def _require_user(self, session: AsyncSession, user_id: UUID) -> None:
+        exists = await session.scalar(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM platform_core.identity_user
+                    WHERE user_id = :user_id
+                )
+                """
+            ),
+            {"user_id": user_id},
+        )
+        if not exists:
+            raise GovernanceNotFoundError("User was not found")
+
+    async def _require_position(self, session: AsyncSession, position_code: str) -> None:
+        exists = await session.scalar(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM platform_core.position_definition
+                    WHERE position_code = :position_code AND status = 'ACTIVE'
+                )
+                """
+            ),
+            {"position_code": position_code},
+        )
+        if not exists:
+            raise GovernanceNotFoundError("Active position was not found")
+
+    async def _assign_user_position(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: UUID,
+        organization_id: str,
+        position_code: str,
+        is_primary: bool,
+    ) -> None:
+        await session.execute(
+            sa.text(
+                """
+            INSERT INTO platform_core.user_organization_position
+                (assignment_id, user_id, organization_id, position_code, is_primary)
+            VALUES (:assignment_id, :user_id, :organization_id, :position_code, :is_primary)
+            ON CONFLICT (user_id, organization_id, position_code) DO NOTHING
+            """
+            ),
+            {
+                "assignment_id": uuid4(),
+                "user_id": user_id,
+                "organization_id": organization_id,
+                "position_code": position_code,
+                "is_primary": is_primary,
+            },
+        )

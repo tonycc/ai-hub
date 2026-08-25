@@ -305,8 +305,8 @@ class PortalSessionService:
             .mappings()
             .all()
         )
-        if not rows:
-            raise PortalSessionNotFoundError("Platform user has no active portal role assignment")
+        # Business users may hold zero platform roles; they still get a portal
+        # session with an empty grant set so they can reach "my applications".
         await session.execute(
             sa.text(
                 """

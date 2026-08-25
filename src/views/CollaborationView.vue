@@ -95,7 +95,7 @@ onMounted(load)
         <el-option
           v-for="item in applications"
           :key="item.application_id"
-          :label="`${item.name} · ${item.application_id}`"
+          :label="item.name"
           :value="item.application_id"
         />
       </el-select>
@@ -164,7 +164,7 @@ onMounted(load)
         </el-table>
       </ApiState>
     </section>
-    <el-dialog v-model="runVisible" title="运行接入一致性认证" width="640px">
+    <el-drawer v-model="runVisible" title="运行接入一致性认证" size="min(640px, 96vw)">
       <el-alert
         type="info"
         :closable="false"
@@ -187,7 +187,7 @@ onMounted(load)
         <el-button @click="runVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="runConformance">开始认证</el-button>
       </template>
-    </el-dialog>
+    </el-drawer>
     <el-drawer v-model="detailVisible" title="认证证据" size="min(720px, 96vw)">
       <template v-if="selected">
         <el-descriptions :column="2" border>
