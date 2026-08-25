@@ -139,10 +139,10 @@ class Settings(_StandaloneSettings):
         "postgresql+psycopg://standalone_app:local-only-standalone-password@"
         "localhost:5433/standalone_app_db"
     )
-    oidc_issuer: str = "http://localhost:9000/application/o/ai-hub/"
-    oidc_audience: str = "ai-hub-platform"
-    oidc_client_id: str = "ai-hub-platform"
-    oidc_client_secret: str = "local-only-oidc-client-secret"
+    oidc_issuer: str = "http://localhost:9000/application/o/standalone-example/"
+    oidc_audience: str = "standalone-example"
+    oidc_client_id: str = "standalone-example"
+    oidc_client_secret: str = "local-only-standalone-oidc-client-secret"
     oidc_redirect_uri: str = "http://localhost:8100/auth/callback"
     oidc_jwks_cache_ttl_seconds: int = 300
     oidc_jwks_stale_ttl_seconds: int = 3600

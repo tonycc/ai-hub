@@ -19,9 +19,9 @@ x-standalone-app-environment: &standalone-app-environment
   STANDALONE_DATABASE_URL: postgresql+psycopg://standalone_app:${STANDALONE_APP_DB_PASSWORD:?Set STANDALONE_APP_DB_PASSWORD in .env}@postgres:5432/standalone_app_db
   STANDALONE_PLATFORM_API_BASE_URL: ${STANDALONE_PLATFORM_API_BASE_URL:-http://platform.localhost:8088}
   STANDALONE_APPLICATION_ID: ${STANDALONE_APPLICATION_ID:-standalone-example}
-  STANDALONE_OIDC_ISSUER: ${STANDALONE_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub/}
-  STANDALONE_OIDC_AUDIENCE: ${STANDALONE_OIDC_AUDIENCE:-ai-hub-platform}
-  STANDALONE_OIDC_CLIENT_ID: ${STANDALONE_OIDC_CLIENT_ID:-ai-hub-platform}
+  STANDALONE_OIDC_ISSUER: ${STANDALONE_OIDC_ISSUER:-http://auth.localhost:8088/application/o/standalone-example/}
+  STANDALONE_OIDC_AUDIENCE: ${STANDALONE_OIDC_AUDIENCE:-standalone-example}
+  STANDALONE_OIDC_CLIENT_ID: ${STANDALONE_OIDC_CLIENT_ID:-standalone-example}
   STANDALONE_OIDC_CLIENT_SECRET: ${STANDALONE_OIDC_CLIENT_SECRET:?Set STANDALONE_OIDC_CLIENT_SECRET in .env}
   STANDALONE_OIDC_REDIRECT_URI: ${STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
   STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS:-300}
@@ -146,17 +146,29 @@ services:
       AI_HUB_PUBLIC_IDENTITY_BASE_URL: ${AI_HUB_PUBLIC_IDENTITY_BASE_URL:-http://auth.localhost:8088}
       AI_HUB_SANDBOX_APPLICATION_ID: ${AI_HUB_SANDBOX_APPLICATION_ID:-standalone-example}
       AI_HUB_SANDBOX_USER_SUBJECT: ${AI_HUB_SANDBOX_USER_SUBJECT:-ai-hub-demo-user}
+      AI_HUB_STANDALONE_PORTAL_URL: ${AI_HUB_STANDALONE_PORTAL_URL:-http://app.localhost:8088/}
+      AI_HUB_STANDALONE_API_BASE_URL: ${AI_HUB_STANDALONE_API_BASE_URL:-http://app.localhost:8088/api/v1}
+      AI_HUB_STANDALONE_HEALTH_URL: ${AI_HUB_STANDALONE_HEALTH_URL:-http://app.localhost:8088/health/live}
+      AI_HUB_STANDALONE_OIDC_REDIRECT_URI: ${AI_HUB_STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
       AI_HUB_MONITOR_TOKEN: ${AI_HUB_MONITOR_TOKEN:?Set AI_HUB_MONITOR_TOKEN in .env}
       AI_HUB_PRODUCTION_TARGETS_PATH: ${AI_HUB_PRODUCTION_TARGETS_PATH:-deploy/operations/production-targets.json}
       AI_HUB_RAW_DATABASE_URL: postgresql+psycopg://ai_hub_raw:${AI_HUB_RAW_DB_PASSWORD:?Set AI_HUB_RAW_DB_PASSWORD in .env}@postgres:5432/platform_db
       AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:-ai-hub-platform}
       AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
+      # Gate dependents on readiness, not liveness: /health/ready only reports
+      # OK once the bootstrap credential reconciliation has produced a usable
+      # provider binding, so dependent services never start against a platform
+      # that would reject their tokens with invalid_issuer.
+      # The start window must cover Authentik blueprint lag after authentik-server
+      # is healthy: reconciliation retries sleep 5/10/20/30s between attempts, so
+      # a short start_period marks the API unhealthy before the dedicated
+      # provider appears (M1 compose --wait then fails).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()"]
       interval: 5s
       timeout: 3s
-      retries: 12
-      start_period: 5s
+      retries: 24
+      start_period: 90s
     depends_on:
       platform-core-migrate:
         condition: service_completed_successfully
@@ -291,6 +303,8 @@ services:
       AI_HUB_AUTHENTIK_API_TOKEN: ${AI_HUB_AUTHENTIK_API_TOKEN:?Set AI_HUB_AUTHENTIK_API_TOKEN in .env}
       AI_HUB_AUTHENTIK_BRAND_DOMAIN: ${AI_HUB_AUTHENTIK_BRAND_DOMAIN:-auth.localhost:8088}
       STANDALONE_OIDC_REDIRECT_URI: ${STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
+      STANDALONE_OIDC_CLIENT_SECRET: ${STANDALONE_OIDC_CLIENT_SECRET:?Set STANDALONE_OIDC_CLIENT_SECRET in .env}
+      STANDALONE_PORTAL_URL: ${STANDALONE_PORTAL_URL:-http://app.localhost:8088/}
       AI_HUB_PORTAL_EXTERNAL_URL: ${AI_HUB_PORTAL_EXTERNAL_URL:-http://platform.localhost:8088}
     depends_on:
       postgres:
@@ -360,9 +374,9 @@ services:
       AI_HUB_ENVIRONMENT: ${AI_HUB_ENVIRONMENT:-local}
       AI_HUB_RAW_DATABASE_URL: postgresql+psycopg://ai_hub_raw:${AI_HUB_RAW_DB_PASSWORD:?Set AI_HUB_RAW_DB_PASSWORD in .env}@postgres:5432/platform_db
       AI_HUB_INGEST_SOURCES_PATH: ${AI_HUB_INGEST_SOURCES_PATH:-deploy/operations/ingest-sources.json}
-      AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub/}
-      AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:-ai-hub-platform}
-      AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
+      AI_HUB_OIDC_ISSUER: ${STANDALONE_OIDC_ISSUER:-http://auth.localhost:8088/application/o/standalone-example/}
+      AI_HUB_OIDC_CLIENT_ID: ${STANDALONE_OIDC_CLIENT_ID:-standalone-example}
+      AI_HUB_OIDC_CLIENT_SECRET: ${STANDALONE_OIDC_CLIENT_SECRET:?Set STANDALONE_OIDC_CLIENT_SECRET in .env}
       AI_HUB_SEED_DATABASE_URL: postgresql+psycopg://ai_hub_platform_migrator:${AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD:?Set AI_HUB_PLATFORM_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/platform_db
       AI_HUB_TICK_INTERVAL_SECONDS: ${AI_HUB_INGEST_TICK_INTERVAL_SECONDS:-1}
       AI_HUB_HTTP_TIMEOUT_SECONDS: ${AI_HUB_INGEST_HTTP_TIMEOUT_SECONDS:-30}

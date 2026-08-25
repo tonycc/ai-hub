@@ -34,24 +34,88 @@ bash scripts/ci/all.sh
 
 第三方生产组件统一记录在 `deploy/component-lock.json`，Compose、Dockerfile 和 `.env.example` 使用精确标签加镜像摘要，并由测试阻止漂移。当前锁定 PostgreSQL 18.4、Python 3.14.7、Node.js 24.18.1、Nginx 1.30.4、authentik 2026.5.6 和 Traefik 3.7.10；后续任何标签或摘要变化都必须重新验证。
 
-本地基础接入档位：
+## 本地启动
+
+本地开发使用唯一的 `base-access` 档位。后端、身份服务、数据库、数据接入调度器和参考应用由 Docker Compose 启动，Vue 前端由宿主机上的 Vite 单独启动，以获得热更新。
+
+### 前置条件
+
+- Docker Engine 或 Docker Desktop 正在运行，并且 Docker Compose v2 可用。
+- 本机已安装 Node.js 24.18.1 和 npm，用于启动前端开发服务器。
+- 命令均从仓库根目录执行。
+
+可以先检查 Docker、配置文件和 Compose 配置：
 
 ~~~bash
-bash scripts/local/start.sh base-access
+bash scripts/local/start.sh --check
 ~~~
 
-该脚本是本地后端调试入口：平台 API 使用 Uvicorn `--reload` 与 debug 日志，脚本以前台模式运行，按 `Ctrl+C` 停止。前端在另一个终端独立启动，以获得 Vite 热更新：
+### 1. 启动后端服务栈
+
+在第一个终端执行：
 
 ~~~bash
+bash scripts/local/start.sh
+~~~
+
+首次运行时，脚本会在 `.env` 不存在时从 `.env.example` 自动创建本地配置，然后构建并启动 PostgreSQL、authentik、平台 API、Traefik、参考应用和数据接入调度器，执行数据库迁移，并等待所有服务就绪。平台 API 使用 Uvicorn `--reload` 和 debug 日志；脚本完成后服务继续在后台运行。
+
+已经构建过当前代码镜像时，可以复用现有镜像以缩短启动时间：
+
+~~~bash
+bash scripts/local/start.sh --no-build
+~~~
+
+停止后端服务
+
+~~~bash
+docker compose -f deploy/compose.yaml --env-file .env --profile base-access stop
+
+~~~
+
+### 2. 启动前端开发服务器
+
+在第二个终端执行：
+
+~~~bash
+npm ci
 npm run dev
 ~~~
 
-需要只复用已经构建的后端镜像时可追加 `--no-build`。
+`npm ci` 只需在首次启动或依赖发生变化后执行。
 
-仅构建发布镜像、或需要不启用热更新的原始 Compose 命令：
+### 本地访问地址
+
+| 组件 | 地址 |
+| --- | --- |
+| 平台管理端（Vite） | [http://localhost:4173](http://localhost:4173) |
+| 平台 API 健康检查 | [http://platform.localhost:8088/health/live](http://platform.localhost:8088/health/live) |
+| authentik 身份服务 | [http://auth.localhost:8088](http://auth.localhost:8088) |
+| 独立参考应用 | [http://app.localhost:8088](http://app.localhost:8088) |
+
+本地平台管理员账号为 `ai-hub-platform-admin`。密码读取根 `.env` 中的 `AI_HUB_UAT_USER_PASSWORD`；未修改示例配置时为 `local-only-uat-user-password`，该密码仅限本地开发使用。
+
+### 常用命令
+
+查看服务日志：
 
 ~~~bash
-docker compose --env-file .env -f deploy/compose.yaml --profile base-access up -d --build
+docker compose --env-file .env -f deploy/compose.yaml \
+  --profile base-access logs -f
+~~~
+
+停止容器和网络并保留本地数据库等命名卷：
+
+~~~bash
+docker compose --env-file .env -f deploy/compose.yaml \
+  --profile base-access down
+~~~
+
+仅构建发布镜像、或需要验证不启用热更新的原始 Compose 部署时执行：
+
+~~~bash
+docker compose --env-file .env -f deploy/compose.yaml \
+  --profile base-access up -d --build
 ~~~
 
 当前 Compose 使用单 PostgreSQL 服务承载多个隔离逻辑库，并通过 Traefik 统一暴露 authentik、平台门户/API 和参考应用。M1 已完成身份与 API 纵向链路；M3 已完成平台公共能力；M4 已完成生产运行、恢复、发布、性能和故障韧性验收；M4.1 已完成只读生产配置、门户状态和通知边界收尾；M7 已完成增量数据接入。唯一部署档位 `base-access` 的组件边界和命令见[本地部署说明](deploy/README.md)。

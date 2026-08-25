@@ -9,22 +9,22 @@ export const platformCapabilityGroups = [
       { code: 'M0-DEPLOY', name: '部署基线', description: '单 PostgreSQL 集群、逻辑隔离、部署档位和配置校验', route: '/platform/operations', phase: 'M0', status: '已具备' },
       { code: 'APP-REGISTRY', name: '应用注册', description: '登记环境、入口、回调、健康、版本和接入能力', route: '/applications', phase: 'V0.1', status: '已具备' },
       { code: 'PORTAL-APP', name: '平台门户', description: '按权限展示应用入口和平台治理入口', route: '/', phase: 'V0.1', status: '已具备' },
-      { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、scope、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
+      { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、权限范围、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
       { code: 'DATA-INGEST', name: '增量数据接入', description: '应用导出契约、版本水位、平台拉取与对账', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
     ],
   },
   {
     key: 'identity-security',
     name: '身份、权限与安全',
-    description: '统一治理身份映射、组织、角色、权限点、数据范围和凭据。',
+    description: '统一治理身份映射、组织、角色、权限点、数据范围和密钥。',
     icon: 'Lock',
     color: '#527a64',
     items: [
       { code: 'IAM-IDENTITY', name: '用户与组织', description: 'authentik 身份映射、组织和账号生命周期', route: '/platform/identity', phase: 'V0.5', status: '已具备' },
       { code: 'IAM-RBAC', name: '角色与权限点', description: '角色、权限注册、授权版本和访问复核', route: '/platform/permissions', phase: 'V0.5', status: '已具备' },
       { code: 'IAM-SCOPE', name: '数据范围', description: '应用级数据范围契约与本地对象级校验边界', route: '/platform/permissions', phase: 'V0.5', status: '已具备' },
-      { code: 'APP-CREDENTIAL', name: '应用凭据', description: '服务身份、scope、轮换、撤销和紧急停用', route: '/applications', phase: 'V0.5', status: '已具备' },
-      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、凭据和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '已具备' },
+      { code: 'APP-CREDENTIAL', name: '应用密钥', description: '服务身份、权限范围、生成、删除和紧急停用', route: '/applications', phase: 'V0.5', status: '已具备' },
+      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、密钥和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '已具备' },
     ],
   },
   {
@@ -61,8 +61,8 @@ export const platformCapabilityGroups = [
     items: [
       { code: 'SEM-CENTER', name: '企业语义中心', description: '语义目录、版本、来源绑定和变更影响', route: '/semantics', phase: 'V1.1', status: '待实施' },
       { code: 'AI-GOVERNANCE', name: 'AI 治理中心', description: '模型、知识、工具、评测、证据和运行审计', route: '/ai-center', phase: 'V1.2', status: '待实施' },
-      { code: 'OPTIONAL-WORKFLOW', name: '工作流与统一待办', description: '仅在正式纳入平台产品范围后独立立项', route: '/platform', phase: '后置', status: '未启用' },
-      { code: 'OPTIONAL-FILE', name: '文件与通用表单', description: '仅在正式纳入平台产品范围后独立立项', route: '/platform', phase: '后置', status: '未启用' },
+      { code: 'OPTIONAL-WORKFLOW', name: '工作流与统一待办', description: '仅在正式纳入平台产品范围后独立立项', route: '/platform/developer', phase: '后置', status: '未启用' },
+      { code: 'OPTIONAL-FILE', name: '文件与通用表单', description: '仅在正式纳入平台产品范围后独立立项', route: '/platform/developer', phase: '后置', status: '未启用' },
     ],
   },
 ]

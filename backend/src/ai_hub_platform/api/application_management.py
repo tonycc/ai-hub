@@ -107,6 +107,7 @@ class ApplicationSummaryResponse(ApiModel):
     name: str
     description: str
     owner: str
+    owner_id: UUID | None = None
     status: ApplicationStatus
     capabilities: list[Capability]
     environment_count: int
@@ -120,6 +121,7 @@ class ApplicationDetailResponse(ApiModel):
     name: str
     description: str
     owner: str
+    owner_id: UUID | None = None
     status: ApplicationStatus
     capabilities: list[Capability]
     environments: list[EnvironmentResponse]
@@ -142,7 +144,7 @@ class ApplicationCreate(ApiModel):
     )
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=4000)
-    owner: str = Field(min_length=1, max_length=200)
+    owner_id: UUID = Field(description="平台用户 user_id，负责人从用户目录中选择")
     capabilities: list[Capability] = Field(default_factory=lambda: ["API_CLIENT"])
 
     @field_validator("capabilities")
@@ -156,7 +158,10 @@ class ApplicationCreate(ApiModel):
 class ApplicationUpdate(ApiModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=4000)
-    owner: str = Field(min_length=1, max_length=200)
+    owner_id: UUID | None = Field(
+        default=None,
+        description="平台用户 user_id，负责人从用户目录中选择；不传则保留原负责人",
+    )
     status: ApplicationStatus
     capabilities: list[Capability]
 
@@ -310,6 +315,7 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
         name=value["name"],
         description=value["description"],
         owner=value["owner"],
+        owner_id=UUID(value["owner_id"]) if value.get("owner_id") else None,
         status=value["status"],
         capabilities=list(value["capabilities"]),
         environments=environments,
@@ -418,7 +424,7 @@ async def create_application(
             application_id=payload.application_id,
             name=payload.name,
             description=payload.description,
-            owner=payload.owner,
+            owner_id=payload.owner_id,
             capabilities=list(payload.capabilities),
         )
     except (
@@ -476,7 +482,7 @@ async def update_application(
             application_id=application_id,
             name=payload.name,
             description=payload.description,
-            owner=payload.owner,
+            owner_id=payload.owner_id,
             status=payload.status,
             capabilities=list(payload.capabilities),
         )

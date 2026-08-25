@@ -105,11 +105,10 @@ watch(
 </script>
 
 <template>
-  <el-dialog
+  <el-drawer
     v-model="visible"
-    width="80%"
-    top="4vh"
-    class="asset-viewer-dialog"
+    size="min(80%, 96vw)"
+    class="asset-viewer-drawer"
     :title="asset ? `${asset.title}（v${asset.version}）` : '资产预览'"
     destroy-on-close
   >
@@ -173,7 +172,7 @@ watch(
     <template #footer>
       <span class="viewer-footer-hint">内容与下载文件同源、同版本，可通过 SHA-256 校验完整性。</span>
     </template>
-  </el-dialog>
+  </el-drawer>
 </template>
 
 <style scoped>

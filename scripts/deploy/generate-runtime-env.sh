@@ -59,6 +59,7 @@ gen_b64() {
 
 OIDC_CLIENT_SECRET="$(gen_secret 48)"
 PORTAL_OIDC_CLIENT_SECRET="$(gen_secret 48)"
+STANDALONE_OIDC_CLIENT_SECRET="$(gen_secret 48)"
 
 mkdir -p "$(dirname "${OUTPUT}")"
 umask 077
@@ -76,7 +77,11 @@ AI_HUB_PORTAL_OIDC_AUDIENCE=ai-hub-portal
 AI_HUB_PORTAL_OIDC_CLIENT_ID=ai-hub-portal
 AI_HUB_PORTAL_OIDC_REDIRECT_URI=https://${PLATFORM_HOST}/auth/callback
 AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI=https://${PLATFORM_HOST}/
-AI_HUB_AUTHENTIK_API_URL=https://${AUTH_HOST}/api/v3
+# Admin API is reached cluster-internally: routing it through the public
+# Traefik address would create a startup cycle (Traefik waits for platform-api
+# to become ready, while readiness waits for bootstrap reconciliation against
+# this very endpoint). The public issuer/brand URLs below stay on HTTPS.
+AI_HUB_AUTHENTIK_API_URL=http://authentik-server:9000/api/v3
 AI_HUB_AUTHENTIK_EXTERNAL_URL=https://${AUTH_HOST}
 AI_HUB_AUTHENTIK_BRAND_DOMAIN=${AUTH_HOST}
 AI_HUB_PUBLIC_PLATFORM_BASE_URL=https://${PLATFORM_HOST}
@@ -87,10 +92,15 @@ AI_HUB_PORTAL_EXTERNAL_URL=https://${PLATFORM_HOST}
 STANDALONE_ENVIRONMENT=production
 STANDALONE_APPLICATION_ID=standalone-example
 STANDALONE_PLATFORM_API_BASE_URL=https://${PLATFORM_HOST}
-STANDALONE_OIDC_ISSUER=https://${AUTH_HOST}/application/o/ai-hub/
-STANDALONE_OIDC_AUDIENCE=ai-hub-platform
-STANDALONE_OIDC_CLIENT_ID=ai-hub-platform
+STANDALONE_OIDC_ISSUER=https://${AUTH_HOST}/application/o/standalone-example/
+STANDALONE_OIDC_AUDIENCE=standalone-example
+STANDALONE_OIDC_CLIENT_ID=standalone-example
 STANDALONE_OIDC_REDIRECT_URI=https://${APP_HOST}/auth/callback
+STANDALONE_PORTAL_URL=https://${APP_HOST}/
+AI_HUB_STANDALONE_PORTAL_URL=https://${APP_HOST}/
+AI_HUB_STANDALONE_API_BASE_URL=https://${APP_HOST}/api/v1
+AI_HUB_STANDALONE_HEALTH_URL=https://${APP_HOST}/health/live
+AI_HUB_STANDALONE_OIDC_REDIRECT_URI=https://${APP_HOST}/auth/callback
 
 # Generated secrets (URI-unreserved; embedded in connection URLs)
 POSTGRES_SUPERUSER_PASSWORD=$(gen_secret 48)
@@ -110,7 +120,7 @@ AI_HUB_OIDC_CLIENT_ID=ai-hub-platform
 AI_HUB_OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
 AI_HUB_PORTAL_OIDC_CLIENT_SECRET=${PORTAL_OIDC_CLIENT_SECRET}
 AI_HUB_AUTHENTIK_API_TOKEN=$(gen_secret 48)
-STANDALONE_OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+STANDALONE_OIDC_CLIENT_SECRET=${STANDALONE_OIDC_CLIENT_SECRET}
 STANDALONE_SESSION_SECRET=$(gen_secret 48)
 AI_HUB_MONITOR_TOKEN=$(gen_secret 48)
 

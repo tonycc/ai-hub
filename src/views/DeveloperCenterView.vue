@@ -13,6 +13,7 @@ import {
 } from '@element-plus/icons-vue'
 import ApiState from '../components/ApiState.vue'
 import AssetViewerDialog from '../components/AssetViewerDialog.vue'
+import { platformCapabilityGroups } from '../data/platformCapabilities'
 import { apiRequest, downloadAsset } from '../services/platformApi'
 
 const router = useRouter()
@@ -192,8 +193,8 @@ onMounted(load)
               <div class="secret-panel__icon"><el-icon :size="22"><Key /></el-icon></div>
               <h3>客户端密钥去哪里领？</h3>
               <p>
-                密钥属于敏感凭据，需要登记、可审计、可吊销，因此不在此页面展示。
-                请到<strong>应用中心</strong>为你的应用创建环境凭据，密钥只会在创建时展示一次，请立即保存。
+                密钥属于敏感信息，需要登记、可审计、可删除，因此不在此页面展示。
+                请到<strong>应用中心</strong>为你的应用创建环境密钥，密钥只会在创建时展示一次，请立即保存。
               </p>
               <el-button type="primary" plain size="small" @click="router.push('/applications')">
                 前往应用中心<el-icon class="el-icon--right"><ArrowRight /></el-icon>
@@ -246,6 +247,35 @@ onMounted(load)
                     </template>
                   </el-table-column>
                 </el-table>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+        </section>
+
+        <section class="page-section">
+          <el-collapse class="integrity__collapse">
+            <el-collapse-item name="capabilities">
+              <template #title>
+                <span class="integrity__title">平台能力纵览（{{ platformCapabilityGroups.flatMap((g) => g.items).length }} 项公共能力）</span>
+              </template>
+              <div class="capability-docs">
+                <div v-for="group in platformCapabilityGroups" :key="group.key" class="capability-doc-group">
+                  <h4>{{ group.name }}</h4>
+                  <p class="capability-doc-group__desc">{{ group.description }}</p>
+                  <el-table :data="group.items" style="width: 100%">
+                    <el-table-column prop="code" label="编号" min-width="150">
+                      <template #default="scope"><code>{{ scope.row.code }}</code></template>
+                    </el-table-column>
+                    <el-table-column prop="name" label="能力" min-width="130" />
+                    <el-table-column prop="description" label="说明" min-width="280" />
+                    <el-table-column prop="phase" label="阶段" width="90" />
+                    <el-table-column label="状态" width="100">
+                      <template #default="scope">
+                        <span class="capability-status" :class="`capability-status--${scope.row.status === '已具备' ? 'ready' : scope.row.status === '进行中' ? 'active' : 'pending'}`">{{ scope.row.status }}</span>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
               </div>
             </el-collapse-item>
           </el-collapse>
@@ -477,6 +507,16 @@ onMounted(load)
   color: var(--ink-500);
 }
 .subline { display: block; margin-top: 2px; color: var(--ink-500); font-size: 11px; }
+
+/* capability docs */
+.capability-docs { padding: 4px 0 10px; }
+.capability-doc-group + .capability-doc-group { margin-top: 20px; }
+.capability-doc-group h4 { margin: 0 0 4px; font-size: var(--font-body-lg); color: var(--ink-900); }
+.capability-doc-group__desc { margin: 0 0 10px; font-size: var(--font-caption); color: var(--ink-500); }
+.capability-status { font-weight: 600; white-space: nowrap; }
+.capability-status--ready { color: var(--success); }
+.capability-status--active { color: var(--accent-600); }
+.capability-status--pending { color: var(--ink-500); }
 
 @media (max-width: 900px) {
   .steps, .sandbox-grid { grid-template-columns: 1fr; }

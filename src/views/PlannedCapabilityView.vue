@@ -28,7 +28,7 @@ const capability = computed(() => capabilities[route.name] || capabilities.seman
   <div class="page-shell planned-page">
     <PageHeader :title="capability.title" :description="capability.description">
       <template #actions>
-        <el-button type="primary" @click="router.push('/platform')">
+        <el-button type="primary" @click="router.push('/platform/developer')">
           <el-icon><Back /></el-icon>返回能力总览
         </el-button>
       </template>

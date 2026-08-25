@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import ApiState from '../components/ApiState.vue'
 import MetricCard from '../components/MetricCard.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -11,12 +12,19 @@ import { usePortalSession } from '../stores/session'
 const router = useRouter()
 const session = usePortalSession()
 const registeredApps = ref([])
+const myApps = ref([])
 const applicationsLoading = ref(false)
 const applicationsError = ref(null)
-const canCreateApplication = computed(() => session.hasPermission('platform.application.write')
-  && session.principal.value?.application_scopes?.['platform.application.write'] === null)
+const myAppsLoading = ref(false)
+const myAppsError = ref(null)
+const operationsSummary = ref(null)
+const operationsError = ref(null)
+const operationsLoading = ref(false)
+const canReadOperations = computed(() => session.hasPermission('platform.operations.read'))
+const isPlatformUser = computed(() => session.hasPermission('platform.application.read'))
 
 async function loadApplications() {
+  if (!isPlatformUser.value) return
   applicationsLoading.value = true
   applicationsError.value = null
   try {
@@ -28,85 +36,160 @@ async function loadApplications() {
   }
 }
 
-const milestoneTasks = [
-  { code: 'M4-01', name: '运行目标、数据保留、责任路由与唯一权威配置', owner: '平台运行', status: '已完成' },
-  { code: 'M4-02', name: '加密备份、异机保留与完整恢复演练', owner: '数据恢复', status: '已完成' },
-  { code: 'M4-03', name: '指标、告警、恢复通知与责任升级', owner: '平台运维', status: '已完成' },
-  { code: 'M4-04', name: '兼容迁移、灰度回滚与服务凭据轮换', owner: '平台发布', status: '已完成' },
-  { code: 'M4-05', name: '性能、安全、积压与公共依赖故障演练', owner: '平台验收', status: '已完成' },
-  { code: 'M4-06', name: '容量结论与高可用部署档位决策', owner: '架构治理', status: '已完成' },
-]
+async function loadMyApplications() {
+  myAppsLoading.value = true
+  myAppsError.value = null
+  try {
+    myApps.value = (await apiRequest('my-applications')).items
+  } catch (error) {
+    myAppsError.value = error
+  } finally {
+    myAppsLoading.value = false
+  }
+}
+
+async function loadOperationsSummary() {
+  if (!canReadOperations.value) return
+  operationsLoading.value = true
+  operationsError.value = null
+  try {
+    operationsSummary.value = await apiRequest('operations/summary')
+  } catch (error) {
+    operationsSummary.value = null
+    operationsError.value = error
+  } finally {
+    operationsLoading.value = false
+  }
+}
+
+const activeApps = computed(() => registeredApps.value.filter((app) => app.status === 'ACTIVE'))
+const healthyEntries = computed(() => (operationsSummary.value?.application_entries || [])
+  .filter((entry) => entry.status === 'HEALTHY').length)
+const totalEntries = computed(() => (operationsSummary.value?.application_entries || []).length)
+const operationsState = computed(() => {
+  if (operationsLoading.value) return 'loading'
+  if (operationsError.value) return 'error'
+  if (!operationsSummary.value) return 'unavailable'
+  return operationsSummary.value.overall_status === 'HEALTHY' ? 'healthy' : 'degraded'
+})
+const operationsLabel = computed(() => ({
+  loading: '加载中',
+  error: '不可用',
+  unavailable: '暂无数据',
+  healthy: '正常',
+  degraded: '降级',
+}[operationsState.value]))
+const operationsHint = computed(() => {
+  if (operationsState.value === 'loading') return '正在获取运行状态'
+  if (operationsState.value === 'error') return operationsError.value?.message || '运维接口不可用'
+  if (operationsState.value === 'unavailable') return '尚未获取到运行状态'
+  return `观测于 ${formatTime(operationsSummary.value?.observed_at)}`
+})
+const operationsTone = computed(() => ({
+  loading: 'blue',
+  error: 'orange',
+  unavailable: 'blue',
+  healthy: 'blue',
+  degraded: 'orange',
+}[operationsState.value]))
 
 const platformEntries = [
   { name: '应用中心', description: '登记环境、入口、回调、能力和版本', path: '/applications', icon: 'Grid', color: '#416f86', permission: 'platform.application.read' },
   { name: '用户与组织', description: '管理身份映射、组织和账号状态', path: '/platform/identity', icon: 'UserFilled', color: '#527a64', permission: 'platform.identity.read' },
-  { name: '权限与安全', description: '管理角色、权限点、scope 和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84', permission: 'platform.authorization.read' },
+  { name: '权限与安全', description: '管理角色、权限点、权限范围和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84', permission: 'platform.authorization.read' },
   { name: '开发者中心', description: '查看契约、SDK、沙箱和认证结果', path: '/platform/developer', icon: 'Tools', color: '#826846', permission: 'platform.developer.read' },
+  { name: '运维中心', description: '应用入口、数据来源和同步新鲜度诊断', path: '/platform/operations', icon: 'Monitor', color: '#4a7a8c', permission: 'platform.operations.read' },
+  { name: '平台配置', description: '只读生产目标、保留策略与责任路由', path: '/platform/settings', icon: 'Setting', color: '#6b7a8c', permission: 'platform.operations.read' },
 ]
 const visiblePlatformEntries = computed(() => platformEntries.filter((entry) => session.hasPermission(entry.permission)))
-onMounted(loadApplications)
+
+function formatTime(value) {
+  if (!value) return '从未检查'
+  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+}
+
+onMounted(() => {
+  loadApplications()
+  loadMyApplications()
+  loadOperationsSummary()
+})
 </script>
 
 <template>
   <div class="page-shell portal-page">
     <PageHeader
-      eyebrow="PLATFORM BASELINE · M4"
-      title="AI Hub 平台控制台"
-      description="当前只建设平台公共能力。真实业务应用通过公开 API 和事件独立接入，不进入平台源码、数据库或发布制品。"
-    >
-      <template #actions>
-        <el-button @click="router.push('/platform/developer')"><el-icon><Document /></el-icon>接入文档</el-button>
-        <el-button v-if="canCreateApplication" type="primary" @click="router.push('/applications')"><el-icon><Plus /></el-icon>注册应用</el-button>
-      </template>
-    </PageHeader>
-
-    <section class="attention-strip" aria-label="当前实施提醒">
-      <span class="attention-strip__mark"><el-icon><CircleCheck /></el-icon></span>
-      <div>
-        <strong>M4 已完成：生产运行基线与综合故障演练已通过</strong>
-        <small>代码与运行基线已具备部署条件；具体环境仍须完成密钥、HTTPS、异机备份、责任路由和目标主机门禁。</small>
-      </div>
-      <el-button text type="primary" @click="router.push('/platform/settings')">查看生产配置<el-icon><ArrowRight /></el-icon></el-button>
-    </section>
+      eyebrow="AI HUB PLATFORM"
+      title="平台控制台"
+      description="管理应用接入、身份权限、通知审计和平台运行状态。"
+    />
 
     <div class="metric-grid page-section">
-      <MetricCard label="当前里程碑" value="M4" hint="生产准备基线已验收" icon="Flag" tone="blue" />
-      <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="均为中性认证配置" icon="Grid" tone="blue" />
-      <MetricCard label="开发者资产" value="5" unit="份" hint="契约 · SDK · 文档 · 示例" icon="Document" tone="green" />
-      <MetricCard label="M4 任务" value="6" unit="项" hint="生产与韧性门禁通过" icon="CircleCheck" tone="green" />
+      <template v-if="isPlatformUser">
+        <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="当前权限范围内" icon="Grid" tone="blue" />
+        <MetricCard label="运行中应用" :value="activeApps.length" unit="个" hint="状态为 ACTIVE" icon="CircleCheck" tone="green" />
+      </template>
+      <template v-else>
+        <MetricCard label="我的应用" :value="myApps.length" unit="个" hint="有权限访问的应用" icon="Grid" tone="green" />
+      </template>
+      <MetricCard v-if="canReadOperations" label="健康应用入口" :value="operationsSummary ? `${healthyEntries}/${totalEntries}` : '—'" hint="最近一次健康检查" icon="Monitor" :tone="operationsState === 'healthy' ? 'green' : 'orange'" />
+      <MetricCard v-if="canReadOperations" label="整体状态" :value="operationsLabel" :hint="operationsHint" icon="Flag" :tone="operationsTone" />
     </div>
 
-    <div class="work-grid page-section">
-      <section class="surface-panel milestone-panel">
-        <header class="panel-header">
-          <div><h2>M4 生产准备门禁</h2><p>运行、恢复、发布、性能与故障边界均已验证</p></div>
-          <el-button text @click="router.push('/platform')">能力路线<el-icon><ArrowRight /></el-icon></el-button>
-        </header>
-        <div class="milestone-list">
-          <article v-for="task in milestoneTasks" :key="task.code">
-            <code>{{ task.code }}</code>
-            <div><strong>{{ task.name }}</strong><small>{{ task.owner }}</small></div>
-            <StatusTag :status="task.status" />
-          </article>
-        </div>
-      </section>
+    <section v-if="canReadOperations && operationsState === 'error'" class="attention-strip" aria-label="运行状态提醒">
+      <span class="attention-strip__mark"><el-icon><Warning /></el-icon></span>
+      <div>
+        <strong>运行状态不可用</strong>
+        <small>{{ operationsError?.message || '运维接口暂时不可用，请稍后重试。' }}</small>
+      </div>
+      <el-button text type="primary" @click="loadOperationsSummary">重试<el-icon><ArrowRight /></el-icon></el-button>
+    </section>
 
-      <section class="surface-panel boundary-panel">
-        <header class="panel-header"><div><h2>平台边界</h2><p>所有实现必须持续满足</p></div></header>
-        <ul>
-          <li><el-icon><CircleCheck /></el-icon><span>平台只提供通用机制与治理</span></li>
-          <li><el-icon><CircleCheck /></el-icon><span>独立应用拥有自己的数据与规则</span></li>
-          <li><el-icon><CircleCheck /></el-icon><span>跨项目只依赖版本化公开契约</span></li>
-          <li><el-icon><CircleCheck /></el-icon><span>平台汇聚数据只读且可以从来源重建</span></li>
-          <li><el-icon><CircleCheck /></el-icon><span>API-only 应用不强制建设数据导出</span></li>
-        </ul>
-      </section>
-    </div>
+    <section v-if="operationsState === 'degraded'" class="attention-strip" aria-label="运行状态提醒">
+      <span class="attention-strip__mark"><el-icon><Warning /></el-icon></span>
+      <div>
+        <strong>存在需要关注的应用入口</strong>
+        <small>部分应用入口健康检查未通过或长时间未上报，请前往运维中心查看对象级诊断。</small>
+      </div>
+      <el-button text type="primary" @click="router.push('/platform/operations')">查看运维中心<el-icon><ArrowRight /></el-icon></el-button>
+    </section>
+
+    <section v-if="!isPlatformUser" class="page-section">
+      <div class="section-heading">
+        <div><h2>我的应用</h2><p>您有权限访问的业务系统</p></div>
+      </div>
+      <div class="application-grid">
+        <ApiState :loading="myAppsLoading" :error="myAppsError" :empty="!myApps.length" empty-text="您暂无应用访问权限" @retry="loadMyApplications">
+        <a v-for="app in myApps" :key="app.application_id" class="surface-panel application-card" :class="{ 'application-card--disabled': !app.portal_url }" :href="app.portal_url || undefined" :target="app.portal_url ? '_blank' : undefined" :rel="app.portal_url ? 'noopener noreferrer' : undefined" :aria-disabled="!app.portal_url">
+          <span style="--app-color: #527a64"><el-icon><Connection /></el-icon></span>
+          <div><strong>{{ app.name }}</strong><small>{{ app.description }}</small></div>
+          <div class="application-card__status">
+            <small>{{ app.portal_url ? '状态' : '暂无可用入口' }}</small>
+            <StatusTag :status="app.status" size="default" />
+          </div>
+        </a>
+        </ApiState>
+      </div>
+    </section>
+
+    <section v-if="isPlatformUser" class="page-section">
+      <div class="section-heading">
+        <div><h2>已登记应用</h2><p>点击应用查看详情、环境和密钥</p></div>
+        <el-button text @click="router.push('/applications')">应用中心<el-icon><ArrowRight /></el-icon></el-button>
+      </div>
+      <div class="application-grid">
+        <ApiState :loading="applicationsLoading" :error="applicationsError" :empty="!registeredApps.length" empty-text="当前权限范围内暂无应用" @retry="loadApplications">
+        <RouterLink v-for="app in registeredApps" :key="app.application_id" class="surface-panel application-card" :to="{ path: '/applications', query: { app: app.application_id } }">
+          <span style="--app-color: #416f86"><el-icon><Connection /></el-icon></span>
+          <div><strong>{{ app.name }}</strong><small>{{ app.description }}</small><code>{{ app.application_id }}</code></div>
+          <div class="application-card__status"><small>状态</small><StatusTag :status="app.status" size="default" /></div>
+        </RouterLink>
+        </ApiState>
+      </div>
+    </section>
 
     <section class="page-section">
       <div class="section-heading">
-        <div><h2>平台治理入口</h2><p>面向平台管理员、应用开发者、安全和运维角色</p></div>
-        <el-button text @click="router.push('/platform')">查看能力总览<el-icon><ArrowRight /></el-icon></el-button>
+        <div><h2>管理入口</h2><p>按当前角色权限显示</p></div>
       </div>
       <div class="platform-service-grid">
         <button v-for="entry in visiblePlatformEntries" :key="entry.path" type="button" @click="router.push(entry.path)">
@@ -116,63 +199,39 @@ onMounted(loadApplications)
         </button>
       </div>
     </section>
-
-    <section class="page-section">
-      <div class="section-heading">
-        <div><h2>接入认证配置</h2><p>参考应用只是平台一致性测试夹具，不承载真实领域功能</p></div>
-        <el-button text @click="router.push('/applications')">应用中心<el-icon><ArrowRight /></el-icon></el-button>
-      </div>
-      <div class="application-grid">
-        <ApiState :loading="applicationsLoading" :error="applicationsError" :empty="!registeredApps.length" empty-text="当前权限范围内暂无应用" @retry="loadApplications">
-        <article v-for="app in registeredApps" :key="app.application_id" class="surface-panel application-card">
-          <span style="--app-color: #416f86"><el-icon><Connection /></el-icon></span>
-          <div><strong>{{ app.name }}</strong><small>{{ app.description }}</small><code>{{ app.application_id }}</code></div>
-          <StatusTag :status="app.status" />
-        </article>
-        </ApiState>
-      </div>
-    </section>
   </div>
 </template>
 
 <style scoped>
-.attention-strip { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid #e6d7c8; border-left: 3px solid var(--accent-500); border-radius: 7px; background: #fffaf6; }
-.attention-strip__mark { display: grid; width: 34px; height: 34px; border-radius: 7px; color: var(--accent-600); background: var(--accent-100); place-items: center; }
-.attention-strip > div { display: grid; gap: 3px; }
-.attention-strip strong { color: #57382b; font-size: 13px; }
-.attention-strip small { color: #876d61; font-size: 11px; }
-.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.work-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.65fr); gap: 14px; }
-.panel-header, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.panel-header { padding: 14px 16px; border-bottom: 1px solid var(--line); }
-.panel-header h2, .section-heading h2 { margin: 0; color: var(--ink-900); font-size: 14px; }
-.panel-header p, .section-heading p { margin: 4px 0 0; color: var(--ink-500); font-size: 11px; }
-.milestone-list { display: grid; }
-.milestone-list article { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 16px; border-top: 1px solid #edf0f2; }
-.milestone-list article:first-child { border-top: 0; }
-.milestone-list code { color: #416c83; font-size: 11px; }
-.milestone-list article > div { display: grid; gap: 3px; }
-.milestone-list strong { color: var(--ink-900); font-size: 12px; }
-.milestone-list small { color: var(--ink-500); font-size: 10px; }
-.boundary-panel ul { display: grid; gap: 12px; margin: 0; padding: 18px; list-style: none; }
-.boundary-panel li { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-700); font-size: 12px; line-height: 1.5; }
-.boundary-panel li .el-icon { flex: 0 0 auto; margin-top: 2px; color: #438167; }
-.section-heading { margin-bottom: 10px; }
-.platform-service-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.platform-service-grid button { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 84px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-500); background: #fff; text-align: left; cursor: pointer; }
+.attention-strip { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: var(--space-gap); margin-top: var(--space-gap); padding: var(--space-card-lg); border: 1px solid #e6d7c8; border-left: 3px solid #d97706; border-radius: 7px; background: #fffaf6; }
+.attention-strip__mark { display: grid; width: 36px; height: 36px; border-radius: 7px; color: #b45309; background: #fef3c7; place-items: center; }
+.attention-strip > div { display: grid; gap: 4px; }
+.attention-strip strong { color: #57382b; font-size: var(--font-body-lg); }
+.attention-strip small { color: #876d61; font-size: var(--font-caption); }
+.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-gap-lg); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-gap); margin-bottom: var(--space-gap); }
+.section-heading h2 { margin: 0; color: var(--ink-900); font-size: var(--font-heading); font-weight: 600; }
+.section-heading p { margin: 4px 0 0; color: var(--ink-500); font-size: var(--font-body); }
+.platform-service-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-gap-lg); }
+.platform-service-grid button { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: var(--space-gap); min-height: 92px; padding: var(--space-card); border: 1px solid var(--line); border-radius: 8px; color: var(--ink-500); background: #fff; text-align: left; cursor: pointer; }
 .platform-service-grid button:hover { border-color: #b9c8cf; box-shadow: var(--shadow-sm); }
-.platform-service-grid button > span { display: grid; width: 40px; height: 40px; border-radius: 8px; color: var(--entry-color); background: color-mix(in srgb, var(--entry-color) 10%, white); font-size: 18px; place-items: center; }
-.platform-service-grid button > div { display: grid; min-width: 0; gap: 4px; }
-.platform-service-grid strong { color: var(--ink-900); font-size: 13px; }
-.platform-service-grid small { color: var(--ink-500); font-size: 10px; line-height: 1.5; }
-.application-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.platform-service-grid button > span { display: grid; width: 44px; height: 44px; border-radius: 8px; color: var(--entry-color); background: color-mix(in srgb, var(--entry-color) 10%, white); font-size: 20px; place-items: center; }
+.platform-service-grid button > div { display: grid; min-width: 0; gap: 5px; }
+.platform-service-grid strong { color: var(--ink-900); font-size: var(--font-body-lg); }
+.platform-service-grid small { color: var(--ink-500); font-size: var(--font-caption); line-height: 1.5; }
+.application-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-gap-lg); }
 .application-grid > :deep(.el-result), .application-grid > :deep(.el-empty), .application-grid > :deep(.api-state) { grid-column: 1 / -1; }
-.application-card { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 15px; }
-.application-card > span { display: grid; width: 42px; height: 42px; border-radius: 9px; color: var(--app-color); background: color-mix(in srgb, var(--app-color) 10%, white); font-size: 19px; place-items: center; }
-.application-card > div { display: grid; min-width: 0; gap: 4px; }
-.application-card strong { color: var(--ink-900); font-size: 13px; }
-.application-card small { color: var(--ink-500); font-size: 10px; line-height: 1.5; }
-.application-card code { color: #71818b; font-size: 10px; }
-@media (max-width: 1100px) { .metric-grid, .platform-service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .work-grid { grid-template-columns: 1fr; } }
+.application-card { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: var(--space-gap); padding: var(--space-card-lg); cursor: pointer; color: inherit; text-decoration: none; }
+.application-card:hover { border-color: #b9c8cf; box-shadow: var(--shadow-sm); }
+.application-card--disabled { cursor: not-allowed; opacity: 0.72; }
+.application-card--disabled:hover { border-color: inherit; box-shadow: none; }
+.application-card > span { display: grid; width: 46px; height: 46px; border-radius: 9px; color: var(--app-color); background: color-mix(in srgb, var(--app-color) 10%, white); font-size: 21px; place-items: center; }
+.application-card > div { display: grid; min-width: 0; gap: 5px; }
+.application-card strong { color: var(--ink-900); font-size: var(--font-body-lg); }
+.application-card small { color: var(--ink-500); font-size: var(--font-caption); line-height: 1.5; }
+.application-card code { color: #71818b; font-size: var(--font-eyebrow); }
+.application-card__status { display: grid; justify-items: end; gap: 4px; }
+.application-card__status small { color: var(--ink-400); font-size: var(--font-eyebrow); }
+@media (max-width: 1100px) { .metric-grid, .platform-service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .attention-strip { grid-template-columns: 38px 1fr; } .attention-strip .el-button { grid-column: 2; justify-self: start; } .metric-grid, .platform-service-grid, .application-grid { grid-template-columns: 1fr; } }
 </style>

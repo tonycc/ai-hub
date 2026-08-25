@@ -106,7 +106,7 @@ m1_assert_audit() {
 m1_service_token() {
   m1_token_scopes=$1
   m1_token_response="$(curl --fail --silent --show-error --max-time 15 \
-    --user 'ai-hub-platform:local-only-oidc-client-secret' \
+    --user 'standalone-example:local-only-standalone-oidc-client-secret' \
     --data-urlencode 'grant_type=client_credentials' \
     --data-urlencode "scope=${m1_token_scopes}" \
     "${M1_AUTH_BASE}/application/o/token/")"
@@ -232,11 +232,11 @@ m1_token_header="$(printf '%s' "${m1_full_service_token}" | cut -d. -f1 | tr '_-
 printf '%s' "${m1_token_header}" | jq --exit-status '.alg == "RS256" and (.kid | type == "string")' >/dev/null
 m1_full_service_claims="$(printf '%s' "${m1_full_service_token}" | cut -d. -f2 | tr '_-' '/+' | awk '{ padding = (4 - length($0) % 4) % 4; printf "%s", $0; for (i = 0; i < padding; i++) printf "=" }' | base64 --decode 2>/dev/null)"
 printf '%s' "${m1_full_service_claims}" | jq --exit-status \
-  --arg issuer "${M1_AUTH_BASE}/application/o/ai-hub/" \
-  '.iss == $issuer and .aud == "ai-hub-platform" and .actor_type == "service" and .application_id == "standalone-example" and .authorization_version == 1 and (.exp > .iat)' \
+  --arg issuer "${M1_AUTH_BASE}/application/o/standalone-example/" \
+  '.iss == $issuer and .aud == "standalone-example" and .actor_type == "service" and .application_id == "standalone-example" and .authorization_version == 1 and (.exp > .iat)' \
   >/dev/null
 m1_bad_client_code="$(curl --silent --show-error --max-time 15 \
-  --user 'ai-hub-platform:revoked-or-invalid-secret' \
+  --user 'standalone-example:revoked-or-invalid-secret' \
   --data-urlencode 'grant_type=client_credentials' \
   --data-urlencode 'scope=platform.notification.request' \
   --output "${M1_WORK_DIR}/invalid-client.json" \

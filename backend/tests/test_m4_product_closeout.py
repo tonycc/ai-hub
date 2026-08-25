@@ -78,8 +78,8 @@ def test_m4_portal_and_future_capability_states_are_explicit() -> None:
     capabilities = _source("src/data/platformCapabilities.js")
     planned = _source("src/views/PlannedCapabilityView.vue")
 
-    assert "PLATFORM BASELINE · M4" in portal
-    assert "M4 已完成" in portal
+    assert "AI HUB PLATFORM" in portal
+    assert "平台控制台" in portal
     assert "M3 实施门禁" not in portal
     assert "BACKUP-RECOVERY" in capabilities
     assert "PLATFORM-CONFIG" in capabilities

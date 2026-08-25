@@ -99,6 +99,19 @@ def test_standalone_image_build_does_not_copy_platform_source() -> None:
     assert "COPY sdk/python/src" in dockerfile
 
 
+def test_platform_api_readiness_probe_allows_bootstrap_reconciliation_window() -> None:
+    compose = load_yaml("deploy/compose.yaml")
+    healthcheck = compose["services"]["platform-api"]["healthcheck"]
+    test_command = " ".join(healthcheck["test"])
+
+    assert "/health/ready" in test_command
+    assert "/health/live" not in test_command
+    # Bootstrap retries sleep 5/10/20/30s before the dedicated provider may
+    # appear; a short start_period fails compose --wait in M1 before reconcile.
+    assert healthcheck["start_period"] == "90s"
+    assert int(str(healthcheck["retries"])) >= 24
+
+
 def test_standalone_app_uses_api_client_and_data_ingest_only() -> None:
     compose = load_yaml("deploy/compose.yaml")
     services = compose["services"]

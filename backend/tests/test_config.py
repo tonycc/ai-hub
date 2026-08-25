@@ -46,9 +46,107 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
             "platform-db.internal:5432/platform_db"
         ),
         oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
+        credential_rotation_overlap_seconds=300,
+        standalone_portal_url="https://app.example.org/",
+        standalone_api_base_url="https://app.example.org",
+        standalone_health_url="https://app.example.org/health",
+        standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
     )
 
     assert settings.environment == "production"
+
+
+def test_production_accepts_cluster_internal_http_authentik_api_url() -> None:
+    settings = Settings(
+        environment="production",
+        database_url=(
+            "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+            "platform-db.internal:5432/platform_db"
+        ),
+        oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+        portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+        portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+        portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+        authentik_api_url="http://authentik-server:9000/api/v3",
+        authentik_external_url="https://identity.example.org",
+        authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+        monitor_token=SecretStr("ProdMonitorToken-4821"),
+        public_platform_base_url="https://platform.example.org",
+        public_identity_base_url="https://identity.example.org",
+        raw_database_url=(
+            "postgresql+psycopg://ai_hub_raw:ProdRawSecret-6754@"
+            "platform-db.internal:5432/platform_db"
+        ),
+        oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
+        credential_rotation_overlap_seconds=300,
+        standalone_portal_url="https://app.example.org/",
+        standalone_api_base_url="https://app.example.org",
+        standalone_health_url="https://app.example.org/health",
+        standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
+    )
+    assert settings.authentik_api_url == "http://authentik-server:9000/api/v3"
+
+
+def test_production_rejects_public_http_authentik_api_url() -> None:
+    with pytest.raises(ValidationError, match="authentik_api_url must use https"):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="http://identity.example.org/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+            monitor_token=SecretStr("ProdMonitorToken-4821"),
+            public_platform_base_url="https://platform.example.org",
+            public_identity_base_url="https://identity.example.org",
+            raw_database_url=(
+                "postgresql+psycopg://ai_hub_raw:ProdRawSecret-6754@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
+            credential_rotation_overlap_seconds=300,
+            standalone_portal_url="https://app.example.org/",
+            standalone_api_base_url="https://app.example.org",
+            standalone_health_url="https://app.example.org/health",
+            standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
+        )
+
+
+def test_production_rejects_prefix_spoofed_internal_hostname() -> None:
+    with pytest.raises(ValidationError, match="authentik_api_url must use https"):
+        Settings(
+            environment="production",
+            database_url=(
+                "postgresql+psycopg://ai_hub_platform:ProdSecret-8374@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_issuer="https://identity.example.org/application/o/ai-hub/",
+            portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
+            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
+            authentik_api_url="http://authentik-server.evil.example/api/v3",
+            authentik_external_url="https://identity.example.org",
+            authentik_api_token=SecretStr("ProdAuthentikApiToken-2938"),
+            monitor_token=SecretStr("ProdMonitorToken-4821"),
+            public_platform_base_url="https://platform.example.org",
+            public_identity_base_url="https://identity.example.org",
+            raw_database_url=(
+                "postgresql+psycopg://ai_hub_raw:ProdRawSecret-6754@"
+                "platform-db.internal:5432/platform_db"
+            ),
+            oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
+            credential_rotation_overlap_seconds=300,
+            standalone_portal_url="https://app.example.org/",
+            standalone_api_base_url="https://app.example.org",
+            standalone_health_url="https://app.example.org/health",
+            standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
+        )
 
 
 def test_database_url_requires_credentials() -> None:
@@ -161,6 +259,11 @@ def test_production_rejects_placeholder_monitor_token() -> None:
             monitor_token=SecretStr("local-only-monitor-token"),
             public_platform_base_url="https://platform.example.org",
             public_identity_base_url="https://identity.example.org",
+            credential_rotation_overlap_seconds=300,
+            standalone_portal_url="https://app.example.org/",
+            standalone_api_base_url="https://app.example.org",
+            standalone_health_url="https://app.example.org/health",
+            standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
         )
 
 

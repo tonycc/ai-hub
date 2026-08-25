@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +25,10 @@ class AuthentikManagementError(RuntimeError):
 
 class AuthentikConflictError(AuthentikManagementError):
     pass
+
+
+class AuthentikUserNotFoundError(AuthentikManagementError):
+    """The target user no longer exists in Authentik."""
 
 
 class AuthentikAdminClient:
@@ -323,4 +330,184 @@ class AuthentikAdminClient:
             "PATCH",
             f"/providers/oauth2/{provider_id}/",
             json={"property_mappings": property_mappings},
+        )
+
+    async def _user_by_username(self, username: str) -> dict[str, Any] | None:
+        payload = await self._json_request(
+            "GET",
+            "/core/users/",
+            params={"username": username, "page_size": 2},
+        )
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, list):
+            raise AuthentikManagementError("authentik user list is invalid")
+        typed_results = cast(list[object], raw_results)
+        results: list[dict[str, Any]] = [
+            cast(dict[str, Any], item) for item in typed_results if isinstance(item, dict)
+        ]
+        exact = [item for item in results if item.get("username") == username]
+        if len(exact) > 1:
+            raise AuthentikManagementError("authentik username is ambiguous")
+        return exact[0] if exact else None
+
+    async def create_user(
+        self,
+        *,
+        username: str,
+        name: str,
+        email: str | None = None,
+        password: str | None = None,
+    ) -> dict[str, Any]:
+        existing = await self._user_by_username(username)
+        if existing is not None:
+            raise AuthentikConflictError(f"authentik user '{username}' already exists")
+        payload: dict[str, Any] = {
+            "username": username,
+            "name": name,
+            "is_active": True,
+            "path": "users",
+        }
+        if email:
+            payload["email"] = email
+        user = await self._json_request(
+            "POST",
+            "/core/users/",
+            json=payload,
+            expected=(201,),
+        )
+        if password:
+            try:
+                await self.set_user_password(username=username, password=password)
+            except Exception as original_error:
+                # Compensate: remove the orphaned user if password setup fails.
+                # A failing cleanup must NOT mask the original error: the
+                # caller reports the password failure, and the log records the
+                # surviving username so an operator can reconcile the orphan.
+                user_id = user.get("pk")
+                if isinstance(user_id, int):
+                    try:
+                        await self._json_request(
+                            "DELETE",
+                            f"/core/users/{user_id}/",
+                            expected=(204,),
+                        )
+                    except Exception:
+                        LOGGER.error(
+                            "compensation delete failed for orphaned authentik user '%s' (pk=%s); "
+                            "manual cleanup required before retrying creation",
+                            username,
+                            user_id,
+                        )
+                raise original_error
+        return user
+
+    async def update_user(
+        self,
+        *,
+        username: str,
+        name: str | None = None,
+        email: str | None = None,
+        is_active: bool | None = None,
+    ) -> dict[str, Any]:
+        user = await self._user_by_username(username)
+        if user is None:
+            raise AuthentikManagementError(f"authentik user '{username}' was not found")
+        user_id = user.get("pk")
+        if not isinstance(user_id, int):
+            raise AuthentikManagementError("authentik user identifier is invalid")
+        payload: dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if email is not None:
+            payload["email"] = email
+        if is_active is not None:
+            payload["is_active"] = is_active
+        updated = await self._json_request(
+            "PATCH",
+            f"/core/users/{user_id}/",
+            json=payload,
+        )
+        return updated
+
+    async def set_authorization_version(self, *, username: str, version: int) -> None:
+        # The ai_hub.identity scope reads attributes.authorization_version into
+        # the token claims; the SDK rejects a snapshot whose version differs
+        # from the claim, so every local version bump must be mirrored here.
+        user = await self._user_by_username(username)
+        if user is None:
+            raise AuthentikManagementError(f"authentik user '{username}' was not found")
+        user_id = user.get("pk")
+        if not isinstance(user_id, int):
+            raise AuthentikManagementError("authentik user identifier is invalid")
+        attributes = user.get("attributes")
+        merged: dict[str, Any] = (
+            dict(cast(dict[str, Any], attributes)) if isinstance(attributes, dict) else {}
+        )
+        merged["authorization_version"] = version
+        await self._json_request(
+            "PATCH",
+            f"/core/users/{user_id}/",
+            json={"attributes": merged},
+        )
+
+    async def delete_user(self, *, username: str) -> None:
+        user = await self._user_by_username(username)
+        if user is None:
+            raise AuthentikUserNotFoundError(f"authentik user '{username}' was not found")
+        user_id = user.get("pk")
+        if not isinstance(user_id, int):
+            raise AuthentikManagementError("authentik user identifier is invalid")
+        await self._json_request(
+            "DELETE",
+            f"/core/users/{user_id}/",
+            expected=(204,),
+        )
+
+    async def list_users(
+        self,
+        *,
+        query: str | None = None,
+        is_active: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str | int] = {"page_size": 100, "page": 1}
+        if query:
+            params["search"] = query
+        if is_active is not None:
+            params["is_active"] = is_active
+        results: list[dict[str, Any]] = []
+        while True:
+            payload = await self._json_request(
+                "GET",
+                "/core/users/",
+                params=params,
+            )
+            raw_results = payload.get("results")
+            if not isinstance(raw_results, list):
+                raise AuthentikManagementError("authentik user list is invalid")
+            results.extend(
+                cast(dict[str, Any], item)
+                for item in cast(list[object], raw_results)
+                if isinstance(item, dict)
+            )
+            pagination = payload.get("pagination")
+            if not isinstance(pagination, dict):
+                break
+            next_page = cast(dict[str, Any], pagination).get("next")
+            if not isinstance(next_page, int) or next_page < 1:
+                break
+            params["page"] = next_page
+        return results
+
+    async def set_user_password(self, *, username: str, password: str) -> None:
+        user = await self._user_by_username(username)
+        if user is None:
+            raise AuthentikManagementError(f"authentik user '{username}' was not found")
+        user_id = user.get("pk")
+        if not isinstance(user_id, int):
+            raise AuthentikManagementError("authentik user identifier is invalid")
+        await self._json_request(
+            "POST",
+            f"/core/users/{user_id}/set_password/",
+            json={"password": password},
+            expected=(204,),
         )

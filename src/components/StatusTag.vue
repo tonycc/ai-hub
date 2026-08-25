@@ -13,7 +13,7 @@ const map = {
   DRAINING: ['warning', '过渡中'],
   DISABLED: ['info', '停用'],
   RETIRED: ['info', '已退役'],
-  REVOKED: ['danger', '已吊销'],
+  REVOKED: ['danger', '已撤销'],
   DEPRECATED: ['warning', '已弃用'],
   ERROR: ['danger', '异常'],
   RUNNING: ['primary', '运行中'],

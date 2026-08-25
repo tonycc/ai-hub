@@ -48,9 +48,16 @@ class AppRegistryService:
                 await session.execute(
                     sa.text(
                         """
-                    SELECT application_id, name, description, owner, status, capabilities
-                    FROM platform_core.application
-                    WHERE application_id = :application_id
+                    SELECT a.application_id, a.name, a.description,
+                           COALESCE(
+                               u.display_name || COALESCE(' <' || u.email || '>', ''),
+                               a.owner
+                           ) AS owner,
+                           a.status, a.capabilities
+                    FROM platform_core.application AS a
+                    LEFT JOIN platform_core.identity_user AS u
+                      ON u.user_id = a.owner_id
+                    WHERE a.application_id = :application_id
                     """
                     ),
                     {"application_id": application_id},

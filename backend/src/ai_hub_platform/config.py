@@ -52,6 +52,46 @@ def _is_local_hostname(hostname: str) -> bool:
     return normalized in _LOCAL_HOSTS or normalized.endswith(".localhost")
 
 
+# Cluster-internal hostnames that may serve plain HTTP even in strict mode.
+# Authentik's admin API carries a Bearer token, so HTTP is only acceptable on
+# the private overlay network, never on a public address.
+# Exact cluster-internal service names plus the Kubernetes internal DNS
+# suffix. Anything else must use HTTPS in strict mode, because the admin API
+# carries a Bearer token and public HTTP would disclose it.
+_CLUSTER_INTERNAL_HOSTS = frozenset(
+    {
+        "authentik-server",
+        "postgres",
+        "traefik",
+    }
+)
+_K8S_INTERNAL_SUFFIXES = (".svc.cluster.local", ".cluster.local")
+
+
+def _is_cluster_internal_hostname(hostname: str) -> bool:
+    normalized = hostname.lower()
+    if normalized in _CLUSTER_INTERNAL_HOSTS:
+        return True
+    # k8s fully-qualified internal names: <service>.<namespace>.svc[.cluster.local]
+    for suffix in _K8S_INTERNAL_SUFFIXES:
+        if normalized.endswith(suffix):
+            labels = normalized[: -len(suffix)].split(".")
+            # Require at least service + namespace, all non-empty and with a
+            # valid DNS label shape; this rejects prefix-spoofed public names
+            # like authentik-server.evil.example.
+            if len(labels) < 2:
+                return False
+            return all(
+                label
+                and len(label) <= 63
+                and label[0].isalnum()
+                and label[-1].isalnum()
+                and all(char.isalnum() or char == "-" for char in label)
+                for label in labels
+            )
+    return False
+
+
 def _has_placeholder_secret(secret: str) -> bool:
     normalized = secret.lower()
     return any(marker in normalized for marker in _PLACEHOLDER_MARKERS)
@@ -120,6 +160,32 @@ def _validate_redirect_uri(value: str, *, field_name: str, strict: bool) -> None
         raise ValueError(f"{field_name} cannot use a local hostname outside local/test")
 
 
+def _validate_internal_api_url(value: str, *, field_name: str, strict: bool) -> None:
+    # Cluster-internal admin endpoints may legitimately use plain HTTP on the
+    # private overlay network even in production: routing them through the
+    # public Traefik address would form a startup dependency cycle (Traefik
+    # waits on platform-api readiness, readiness waits on this very call).
+    # Public issuer/brand URLs keep the strict HTTPS + non-local rules.
+    parsed = _parse_url(
+        value,
+        field_name=field_name,
+        allowed_schemes={"http", "https"},
+    )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"{field_name} cannot include credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"{field_name} cannot include a query or fragment")
+    if strict and parsed.scheme != "https":
+        hostname = parsed.hostname or ""
+        if not _is_cluster_internal_hostname(hostname):
+            raise ValueError(
+                f"{field_name} must use https outside local/test unless the host is "
+                f"a known cluster-internal service"
+            )
+    if strict and parsed.hostname and _is_local_hostname(parsed.hostname):
+        raise ValueError(f"{field_name} cannot use a local hostname outside local/test")
+
+
 class _PlatformSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -165,6 +231,13 @@ class Settings(_PlatformSettings):
     public_identity_base_url: str = "http://auth.localhost:8088"
     sandbox_application_id: str = "standalone-example"
     sandbox_user_subject: str = "ai-hub-demo-user"
+    # Public entry points of the reference standalone application. Used when
+    # the bootstrap reconciliation needs to create the production environment
+    # row, so the portal never points at the identity service.
+    standalone_portal_url: str = "http://app.localhost:8088/"
+    standalone_api_base_url: str = "http://app.localhost:8088"
+    standalone_health_url: str = "http://app.localhost:8088/health"
+    standalone_oidc_redirect_uri: str = "http://app.localhost:8088/auth/callback"
     monitor_token: SecretStr | None = None
     production_targets_path: str = "deploy/operations/production-targets.json"
     # Portal ingest ops actions read/write platform_raw and pull export APIs.
@@ -195,7 +268,7 @@ class Settings(_PlatformSettings):
             field_name="portal_oidc_redirect_uri",
             strict=strict,
         )
-        _validate_redirect_uri(
+        _validate_internal_api_url(
             self.authentik_api_url,
             field_name="authentik_api_url",
             strict=strict,
@@ -250,6 +323,26 @@ class Settings(_PlatformSettings):
             strict=strict,
         )
         _validate_application_id(self.sandbox_application_id)
+        _validate_redirect_uri(
+            self.standalone_portal_url,
+            field_name="standalone_portal_url",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.standalone_api_base_url,
+            field_name="standalone_api_base_url",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.standalone_health_url,
+            field_name="standalone_health_url",
+            strict=strict,
+        )
+        _validate_redirect_uri(
+            self.standalone_oidc_redirect_uri,
+            field_name="standalone_oidc_redirect_uri",
+            strict=strict,
+        )
         if not self.sandbox_user_subject.strip():
             raise ValueError("sandbox_user_subject cannot be empty")
         if strict and self.monitor_token is not None:

@@ -41,7 +41,13 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "GRANT SELECT ON platform_core.audit_event TO ai_hub_platform" in sql
     assert "REVOKE UPDATE, DELETE ON platform_core.audit_event" in sql
     assert "REVOKE ALL ON platform_core.alembic_version FROM ai_hub_platform" in sql
-    assert "('SECURITY_AUDITOR', 'platform.notification.read')" in sql
+    assert "('PLATFORM_ADMIN', 'platform.notification.read')" in sql
+    assert "('APPLICATION_DEVELOPER', 'platform.notification.read')" in sql
+    # INSERT statements should not contain retired roles; 0011 only disables
+    assert "INSERT INTO platform_core.platform_role_permission" in sql
+    assert "UPDATE platform_core.platform_role_definition" in sql
+    assert "DELETE FROM platform_core.platform_role_definition" not in sql
+    assert "DELETE FROM platform_core.platform_role_permission" not in sql
     assert "platform_projection" not in sql
     assert "platform_raw" not in sql
     assert "integration_outbox" not in sql

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -28,6 +29,12 @@ from ai_hub_platform.api.platform import router as platform_router
 from ai_hub_platform.api.portal_auth import auth_router, session_router
 from ai_hub_platform.config import Settings, get_settings
 from ai_hub_platform.modules.app_management.authentik import AuthentikAdminClient
+from ai_hub_platform.modules.app_management.bootstrap import (
+    start_bootstrap_reconciliation,
+)
+from ai_hub_platform.modules.governance.version_sync import (
+    start_authorization_version_reconciler,
+)
 from ai_hub_platform.modules.permission.service import PermissionService
 from ai_hub_platform.operations.targets import load_production_targets
 from ai_hub_platform.shared.database import Database
@@ -37,6 +44,10 @@ from ai_hub_platform.shared.observability import (
     RequestContextMiddleware,
 )
 from ai_hub_platform.shared.token_validation import RegisteredOidcTokenValidator
+
+LOGGER = logging.getLogger(__name__)
+
+__all__ = ["create_app"]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -92,7 +103,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.raw_sessions = async_sessionmaker(
             raw_engine, class_=AsyncSession, expire_on_commit=False
         )
+        reconciliation_state, reconciliation_task = start_bootstrap_reconciliation(
+            database,
+            authentik_admin_client,
+            application_id=resolved_settings.sandbox_application_id,
+            environment=resolved_settings.environment,
+            external_url=resolved_settings.authentik_external_url,
+            standalone_portal_url=resolved_settings.standalone_portal_url,
+            standalone_api_base_url=resolved_settings.standalone_api_base_url,
+            standalone_health_url=resolved_settings.standalone_health_url,
+            standalone_oidc_redirect_uri=resolved_settings.standalone_oidc_redirect_uri,
+        )
+        app.state.bootstrap_reconciliation = reconciliation_state
+        version_sync_task = start_authorization_version_reconciler(
+            database, authentik_admin_client
+        )
         yield
+        version_sync_task.cancel()
+        reconciliation_task.cancel()
         await raw_engine.dispose()
         await authentik_admin_client.close()
         await portal_oidc_client.close()
