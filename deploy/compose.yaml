@@ -160,11 +160,15 @@ services:
       # OK once the bootstrap credential reconciliation has produced a usable
       # provider binding, so dependent services never start against a platform
       # that would reject their tokens with invalid_issuer.
+      # The start window must cover Authentik blueprint lag after authentik-server
+      # is healthy: reconciliation retries sleep 5/10/20/30s between attempts, so
+      # a short start_period marks the API unhealthy before the dedicated
+      # provider appears (M1 compose --wait then fails).
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()"]
       interval: 5s
       timeout: 3s
-      retries: 12
-      start_period: 5s
+      retries: 24
+      start_period: 90s
     depends_on:
       platform-core-migrate:
         condition: service_completed_successfully
