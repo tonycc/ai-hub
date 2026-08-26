@@ -58,6 +58,7 @@ COPY contracts ./public-assets/contracts
 COPY deploy/operations/production-targets.json ./deploy/operations/production-targets.json
 COPY deploy/operations/ingest-sources.json ./deploy/operations/ingest-sources.json
 COPY docs/developer-integration-guide.md ./public-assets/docs/developer-integration-guide.md
+COPY docs/agent-integration.md ./public-assets/docs/agent-integration.md
 COPY examples/sdk ./public-assets/examples/sdk
 
 USER ai-hub

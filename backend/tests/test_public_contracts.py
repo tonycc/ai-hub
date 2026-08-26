@@ -31,7 +31,7 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     contract = load_yaml_mapping(OPENAPI_PATH)
 
     assert contract["openapi"] == "3.1.0"
-    assert contract["info"]["version"] == "0.2.0"
+    assert contract["info"]["version"] == "0.2.1"
     assert contract["paths"]
 
     operation_ids: list[str] = []

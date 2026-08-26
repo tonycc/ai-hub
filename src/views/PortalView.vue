@@ -97,7 +97,7 @@ const platformEntries = [
   { name: '应用中心', description: '登记环境、入口、回调、能力和版本', path: '/applications', icon: 'Grid', color: '#416f86', permission: 'platform.application.read' },
   { name: '用户与组织', description: '管理身份映射、组织和账号状态', path: '/platform/identity', icon: 'UserFilled', color: '#527a64', permission: 'platform.identity.read' },
   { name: '权限与安全', description: '管理角色、权限点、权限范围和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84', permission: 'platform.authorization.read' },
-  { name: '开发者中心', description: '查看契约、SDK、沙箱和认证结果', path: '/platform/developer', icon: 'Tools', color: '#826846', permission: 'platform.developer.read' },
+  { name: '开发者中心', description: '接入文档、契约、示例与沙箱参数', path: '/platform/developer', icon: 'Tools', color: '#826846', permission: 'platform.developer.read' },
   { name: '运维中心', description: '应用入口、数据来源和同步新鲜度诊断', path: '/platform/operations', icon: 'Monitor', color: '#4a7a8c', permission: 'platform.operations.read' },
   { name: '平台配置', description: '只读生产目标、保留策略与责任路由', path: '/platform/settings', icon: 'Setting', color: '#6b7a8c', permission: 'platform.operations.read' },
 ]
@@ -171,6 +171,19 @@ onMounted(() => {
       </div>
     </section>
 
+    <section class="page-section">
+      <div class="section-heading">
+        <div><h2>管理入口</h2><p>按当前角色权限显示</p></div>
+      </div>
+      <div class="platform-service-grid">
+        <button v-for="entry in visiblePlatformEntries" :key="entry.path" type="button" @click="router.push(entry.path)">
+          <span :style="{ '--entry-color': entry.color }"><el-icon><component :is="entry.icon" /></el-icon></span>
+          <div><strong>{{ entry.name }}</strong><small>{{ entry.description }}</small></div>
+          <el-icon><ArrowRight /></el-icon>
+        </button>
+      </div>
+    </section>
+
     <section v-if="isPlatformUser" class="page-section">
       <div class="section-heading">
         <div><h2>已登记应用</h2><p>点击应用查看详情、环境和密钥</p></div>
@@ -184,19 +197,6 @@ onMounted(() => {
           <div class="application-card__status"><small>状态</small><StatusTag :status="app.status" size="default" /></div>
         </RouterLink>
         </ApiState>
-      </div>
-    </section>
-
-    <section class="page-section">
-      <div class="section-heading">
-        <div><h2>管理入口</h2><p>按当前角色权限显示</p></div>
-      </div>
-      <div class="platform-service-grid">
-        <button v-for="entry in visiblePlatformEntries" :key="entry.path" type="button" @click="router.push(entry.path)">
-          <span :style="{ '--entry-color': entry.color }"><el-icon><component :is="entry.icon" /></el-icon></span>
-          <div><strong>{{ entry.name }}</strong><small>{{ entry.description }}</small></div>
-          <el-icon><ArrowRight /></el-icon>
-        </button>
       </div>
     </section>
   </div>

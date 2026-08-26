@@ -43,6 +43,31 @@ async function parseError(response) {
   )
 }
 
+export function formatApiError(error) {
+  if (!(error instanceof PlatformApiError)) return error?.message || '操作失败'
+  const validationErrors = error.details?.errors
+  if (!Array.isArray(validationErrors) || !validationErrors.length) return error.message
+
+  const fieldLabels = {
+    login_account: '登录账号',
+    user_name: '用户姓名',
+    password: '密码',
+    organization_id: '所属组织',
+    position_code: '职位',
+    email: '邮箱',
+    role_code: '平台角色',
+    application_id: '应用编号',
+  }
+
+  return validationErrors.map((item) => {
+    const field = fieldLabels[item.loc?.at(-1)] || item.loc?.at(-1) || '字段'
+    const message = item.msg?.startsWith('Value error, ')
+      ? item.msg.slice('Value error, '.length)
+      : item.msg
+    return `${field}：${message}`
+  }).join('；')
+}
+
 export async function apiRequest(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
   const headers = new Headers(options.headers || {})

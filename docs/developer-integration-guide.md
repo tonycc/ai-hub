@@ -1,5 +1,7 @@
 # 独立应用接入指南
 
+> **Coding agent：**请先读 [Agent 接入索引](./agent-integration.md) 或仓库根目录 `llms.txt`。
+
 本指南面向独立部署的企业 B 端应用。应用通过版本化 API 与**数据汇聚导出接口**接入平台，不共享平台源码、数据库账号、Cookie 或 Session 表。
 
 ## 1. 从 API-only 开始
@@ -13,7 +15,7 @@
 5. 应用本地验证用户 JWT 的 issuer、audience、签名、有效期和 scope，再调用 `/me` 与权限 API。
 6. 对象归属、业务状态和并发规则始终由应用自己最终校验。
 
-Python 最小示例见开发者目录中的 `api-only-python`。服务通知请求必须携带唯一幂等键；失败需按公开错误码处理，不得静默丢弃。
+Python 最小示例见开发者中心的 `api-only-python` 资产（`examples/sdk/api_only.py`）。服务通知请求必须携带唯一幂等键；失败需按公开错误码处理，不得静默丢弃。
 
 ## 2. 数据汇聚（推荐）
 
@@ -46,7 +48,7 @@ Python 辅助见 SDK：`ExportPage` / `ExportRecord` / `paginate_export_records`
 2. 平台跑一次 `full` 建基线（对缺席对象合成删除墓碑）。
 3. 转入 `incremental`，按周期拉取；失败不推进位点，下次重拉（幂等去重）。
 
-消费侧（治理 / AI）使用 `platform.data.read` 查询当前态与历史，见 `examples/sdk/data_read.py`。
+消费侧（治理 / AI）使用 `platform.data.read` 查询当前态与历史，见开发者中心资产 `data-read-python`（`examples/sdk/data_read.py`）。
 
 ## 3. 故障与安全边界
 
@@ -58,6 +60,6 @@ Python 辅助见 SDK：`ExportPage` / `ExportRecord` / `paginate_export_records`
 
 ## 4. 一致性认证
 
-提交上线前分别运行已启用能力的认证配置：`API_ONLY`、`DATA_INGEST`。未启用能力应显示为“不适用”，不能为了通过认证而安装无用基础设施。
+提交上线前在「接入治理」页面分别运行已启用能力的认证配置：`API_ONLY`、`DATA_INGEST`。未启用能力应显示为「不适用」，不能为了通过认证而安装无用基础设施。
 
-`DATA_INGEST` 运行时证据须证明：导出接口可达且校验 `ai_hub.ingest.export`、version 全序单调、回看窗口下无漏拉、删除可捕获、幂等正确、payload 符合已登记契约。
+`DATA_INGEST` 运行时证据须证明：导出接口可达且校验 `ai_hub.ingest.export`、version 全序单调、回看窗口下无漏拉、删除可捕获、幂等正确、payload 符合已登记契约。本地门禁通过后，可参考开发者中心资产 `data-ingest-evidence`（`examples/sdk/data_ingest_evidence.py`）生成并导入证据摘要。

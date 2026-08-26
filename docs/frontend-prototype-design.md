@@ -43,7 +43,7 @@
 | `/platform/notifications` | 通知中心 | `IN_APP` 站内测试通知配置、测试送达、结果与失败原因 | V0.5 |
 | `/platform/integrations` | 接入治理 | API、数据导出、服务身份、scope、对象引用和汇聚状态 | V0.5 |
 | `/platform/audit` | 审计中心 | 登录、配置、授权、凭据和公共能力调用审计 | V0.5 |
-| `/platform/developer` | 开发者中心 | 契约、SDK、沙箱、示例、兼容窗口和认证结果 | V0.5 |
+| `/platform/developer` | 开发者中心 | 契约、SDK、沙箱、示例与版本指纹（只读） | V0.5 |
 | `/platform/operations` | 运维中心 | 健康、指标、告警、发布、积压、备份和恢复 | V1.0 |
 | `/platform/settings` | 平台配置 | 只读展示运行目标、恢复目标、保留策略、责任路由和高可用触发条件 | V1.0 |
 | `/semantics` | 企业语义中心 | 语义目录、版本、来源绑定和影响分析 | V1.1，按需求启用 |

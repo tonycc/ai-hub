@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Annotated, Any, Literal, NoReturn, Self, cast
+from typing import Annotated, Any, Literal, NoReturn, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_hub_platform.api.dependencies import (
@@ -124,15 +125,26 @@ class UnifiedUserCreate(ApiModel):
     role_code: str | None = None
     application_id: str | None = None
 
-    @model_validator(mode="after")
-    def validate_login_account(self) -> Self:
+    @field_validator("email", "position_code", "role_code", "application_id", mode="before")
+    @classmethod
+    def empty_optional_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+    @field_validator("login_account")
+    @classmethod
+    def validate_login_account_format(cls, value: str) -> str:
         import re
 
-        is_phone = bool(re.match(PHONE_PATTERN, self.login_account))
-        is_email = bool(re.match(EMAIL_PATTERN, self.login_account))
+        is_phone = bool(re.match(PHONE_PATTERN, value))
+        is_email = bool(re.match(EMAIL_PATTERN, value))
         if not is_phone and not is_email:
-            raise ValueError("登录账号必须是手机号或邮箱格式")
-        return self
+            raise PydanticCustomError(
+                "login_account_format",
+                "登录账号必须是手机号或邮箱格式",
+            )
+        return value
 
 
 class UnifiedUserUpdate(ApiModel):
