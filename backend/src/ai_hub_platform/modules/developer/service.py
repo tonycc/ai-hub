@@ -35,10 +35,19 @@ class DeveloperAsset:
 
 ASSETS: tuple[AssetDefinition, ...] = (
     AssetDefinition(
+        "agent-integration",
+        "GUIDE",
+        "Agent integration index",
+        "0.1.0",
+        "docs/agent-integration.md",
+        "text/markdown",
+        "API_CLIENT",
+    ),
+    AssetDefinition(
         "platform-openapi",
         "OPENAPI",
         "Platform API OpenAPI",
-        "0.2.0",
+        "0.2.1",
         "contracts/api/platform-api.openapi.yaml",
         "application/yaml",
         "API_CLIENT",

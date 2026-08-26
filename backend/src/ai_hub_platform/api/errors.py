@@ -45,13 +45,29 @@ def register_error_handlers(application: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, error: RequestValidationError
     ) -> JSONResponse:
+        # Pydantic may embed non-JSON-serializable objects (e.g. ValueError) in
+        # error contexts; coerce them so clients always receive a 422 payload.
+        serializable_errors: list[dict[str, Any]] = []
+        for item in error.errors():
+            cleaned = dict(item)
+            context = cleaned.get("ctx")
+            if isinstance(context, dict):
+                cleaned["ctx"] = {
+                    key: (
+                        str(value)
+                        if not isinstance(value, (str, int, float, bool, type(None)))
+                        else value
+                    )
+                    for key, value in context.items()
+                }
+            serializable_errors.append(cleaned)
         return JSONResponse(
             status_code=422,
             content=error_payload(
                 request,
                 "request_validation_failed",
                 "Request validation failed",
-                {"errors": error.errors()},
+                {"errors": serializable_errors},
             ),
         )
 

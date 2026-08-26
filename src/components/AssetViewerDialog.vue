@@ -51,6 +51,165 @@ function codeLanguage(asset) {
   return 'text'
 }
 
+function resolveRef(doc, ref, seen = new Set()) {
+  if (!ref || typeof ref !== 'string' || !ref.startsWith('#/') || seen.has(ref)) return null
+  seen.add(ref)
+  let node = doc
+  for (const part of ref.slice(2).split('/')) {
+    node = node?.[part]
+    if (node === undefined) return null
+  }
+  if (node?.$ref) return resolveRef(doc, node.$ref, seen)
+  return node
+}
+
+function schemaTypeLabel(doc, schema, seen = new Set()) {
+  if (!schema) return ''
+  if (schema.$ref) {
+    if (seen.has(schema.$ref)) return schema.$ref.split('/').pop() || 'object'
+    seen.add(schema.$ref)
+    const resolved = resolveRef(doc, schema.$ref)
+    if (resolved && resolved !== schema) return schemaTypeLabel(doc, resolved, seen)
+    return schema.$ref.split('/').pop() || 'object'
+  }
+  if (schema.type === 'array') {
+    const itemType = schemaTypeLabel(doc, schema.items, seen)
+    return `array<${itemType || 'any'}>`
+  }
+  if (schema.enum?.length) return `enum(${schema.enum.join('|')})`
+  if (schema.const !== undefined) return `const ${JSON.stringify(schema.const)}`
+  if (Array.isArray(schema.type)) {
+    const types = schema.type.filter((value) => value !== 'null')
+    return types.join('|') + (schema.type.includes('null') ? '?' : '')
+  }
+  if (schema.type && schema.format) return `${schema.type}(${schema.format})`
+  return schema.type || 'object'
+}
+
+function flattenSchemaFields(doc, schema, options = {}) {
+  const { prefix = '', depth = 0, maxDepth = 5, seen = new Set() } = options
+  const fields = []
+  if (!schema || depth > maxDepth) return fields
+
+  let resolved = schema
+  if (schema.$ref) {
+    if (seen.has(schema.$ref)) {
+      fields.push({
+        name: prefix || schema.$ref.split('/').pop(),
+        type: schema.$ref.split('/').pop(),
+        required: false,
+        description: '',
+      })
+      return fields
+    }
+    seen.add(schema.$ref)
+    resolved = resolveRef(doc, schema.$ref)
+    if (!resolved) return fields
+  }
+
+  if (resolved.type === 'array' && resolved.items) {
+    const itemSchema = resolved.items.$ref ? resolveRef(doc, resolved.items.$ref) : resolved.items
+    if (itemSchema?.properties) {
+      const reqSet = new Set(itemSchema.required || [])
+      Object.entries(itemSchema.properties).forEach(([key, propSchema]) => {
+        const fieldName = prefix ? `${prefix}[].${key}` : `[].${key}`
+        fields.push({
+          name: fieldName,
+          type: schemaTypeLabel(doc, propSchema),
+          required: reqSet.has(key),
+          description: (propSchema.$ref ? resolveRef(doc, propSchema.$ref) : propSchema)?.description || '',
+        })
+      })
+      return fields
+    }
+    if (prefix) {
+      fields.push({
+        name: prefix,
+        type: schemaTypeLabel(doc, resolved),
+        required: false,
+        description: resolved.description || '',
+      })
+    }
+    return fields
+  }
+
+  if (resolved.properties) {
+    const reqSet = new Set(resolved.required || [])
+    Object.entries(resolved.properties).forEach(([key, propSchema]) => {
+      const fieldName = prefix ? `${prefix}.${key}` : key
+      const propResolved = propSchema.$ref ? resolveRef(doc, propSchema.$ref) : propSchema
+      const nestedArrayObject =
+        propResolved?.type === 'array' &&
+        (propResolved.items?.properties || propResolved.items?.$ref)
+
+      if (propResolved?.properties || nestedArrayObject) {
+        fields.push(...flattenSchemaFields(doc, propSchema, { prefix: fieldName, depth: depth + 1, maxDepth, seen: new Set(seen) }))
+      } else {
+        fields.push({
+          name: fieldName,
+          type: schemaTypeLabel(doc, propSchema),
+          required: reqSet.has(key),
+          description: propResolved?.description || propSchema.description || '',
+        })
+      }
+    })
+    return fields
+  }
+
+  if (prefix) {
+    fields.push({
+      name: prefix,
+      type: schemaTypeLabel(doc, resolved),
+      required: false,
+      description: resolved.description || '',
+    })
+  }
+  return fields
+}
+
+function resolveParameter(doc, parameter) {
+  const resolved = parameter.$ref ? resolveRef(doc, parameter.$ref) : parameter
+  if (!resolved) return null
+  const schema = resolved.schema?.$ref ? resolveRef(doc, resolved.schema.$ref) : resolved.schema
+  return {
+    name: resolved.name,
+    in: resolved.in,
+    required: Boolean(resolved.required),
+    type: schemaTypeLabel(doc, schema),
+    description: resolved.description || '',
+  }
+}
+
+function extractRequestBody(doc, operation) {
+  const body = operation.requestBody
+  if (!body) return null
+  const schema = body.content?.['application/json']?.schema
+  return {
+    required: Boolean(body.required),
+    description: body.description || '',
+    fields: schema ? flattenSchemaFields(doc, schema) : [],
+  }
+}
+
+function extractResponses(doc, operation) {
+  return Object.entries(operation.responses || {})
+    .map(([status, response]) => {
+      const resolved = response.$ref ? resolveRef(doc, response.$ref) : response
+      const schema = resolved?.content?.['application/json']?.schema
+      return {
+        status,
+        description: resolved?.description || '',
+        fields: schema ? flattenSchemaFields(doc, schema) : [],
+      }
+    })
+    .sort((a, b) => {
+      const na = Number(a.status)
+      const nb = Number(b.status)
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
+      return a.status.localeCompare(b.status)
+    })
+}
+
 function extractOpenapi(doc) {
   const paths = doc?.paths || {}
   const endpoints = []
@@ -58,19 +217,17 @@ function extractOpenapi(doc) {
     METHODS.forEach((method) => {
       const operation = operations?.[method]
       if (!operation) return
+      const responses = extractResponses(doc, operation)
+      const successResponse = responses.find((response) => response.status.startsWith('2'))
       endpoints.push({
         path,
         method: method.toUpperCase(),
-        summary: operation.summary || operation.operationId || '',
+        summary: operation.summary || successResponse?.description || operation.operationId || '',
         description: operation.description || '',
         tags: operation.tags || [],
-        parameters: (operation.parameters || []).map((parameter) => ({
-          name: parameter.name,
-          in: parameter.in,
-          required: Boolean(parameter.required),
-          description: parameter.description || '',
-        })),
-        responses: Object.keys(operation.responses || {}),
+        parameters: (operation.parameters || []).map((parameter) => resolveParameter(doc, parameter)).filter(Boolean),
+        requestBody: extractRequestBody(doc, operation),
+        responses,
       })
     })
   })
@@ -147,15 +304,44 @@ watch(
                   <el-table :data="endpoint.parameters" size="small">
                     <el-table-column prop="name" label="名称" min-width="140" />
                     <el-table-column prop="in" label="位置" width="90" />
+                    <el-table-column prop="type" label="类型" min-width="120" />
                     <el-table-column label="必填" width="70">
                       <template #default="scope">{{ scope.row.required ? '是' : '否' }}</template>
                     </el-table-column>
                     <el-table-column prop="description" label="说明" min-width="200" />
                   </el-table>
                 </div>
-                <div class="endpoint-row">
-                  <span class="endpoint-label">响应码</span>
-                  <code v-for="code in endpoint.responses" :key="code" class="response-code">{{ code }}</code>
+                <div v-if="endpoint.requestBody" class="endpoint-params">
+                  <span class="endpoint-label">请求体</span>
+                  <p v-if="endpoint.requestBody.description" class="schema-note">{{ endpoint.requestBody.description }}</p>
+                  <p class="schema-note">
+                    {{ endpoint.requestBody.required ? '必填' : '可选' }} · application/json
+                  </p>
+                  <el-table v-if="endpoint.requestBody.fields.length" :data="endpoint.requestBody.fields" size="small">
+                    <el-table-column prop="name" label="字段" min-width="160" />
+                    <el-table-column prop="type" label="类型" min-width="120" />
+                    <el-table-column label="必填" width="70">
+                      <template #default="scope">{{ scope.row.required ? '是' : '否' }}</template>
+                    </el-table-column>
+                    <el-table-column prop="description" label="说明" min-width="200" />
+                  </el-table>
+                </div>
+                <div v-if="endpoint.responses.length" class="endpoint-responses">
+                  <span class="endpoint-label">响应</span>
+                  <div v-for="response in endpoint.responses" :key="response.status" class="response-block">
+                    <div class="response-header">
+                      <code class="response-code">{{ response.status }}</code>
+                      <span class="response-description">{{ response.description }}</span>
+                    </div>
+                    <el-table v-if="response.fields.length" :data="response.fields" size="small">
+                      <el-table-column prop="name" label="字段" min-width="160" />
+                      <el-table-column prop="type" label="类型" min-width="120" />
+                      <el-table-column label="必填" width="70">
+                        <template #default="scope">{{ scope.row.required ? '是' : '否' }}</template>
+                      </el-table-column>
+                      <el-table-column prop="description" label="说明" min-width="200" />
+                    </el-table>
+                  </div>
                 </div>
               </div>
             </el-collapse-item>
@@ -182,9 +368,9 @@ watch(
   overflow: auto;
 }
 .endpoint-count {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-gap);
   color: var(--ink-500);
-  font-size: 12px;
+  font-size: var(--font-caption);
 }
 .endpoint-title {
   display: flex;
@@ -202,19 +388,19 @@ watch(
 }
 .endpoint-summary {
   color: var(--ink-500);
-  font-size: 12px;
+  font-size: var(--font-caption);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .endpoint-detail {
   display: grid;
-  gap: 12px;
+  gap: var(--space-gap);
 }
 .endpoint-description {
   margin: 0;
   color: var(--ink-700);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 .endpoint-row {
   display: flex;
@@ -224,18 +410,41 @@ watch(
 }
 .endpoint-label {
   color: var(--ink-500);
-  font-size: 12px;
+  font-size: var(--font-caption);
   min-width: 44px;
 }
-.endpoint-params {
+.endpoint-params,
+.endpoint-responses {
   display: grid;
-  gap: 6px;
+  gap: var(--space-gap);
+}
+.schema-note {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: var(--font-caption);
+}
+.response-block {
+  display: grid;
+  gap: var(--space-gap);
+  padding: var(--space-gap);
+  background: var(--surface-100, #f7f8fb);
+  border-radius: 6px;
+}
+.response-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-gap);
+  flex-wrap: wrap;
 }
 .response-code {
   padding: 2px 8px;
   background: var(--surface-200, #f2f4f8);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--font-caption);
+}
+.response-description {
+  color: var(--ink-700);
+  font-size: var(--font-body);
 }
 .schema-json,
 .code-body {
@@ -244,20 +453,20 @@ watch(
   background: var(--ink-900, #1c2333);
   color: #e6e9f0;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--font-caption);
   line-height: 1.6;
   overflow: auto;
   white-space: pre;
 }
 .viewer-footer-hint {
   color: var(--ink-500);
-  font-size: 12px;
+  font-size: var(--font-caption);
 }
 
 .markdown-body {
   line-height: 1.7;
   color: var(--ink-900);
-  font-size: 14px;
+  font-size: var(--font-body-lg);
 }
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),

@@ -1,5 +1,7 @@
 # AI Hub Python SDK
 
+> Agent 接入索引：[docs/agent-integration.md](../../docs/agent-integration.md)
+
 SDK 只封装公开协议，不包含平台业务实现或平台数据库访问。
 
 当前版本包括：
@@ -9,6 +11,8 @@ SDK 只封装公开协议，不包含平台业务实现或平台数据库访问�
 - 按主体、应用和授权版本隔离的有界授权缓存。
 - `DATA_INGEST` 导出契约辅助：导出页构建、版本单调校验、payload 白名单与导出 scope 检查。
 
-API-only 最小示例由开发者中心的 `api-only-python` 资产提供。它只依赖公开 SDK、OIDC 和平台 API。
+API-only 最小示例由开发者中心的 `api-only-python` 资产提供（`examples/sdk/api_only.py`）。它只依赖公开 SDK、OIDC 和平台 API。
 
-启用 `DATA_INGEST` 时，应用自行实现导出端点与变更日志；SDK 提供契约辅助函数，不隐式创建应用侧持久化对象。
+读取汇聚数据见 `data-read-python`（`examples/sdk/data_read.py`）。
+
+启用 `DATA_INGEST` 时，应用自行实现导出端点与变更日志；SDK 提供契约辅助函数，不隐式创建应用侧持久化对象。本地导出门禁通过后，见 `data-ingest-evidence`（`examples/sdk/data_ingest_evidence.py`）生成认证证据摘要。

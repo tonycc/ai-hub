@@ -1,0 +1,36 @@
+# AI Hub Platform — agent integration index
+
+Read this file first when integrating an independent application with the AI Hub platform.
+
+## Start here
+
+1. docs/agent-integration.md — reading order, decision tree, env vars, checklists
+2. docs/developer-integration-guide.md — human-oriented integration guide (API-only, DATA_INGEST, certification)
+3. contracts/api/platform-api.openapi.yaml — platform public API (v0.2.1+)
+
+## Developer assets (also via API)
+
+Base URL: {PLATFORM}/portal-api/v1/developer/assets/{asset_id}
+
+| asset_id | path |
+| --- | --- |
+| agent-integration | docs/agent-integration.md |
+| integration-guide | docs/developer-integration-guide.md |
+| platform-openapi | contracts/api/platform-api.openapi.yaml |
+| api-only-python | examples/sdk/api_only.py |
+| data-read-python | examples/sdk/data_read.py |
+| data-ingest-evidence | examples/sdk/data_ingest_evidence.py |
+
+Catalog: GET {PLATFORM}/portal-api/v1/developer/catalog
+
+## App-side export (NOT in platform OpenAPI)
+
+DATA_INGEST apps must implement:
+
+GET {app}/ai-hub/export?object_type=&since_version=&limit=
+
+Scope: ai_hub.ingest.export. Schema: sdk/python/src/ai_hub_sdk/export.py (ExportPage).
+
+## Manual steps (cannot be automated via API)
+
+Application registration, client_secret issuance, and conformance runs in the portal governance UI.

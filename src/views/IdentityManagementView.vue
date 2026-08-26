@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import ApiState from '../components/ApiState.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
-import { apiRequest, queryString } from '../services/platformApi'
+import { apiRequest, formatApiError, queryString } from '../services/platformApi'
 import { usePortalSession } from '../stores/session'
 
 const session = usePortalSession()
@@ -24,8 +24,10 @@ const userVisible = ref(false)
 const orgVisible = ref(false)
 const positionVisible = ref(false)
 const userPositionVisible = ref(false)
+const passwordVisible = ref(false)
 const saving = ref(false)
 const editingUser = ref(null)
+const passwordUser = ref(null)
 const editingOrg = ref(null)
 const editingPosition = ref(null)
 const selectedUser = ref(null)
@@ -42,7 +44,23 @@ const userForm = reactive({
 const orgForm = reactive({ organization_id: '', name: '', parent_organization_id: null, status: 'ACTIVE' })
 const positionForm = reactive({ position_code: '', name: '', description: '' })
 const userPositionForm = reactive({ organization_id: '', position_code: '', is_primary: false })
+const passwordForm = reactive({ password: '' })
 const canWrite = computed(() => session.hasPermission('platform.identity.write'))
+
+const PHONE_PATTERN = /^1[3-9]\d{9}$/
+const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+
+function validateUserForm() {
+  if (!userForm.user_name?.trim()) return '请填写用户姓名'
+  if (!userForm.organization_id) return '请选择所属组织'
+  if (!editingUser.value) {
+    if (!PHONE_PATTERN.test(userForm.login_account) && !EMAIL_PATTERN.test(userForm.login_account)) {
+      return '登录账号必须是手机号或邮箱格式'
+    }
+    if (!userForm.password || userForm.password.length < 8) return '初始密码至少需要 8 位'
+  }
+  return null
+}
 
 // 业务用户 = 无平台角色的用户
 const businessUsers = computed(() => users.value.filter((user) => user.platform_roles.length === 0))
@@ -113,6 +131,11 @@ function openUser(row = null) {
 }
 
 async function saveUser() {
+  const validationError = validateUserForm()
+  if (validationError) {
+    ElMessage.warning(validationError)
+    return
+  }
   saving.value = true
   try {
     if (editingUser.value) {
@@ -123,7 +146,6 @@ async function saveUser() {
         status: userForm.status,
         is_active: userForm.status === 'ACTIVE',
       }
-      if (userForm.password) body.password = userForm.password
       await apiRequest(`unified-users/${editingUser.value.user_id}`, { method: 'PUT', body })
       // 更新职位：职位或组织变化时写入；显式清空时删除原主职位，否则页面
       // 提示成功但旧职位仍保留。
@@ -162,8 +184,34 @@ async function saveUser() {
     userVisible.value = false
     await loadAll()
   } catch (caught) {
-    ElMessage.error(caught.message)
+    ElMessage.error(formatApiError(caught))
   } finally { saving.value = false }
+}
+
+function openPassword(row) {
+  passwordUser.value = row
+  passwordForm.password = ''
+  passwordVisible.value = true
+}
+
+async function savePassword() {
+  if (!passwordForm.password || passwordForm.password.length < 8) {
+    ElMessage.warning('新密码至少需要 8 位')
+    return
+  }
+  saving.value = true
+  try {
+    await apiRequest(`unified-users/${passwordUser.value.user_id}`, {
+      method: 'PUT',
+      body: { password: passwordForm.password },
+    })
+    passwordVisible.value = false
+    ElMessage.success('密码已重置')
+  } catch (caught) {
+    ElMessage.error(formatApiError(caught))
+  } finally {
+    saving.value = false
+  }
 }
 
 function openOrg(row = null) {
@@ -310,9 +358,10 @@ onMounted(loadAll)
           <el-table-column prop="status" label="状态" width="90">
             <template #default="scope"><StatusTag :status="scope.row.status" /></template>
           </el-table-column>
-          <el-table-column v-if="canWrite" label="操作" width="150" fixed="right">
+          <el-table-column v-if="canWrite" label="操作" width="220" fixed="right">
             <template #default="scope">
               <el-button type="primary" link @click="openUser(scope.row)">编辑</el-button>
+              <el-button type="primary" link @click="openPassword(scope.row)">重置密码</el-button>
               <el-button type="primary" link @click="openUserPosition(scope.row)">分配职位</el-button>
             </template>
           </el-table-column>
@@ -404,6 +453,24 @@ onMounted(loadAll)
       <template #footer>
         <el-button @click="userVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveUser">保存</el-button>
+      </template>
+    </el-drawer>
+
+    <el-drawer v-model="passwordVisible" title="重置密码" size="min(480px, 96vw)">
+      <el-form label-position="top">
+        <el-form-item label="用户">
+          <el-input :model-value="passwordUser?.display_name" disabled />
+        </el-form-item>
+        <el-form-item label="登录账号">
+          <el-input :model-value="passwordUser?.subject" disabled />
+        </el-form-item>
+        <el-form-item label="新密码" required>
+          <el-input v-model="passwordForm.password" type="password" show-password placeholder="至少8位" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="passwordVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="savePassword">重置</el-button>
       </template>
     </el-drawer>
 
