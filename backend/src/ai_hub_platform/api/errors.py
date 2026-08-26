@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -52,14 +52,14 @@ def register_error_handlers(application: FastAPI) -> None:
             cleaned = dict(item)
             context = cleaned.get("ctx")
             if isinstance(context, dict):
-                cleaned["ctx"] = {
-                    key: (
-                        str(value)
-                        if not isinstance(value, (str, int, float, bool, type(None)))
-                        else value
-                    )
-                    for key, value in context.items()
-                }
+                typed_context = cast(dict[str, Any], context)
+                safe_ctx: dict[str, Any] = {}
+                for key, value in typed_context.items():
+                    if isinstance(value, (str, int, float, bool, type(None))):
+                        safe_ctx[key] = value
+                    else:
+                        safe_ctx[key] = str(value)
+                cleaned["ctx"] = safe_ctx
             serializable_errors.append(cleaned)
         return JSONResponse(
             status_code=422,
