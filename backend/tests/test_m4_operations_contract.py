@@ -147,6 +147,11 @@ def test_production_runtime_env_never_serves_localhost_launch_urls() -> None:
     # The blueprint reads the value instead of hardcoding the callback as the
     # launch URL.
     assert "STANDALONE_PORTAL_URL" in blueprint
+    # The brand logo/favicon must resolve to the portal in production so the
+    # login page never serves authentik's default branding assets.
+    assert "AI_HUB_BRAND_ICON_URL=https://${PLATFORM_HOST}/ai-hub-icon.svg" in generator
+    assert "AI_HUB_BRAND_ICON_URL: ${AI_HUB_BRAND_ICON_URL" in compose
+    assert "branding_logo: !Env [AI_HUB_BRAND_ICON_URL" in blueprint
 
 
 def test_sandbox_configuration_uses_dedicated_provider_identity() -> None:
