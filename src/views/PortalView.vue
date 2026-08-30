@@ -99,6 +99,7 @@ const platformEntries = [
   { name: '权限与安全', description: '管理角色、权限点、权限范围和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84', permission: 'platform.authorization.read' },
   { name: '开发者中心', description: '接入文档、契约、示例与沙箱参数', path: '/platform/developer', icon: 'Tools', color: '#826846', permission: 'platform.developer.read' },
   { name: '运维中心', description: '应用入口、数据来源和同步新鲜度诊断', path: '/platform/operations', icon: 'Monitor', color: '#4a7a8c', permission: 'platform.operations.read' },
+  { name: '数据接入', description: '来源、契约、认证与推送接入', path: '/platform/ingest', icon: 'Coin', color: '#416f86', permission: 'platform.ingest.read' },
   { name: '平台配置', description: '只读生产目标、保留策略与责任路由', path: '/platform/settings', icon: 'Setting', color: '#6b7a8c', permission: 'platform.operations.read' },
 ]
 const visiblePlatformEntries = computed(() => platformEntries.filter((entry) => session.hasPermission(entry.permission)))

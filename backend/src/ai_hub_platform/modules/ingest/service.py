@@ -13,12 +13,18 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_hub_platform.modules.ingest.source_lock import lock_ingest_source
+
 SyncMode = Literal["full", "incremental"]
 Operation = Literal["upsert", "delete"]
 
 
 class IngestValidationError(ValueError):
     pass
+
+
+class IngestRecordConflictError(IngestValidationError):
+    error_code = "record_version_conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +112,14 @@ class IngestService:
         high_watermark: int,
         payload_contract_version: str,
         from_version: int | None = None,
+        transport_mode: Literal["PULL_EXPORT", "PUSH_AGENT"] = "PULL_EXPORT",
+        external_batch_id: str | None = None,
+        generation_id: UUID | None = None,
+        content_sha256: str | None = None,
+        schema_fingerprint: str | None = None,
+        audit_summary: Mapping[str, Any] | None = None,
+        apply_current_state: bool = True,
+        purpose: Literal["production", "certification"] = "production",
     ) -> LoadBatchResult:
         if not source_application_id.strip():
             raise IngestValidationError("source_application_id cannot be empty")
@@ -115,8 +129,51 @@ class IngestService:
             raise IngestValidationError("sync_mode must be full or incremental")
         if not payload_contract_version.strip():
             raise IngestValidationError("payload_contract_version cannot be empty")
+        if purpose not in {"production", "certification"}:
+            raise IngestValidationError("purpose must be production or certification")
+        await lock_ingest_source(session, source_application_id, object_type)
         validate_ingest_records(records, high_watermark=high_watermark)
 
+        async with session.begin_nested():
+            return await self._commit_loaded_batch(
+                session,
+                source_application_id=source_application_id,
+                object_type=object_type,
+                sync_mode=sync_mode,
+                records=records,
+                high_watermark=high_watermark,
+                payload_contract_version=payload_contract_version,
+                from_version=from_version,
+                transport_mode=transport_mode,
+                external_batch_id=external_batch_id,
+                generation_id=generation_id,
+                content_sha256=content_sha256,
+                schema_fingerprint=schema_fingerprint,
+                audit_summary=audit_summary,
+                apply_current_state=apply_current_state,
+                purpose=purpose,
+            )
+
+    async def _commit_loaded_batch(
+        self,
+        session: AsyncSession,
+        *,
+        source_application_id: str,
+        object_type: str,
+        sync_mode: SyncMode,
+        records: Sequence[IngestRecord],
+        high_watermark: int,
+        payload_contract_version: str,
+        from_version: int | None,
+        transport_mode: Literal["PULL_EXPORT", "PUSH_AGENT"],
+        external_batch_id: str | None,
+        generation_id: UUID | None,
+        content_sha256: str | None,
+        schema_fingerprint: str | None,
+        audit_summary: Mapping[str, Any] | None,
+        apply_current_state: bool,
+        purpose: Literal["production", "certification"],
+    ) -> LoadBatchResult:
         batch_id = uuid4()
         started_at = datetime.now(UTC)
         await session.execute(
@@ -124,10 +181,15 @@ class IngestService:
                 """
                 INSERT INTO platform_raw.raw_ingest_batch (
                     batch_id, source_application_id, object_type, sync_mode,
-                    from_version, to_version, record_count, status, started_at
+                    from_version, to_version, record_count, status, started_at,
+                    transport_mode, external_batch_id, generation_id,
+                    content_sha256, schema_fingerprint, audit_summary, purpose
                 ) VALUES (
                     :batch_id, :source_application_id, :object_type, :sync_mode,
-                    :from_version, :to_version, :record_count, 'running', :started_at
+                    :from_version, :to_version, :record_count, 'running', :started_at,
+                    :transport_mode, :external_batch_id, :generation_id,
+                    :content_sha256, :schema_fingerprint, CAST(:audit_summary AS jsonb),
+                    :purpose
                 )
                 """
             ),
@@ -140,6 +202,15 @@ class IngestService:
                 "to_version": high_watermark,
                 "record_count": len(records),
                 "started_at": started_at,
+                "transport_mode": transport_mode,
+                "external_batch_id": external_batch_id,
+                "generation_id": generation_id,
+                "content_sha256": content_sha256,
+                "schema_fingerprint": schema_fingerprint,
+                "audit_summary": (
+                    None if audit_summary is None else json.dumps(dict(audit_summary))
+                ),
+                "purpose": purpose,
             },
         )
 
@@ -155,11 +226,14 @@ class IngestService:
                 object_type=object_type,
                 record=record,
                 payload_contract_version=payload_contract_version,
+                purpose=purpose,
             )
             if inserted:
                 accepted += 1
             else:
                 skipped += 1
+            if not apply_current_state:
+                continue
             applied = await self._apply_current_state(
                 session,
                 source_application_id=source_application_id,
@@ -174,7 +248,7 @@ class IngestService:
                 deletes += 1
 
         tombstones = 0
-        if sync_mode == "full":
+        if sync_mode == "full" and apply_current_state:
             tombstones = await self._synthesize_full_tombstones(
                 session,
                 batch_id=batch_id,
@@ -183,6 +257,7 @@ class IngestService:
                 exported_object_ids={record.object_id for record in records},
                 high_watermark=high_watermark,
                 payload_contract_version=payload_contract_version,
+                purpose=purpose,
             )
             deletes += tombstones
 
@@ -326,6 +401,7 @@ class IngestService:
         object_type: str,
         record: IngestRecord,
         payload_contract_version: str,
+        purpose: Literal["production", "certification"],
     ) -> bool:
         payload = dict(record.payload) if record.payload is not None else None
         result = await session.execute(
@@ -333,13 +409,16 @@ class IngestService:
                 """
                 INSERT INTO platform_raw.raw_change_record (
                     batch_id, source_application_id, object_type, object_id,
-                    operation, version, payload, payload_contract_version, content_hash
+                    operation, version, payload, payload_contract_version, content_hash,
+                    purpose
                 ) VALUES (
                     :batch_id, :source_application_id, :object_type, :object_id,
                     :operation, :version, CAST(:payload AS jsonb),
-                    :payload_contract_version, :content_hash
+                    :payload_contract_version, :content_hash, :purpose
                 )
-                ON CONFLICT (source_application_id, object_type, object_id, version)
+                ON CONFLICT (
+                    source_application_id, object_type, object_id, version
+                )
                 DO NOTHING
                 RETURNING id
                 """
@@ -354,9 +433,49 @@ class IngestService:
                 "payload": None if payload is None else json.dumps(payload, ensure_ascii=True),
                 "payload_contract_version": payload_contract_version,
                 "content_hash": payload_content_hash(payload),
+                "purpose": purpose,
             },
         )
-        return result.scalar_one_or_none() is not None
+        inserted_id = result.scalar_one_or_none()
+        if inserted_id is not None:
+            return True
+        existing = await session.execute(
+            text(
+                """
+                SELECT operation, content_hash, purpose
+                FROM platform_raw.raw_change_record
+                WHERE source_application_id = :source_application_id
+                  AND object_type = :object_type
+                  AND object_id = :object_id
+                  AND version = :version
+                """
+            ),
+            {
+                "source_application_id": source_application_id,
+                "object_type": object_type,
+                "object_id": record.object_id,
+                "version": record.version,
+            },
+        )
+        row = existing.one()
+        existing_purpose = (
+            "production" if row.purpose is None else str(row.purpose)
+        )
+        if existing_purpose != purpose:
+            raise IngestRecordConflictError(
+                f"object_id/version already exists with a different purpose: "
+                f"{record.object_id}@{record.version}"
+            )
+        incoming_hash = payload_content_hash(payload)
+        if (
+            str(row.operation) == record.operation
+            and str(row.content_hash) == incoming_hash
+        ):
+            return False
+        raise IngestRecordConflictError(
+            f"object_id/version already exists with different content: "
+            f"{record.object_id}@{record.version}"
+        )
 
     async def _apply_current_state(
         self,
@@ -450,6 +569,7 @@ class IngestService:
         exported_object_ids: set[str],
         high_watermark: int,
         payload_contract_version: str,
+        purpose: Literal["production", "certification"],
     ) -> int:
         result = await session.execute(
             text(
@@ -485,6 +605,7 @@ class IngestService:
                 object_type=object_type,
                 record=record,
                 payload_contract_version=payload_contract_version,
+                purpose=purpose,
             )
             # Full snapshot absence is authoritative: bypass version compare.
             await self._apply_current_state(

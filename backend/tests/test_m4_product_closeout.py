@@ -21,6 +21,10 @@ def test_platform_settings_use_the_authoritative_read_only_api() -> None:
     assert "path: 'platform/settings'" in router
     assert "PlatformSettingsView.vue" in router
     assert "'/platform/settings': 'platform.operations.read'" in layout
+    assert "'/platform/ingest': 'platform.ingest.read'" in layout
+    portal = _source("src/views/PortalView.vue")
+    assert "permission: 'platform.ingest.read'" in portal
+    assert "path: '/platform/ingest'" in portal
     assert "apiRequest('operations/targets')" in settings
     assert "只读 · 配置即代码" in settings
     assert "method: 'POST'" not in settings

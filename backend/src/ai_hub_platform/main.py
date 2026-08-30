@@ -20,6 +20,8 @@ from ai_hub_platform.api.governance import router as governance_router
 from ai_hub_platform.api.health import internal_router
 from ai_hub_platform.api.health import router as health_router
 from ai_hub_platform.api.ingest import router as ingest_router
+from ai_hub_platform.api.ingest_contracts import router as ingest_contracts_router
+from ai_hub_platform.api.ingest_push import router as ingest_push_router
 from ai_hub_platform.api.notification_management import (
     router as notification_management_router,
 )
@@ -35,6 +37,7 @@ from ai_hub_platform.modules.app_management.bootstrap import (
 from ai_hub_platform.modules.governance.version_sync import (
     start_authorization_version_reconciler,
 )
+from ai_hub_platform.modules.ingest.generation_sql import start_push_lease_reaper
 from ai_hub_platform.modules.permission.service import PermissionService
 from ai_hub_platform.operations.targets import load_production_targets
 from ai_hub_platform.shared.database import Database
@@ -118,7 +121,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version_sync_task = start_authorization_version_reconciler(
             database, authentik_admin_client
         )
+        push_lease_reaper = start_push_lease_reaper(app.state.raw_sessions)
         yield
+        push_lease_reaper.cancel()
         version_sync_task.cancel()
         reconciliation_task.cancel()
         await raw_engine.dispose()
@@ -159,6 +164,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(conformance_router)
     application.include_router(operations_router)
     application.include_router(ingest_router)
+    application.include_router(ingest_contracts_router)
+    application.include_router(ingest_push_router)
     return application
 
 

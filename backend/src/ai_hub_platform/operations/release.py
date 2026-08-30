@@ -62,6 +62,17 @@ DESTRUCTIVE_SQL = re.compile(
     r"\b(?:DROP\s+(?:TABLE|COLUMN|INDEX|CONSTRAINT)|TRUNCATE|DELETE\s+FROM)\b",
     re.IGNORECASE,
 )
+LIVE_DATA_CONDITION_CREDENTIALS = "no_environment_has_multiple_credential_rows"
+LIVE_DATA_CONDITION_NO_PUSH_SOURCES = "no_push_ingest_sources"
+LIVE_DATA_CONDITION_NO_ENFORCE_PULL = "no_enforce_pull_ingest_sources"
+KNOWN_LIVE_DATA_CONDITIONS = frozenset(
+    {
+        LIVE_DATA_CONDITION_CREDENTIALS,
+        LIVE_DATA_CONDITION_NO_PUSH_SOURCES,
+        LIVE_DATA_CONDITION_NO_ENFORCE_PULL,
+    }
+)
+DEFAULT_LIVE_DATA_CONDITIONS = (LIVE_DATA_CONDITION_CREDENTIALS,)
 
 
 class ReleaseError(RuntimeError):
@@ -607,6 +618,18 @@ def validate_release_manifest(
         raise ReleaseError("Release manifest lacks the previous approved manifest digest")
     if not isinstance(rollback.get("live_data_check_required"), bool):
         raise ReleaseError("Release manifest lacks the rollback live-data policy")
+    parse_live_data_conditions(rollback.get("live_data_condition"))
+    derived_schema_compatible = all(
+        bool(
+            cast(dict[str, Any], migrations[component])["rollback_schema_compatible"]
+        )
+        for component in MIGRATION_COMPONENTS
+    )
+    if rollback.get("schema_compatible") is not derived_schema_compatible:
+        raise ReleaseError(
+            "rollback.schema_compatible must equal all "
+            "migrations.*.rollback_schema_compatible"
+        )
     if production and source.get("dirty") is not False:
         raise ReleaseError("Production release manifests cannot be created from a dirty tree")
     if manifest.get("status") in {"APPROVED", "DEPLOYED"} and not rollback.get(
@@ -740,6 +763,9 @@ def create_release_manifest(
     commit, dirty = _git_source(project_root)
     if environment == "production" and dirty:
         raise ReleaseError("Production release manifest cannot be created from a dirty tree")
+    schema_compatible = all(
+        transition.rollback_schema_compatible for transition in transitions.values()
+    )
     manifest: dict[str, Any] = {
         "$schema": "../operations/release-manifest.schema.json",
         "schema_version": RELEASE_SCHEMA_VERSION,
@@ -780,11 +806,11 @@ def create_release_manifest(
             "previous_release_id": previous_manifest["release_id"],
             "previous_manifest": str(previous_manifest_path.resolve()),
             "previous_manifest_sha256": _sha256_text(previous_manifest_path),
-            "schema_compatible": all(
-                transition.rollback_schema_compatible for transition in transitions.values()
-            ),
+            "schema_compatible": schema_compatible,
             "live_data_check_required": True,
-            "live_data_condition": "no_environment_has_multiple_credential_rows",
+            "live_data_condition": format_live_data_condition(
+                live_data_conditions_for_rollback(schema_compatible=schema_compatible)
+            ),
         },
     }
     validate_release_manifest(manifest)
@@ -872,8 +898,65 @@ def live_migration_heads(target: ReleaseTarget) -> dict[str, str]:
     return heads
 
 
-def assert_live_rollback_compatible(target: ReleaseTarget) -> None:
-    duplicate_count = _psql_scalar(
+def parse_live_data_conditions(value: object) -> tuple[str, ...]:
+    if not isinstance(value, str) or not value.strip():
+        raise ReleaseError("Release manifest rollback.live_data_condition is required")
+    parsed: list[str] = []
+    for part in value.split(";"):
+        condition = part.strip()
+        if not condition:
+            continue
+        if condition not in KNOWN_LIVE_DATA_CONDITIONS:
+            raise ReleaseError(f"Unknown rollback live-data condition: {condition}")
+        if condition not in parsed:
+            parsed.append(condition)
+    if not parsed:
+        raise ReleaseError("Release manifest rollback.live_data_condition is empty")
+    if LIVE_DATA_CONDITION_CREDENTIALS not in parsed:
+        raise ReleaseError(
+            "rollback.live_data_condition must include "
+            f"{LIVE_DATA_CONDITION_CREDENTIALS}"
+        )
+    return tuple(parsed)
+
+
+def live_data_conditions_for_rollback(*, schema_compatible: bool) -> tuple[str, ...]:
+    if schema_compatible:
+        return DEFAULT_LIVE_DATA_CONDITIONS
+    return (
+        *DEFAULT_LIVE_DATA_CONDITIONS,
+        LIVE_DATA_CONDITION_NO_PUSH_SOURCES,
+        LIVE_DATA_CONDITION_NO_ENFORCE_PULL,
+    )
+
+
+def format_live_data_condition(
+    conditions: Sequence[str] = DEFAULT_LIVE_DATA_CONDITIONS,
+) -> str:
+    return ";".join(conditions)
+
+
+def assert_image_rollback_declared(
+    *, schema_compatible: bool, conditions: Sequence[str]
+) -> None:
+    if schema_compatible:
+        return
+    if LIVE_DATA_CONDITION_NO_PUSH_SOURCES not in conditions:
+        raise ReleaseError("Release lacks a schema-compatible image rollback path")
+    if LIVE_DATA_CONDITION_NO_ENFORCE_PULL not in conditions:
+        raise ReleaseError("Release lacks a schema-compatible image rollback path")
+
+
+def _psql_count(target: ReleaseTarget, sql: str, *, error: str) -> int:
+    raw = _psql_scalar(target, sql)
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ReleaseError(error) from exc
+
+
+def _assert_no_multi_version_credentials(target: ReleaseTarget) -> None:
+    duplicates = _psql_count(
         target,
         """
         SELECT COUNT(*)
@@ -884,16 +967,91 @@ def assert_live_rollback_compatible(target: ReleaseTarget) -> None:
             HAVING COUNT(*) > 1
         ) AS multi_version_environment;
         """,
+        error="Cannot evaluate the credential rollback data condition",
     )
-    try:
-        duplicates = int(duplicate_count)
-    except ValueError as error:
-        raise ReleaseError("Cannot evaluate the credential rollback data condition") from error
     if duplicates:
         raise ReleaseError(
             "Rollback to the previous image is forbidden after credential multi-version state "
             "exists; use a forward fix or the verified restore procedure"
         )
+
+
+_PUSH_COLUMN_EXISTS_SQL = """
+SELECT COUNT(*)
+FROM information_schema.columns
+WHERE table_schema = 'platform_core'
+  AND table_name = 'ingest_source'
+  AND column_name = 'transport_mode';
+"""
+
+_PUSH_SOURCE_COUNT_SQL = """
+SELECT COUNT(*)
+FROM platform_core.ingest_source
+WHERE transport_mode = 'PUSH_AGENT';
+"""
+
+_ENFORCE_PULL_COUNT_SQL = """
+SELECT COUNT(*)
+FROM platform_core.ingest_source
+WHERE transport_mode = 'PULL_EXPORT'
+  AND contract_validation_mode = 'ENFORCE';
+"""
+
+
+def _assert_no_push_ingest_sources(target: ReleaseTarget) -> None:
+    # Two statements: PostgreSQL type-checks every subquery in a statement, so a
+    # single query that names ingest_source fails on databases that predate 0020.
+    column_exists = _psql_count(
+        target,
+        _PUSH_COLUMN_EXISTS_SQL,
+        error="Cannot evaluate the push-ingest rollback data condition",
+    )
+    if not column_exists:
+        return
+    push_count = _psql_count(
+        target,
+        _PUSH_SOURCE_COUNT_SQL,
+        error="Cannot evaluate the push-ingest rollback data condition",
+    )
+    if push_count:
+        raise ReleaseError(
+            "Image rollback is forbidden while PUSH_AGENT ingest sources exist; "
+            "delete or convert those sources, or use a forward fix"
+        )
+
+
+def _assert_no_enforce_pull_ingest_sources(target: ReleaseTarget) -> None:
+    column_exists = _psql_count(
+        target,
+        _PUSH_COLUMN_EXISTS_SQL,
+        error="Cannot evaluate the Pull ENFORCE rollback data condition",
+    )
+    if not column_exists:
+        return
+    enforce_count = _psql_count(
+        target,
+        _ENFORCE_PULL_COUNT_SQL,
+        error="Cannot evaluate the Pull ENFORCE rollback data condition",
+    )
+    if enforce_count:
+        raise ReleaseError(
+            "Image rollback is forbidden while Pull ENFORCE ingest sources exist "
+            "(including disabled rows); revert them to AUDIT_ONLY, or use a forward fix"
+        )
+
+
+def assert_live_rollback_compatible(
+    target: ReleaseTarget, conditions: Sequence[str]
+) -> None:
+    for condition in conditions:
+        if condition == LIVE_DATA_CONDITION_CREDENTIALS:
+            _assert_no_multi_version_credentials(target)
+        elif condition == LIVE_DATA_CONDITION_NO_PUSH_SOURCES:
+            _assert_no_push_ingest_sources(target)
+        elif condition == LIVE_DATA_CONDITION_NO_ENFORCE_PULL:
+            _assert_no_enforce_pull_ingest_sources(target)
+        else:
+            raise ReleaseError(f"Unknown rollback live-data condition: {condition}")
 
 
 def release_preflight(
@@ -937,9 +1095,13 @@ def release_preflight(
             raise ReleaseError(
                 f"Live {component} migration head is outside the approved transition"
             )
-    if _expect_object(manifest, "rollback").get("schema_compatible") is not True:
-        raise ReleaseError("Release lacks a schema-compatible image rollback path")
-    assert_live_rollback_compatible(target)
+    rollback = _expect_object(manifest, "rollback")
+    live_conditions = parse_live_data_conditions(rollback.get("live_data_condition"))
+    assert_image_rollback_declared(
+        schema_compatible=rollback.get("schema_compatible") is True,
+        conditions=live_conditions,
+    )
+    assert_live_rollback_compatible(target, live_conditions)
     production = _expect_object(manifest, "deployment")["environment"] == "production"
     for reference in _expect_object(manifest, "images").values():
         _ensure_release_image(str(reference), production=production)
@@ -1102,8 +1264,11 @@ def rollback_release(
     validate_release_manifest(current)
     _assert_target_matches_manifest(target, current)
     rollback = _expect_object(current, "rollback")
-    if rollback.get("schema_compatible") is not True:
-        raise ReleaseError("Manifest does not permit image rollback on the expanded schema")
+    live_conditions = parse_live_data_conditions(rollback.get("live_data_condition"))
+    assert_image_rollback_declared(
+        schema_compatible=rollback.get("schema_compatible") is True,
+        conditions=live_conditions,
+    )
     previous_path = Path(str(rollback.get("previous_manifest", "")))
     if not previous_path.is_file():
         raise ReleaseError("Previous approved release manifest is unavailable")
@@ -1125,7 +1290,7 @@ def rollback_release(
             raise ReleaseError(
                 f"Live {component} migration head is outside the rollback transition"
             )
-    assert_live_rollback_compatible(target)
+    assert_live_rollback_compatible(target, live_conditions)
     environment = _release_environment(previous)
     production = _expect_object(previous, "deployment")["environment"] == "production"
     for reference in _expect_object(previous, "images").values():

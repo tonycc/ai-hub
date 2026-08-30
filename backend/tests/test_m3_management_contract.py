@@ -68,6 +68,20 @@ def test_m3_management_openapi_exposes_required_server_authorized_resources() ->
         "/portal-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}/history": {
             "get"
         },
+        "/portal-api/v1/ingest/contracts": {"get", "put"},
+        "/portal-api/v1/ingest/contracts/activate": {"post"},
+        "/portal-api/v1/ingest/contracts/reject": {"post"},
+        "/portal-api/v1/ingest/contracts/certifications": {"get", "post"},
+        "/portal-api/v1/ingest/contracts/certifications/{certification_id}/approve": {
+            "post"
+        },
+        "/platform-api/v1/ingest/push/capabilities": {"get"},
+        "/platform-api/v1/ingest/push/generations": {"post"},
+        "/platform-api/v1/ingest/push/generations/{generation_id}": {"get"},
+        "/platform-api/v1/ingest/push/generations/{generation_id}/heartbeat": {"post"},
+        "/platform-api/v1/ingest/push/generations/{generation_id}/batches": {"post"},
+        "/platform-api/v1/ingest/push/generations/{generation_id}/complete": {"post"},
+        "/platform-api/v1/ingest/push/generations/{generation_id}/abort": {"post"},
     }
     for path, methods in expected_methods.items():
         assert path in paths

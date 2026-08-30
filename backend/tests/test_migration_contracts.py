@@ -56,7 +56,50 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "ck_conformance_check_profile" in sql
     assert "profile IN ('API_ONLY', 'DATA_INGEST')" in sql
     assert "profile IN ('DATA_INGEST')" in sql
-    assert "20260816_core_0009" in sql
+    assert "CREATE TABLE platform_core.ingest_contract" in sql
+    assert "CREATE TABLE platform_core.ingest_contract_certification" in sql
+    assert "GRANT SELECT ON platform_core.ingest_contract TO ai_hub_raw" in sql
+    assert "ai_hub.ingest.push" in sql
+    assert "ck_ingest_source_transport_fields" in sql
+    assert "20260829_core_0020" in sql
+    assert "20260829_core_0021" in sql
+    assert "20260830_core_0022" in sql
+    assert "20260830_core_0023" in sql
+    assert "20260830_core_0024" in sql
+    assert "PLATFORM_INGEST_OPERATOR" in sql
+    assert "platform.ingest.certify.data_owner" in sql
+    assert "platform.ingest.certify.operator" in sql
+    assert "push_staging_retention_hours" in sql
+    core_0020 = (
+        BACKEND_ROOT / "migrations/versions/core/20260829_core_0020.py"
+    ).read_text()
+    assert "DELETE FROM platform_core.ingest_source" in core_0020
+    assert "transport_mode = 'PUSH_AGENT'" in core_0020
+    assert "rollback_compatible_with =" not in core_0020
+    core_0021 = (
+        BACKEND_ROOT / "migrations/versions/core/20260829_core_0021.py"
+    ).read_text()
+    assert "push_staging_retention_hours" in core_0021
+    assert 'rollback_compatible_with = {"20260829_core_0020"}' in core_0021
+    core_0022 = (
+        BACKEND_ROOT / "migrations/versions/core/20260830_core_0022.py"
+    ).read_text()
+    assert "full_regression_evidence_ref" in core_0022
+    assert 'rollback_compatible_with = {"20260829_core_0021"}' in core_0022
+    core_0023 = (
+        BACKEND_ROOT / "migrations/versions/core/20260830_core_0023.py"
+    ).read_text()
+    assert "PLATFORM_INGEST_OPERATOR" in core_0023
+    assert "platform.ingest.certify.operator" in core_0023
+    assert "ai-hub-platform-ingest-operator" in core_0023
+    assert 'rollback_compatible_with = {"20260830_core_0022"}' in core_0023
+    core_0024 = (
+        BACKEND_ROOT / "migrations/versions/core/20260830_core_0024.py"
+    ).read_text()
+    assert "transport_mode" in core_0024
+    assert "ck_ingest_contract_certification_transport_mode" in core_0024
+    assert 'rollback_compatible_with = {"20260830_core_0023"}' in core_0024
+    assert "FROM platform_core.ingest_source" not in core_0024
 
 
 def test_platform_raw_migration_establishes_ingest_tables_without_core_objects() -> None:
@@ -72,7 +115,36 @@ def test_platform_raw_migration_establishes_ingest_tables_without_core_objects()
     assert "platform_core" not in sql
     assert "platform_projection" not in sql
     assert "integration_outbox" not in sql
-    assert "REVOKE ALL ON platform_raw.alembic_version FROM ai_hub_platform, ai_hub_raw" in sql
+    assert "CREATE TABLE platform_raw.raw_push_generation" in sql
+    assert "CREATE TABLE platform_raw.raw_push_staging" in sql
+    assert "CREATE TABLE platform_raw.raw_push_batch_receipt" in sql
+    assert "CREATE TABLE platform_raw.raw_push_committed_watermark" in sql
+    assert "CREATE TABLE platform_raw.raw_push_generation_transition" in sql
+    assert "ix_raw_push_generation_client_lease" in sql
+    assert "ix_raw_push_generation_worker_lease" in sql
+    assert "20260830_raw_0003" in sql
+    assert "20260830_raw_0004" in sql
+    assert "20260830_raw_0005" in sql
+    assert "20260830_raw_0006" in sql
+    raw_0006 = (BACKEND_ROOT / "migrations/versions/raw/20260830_raw_0006.py").read_text()
+    upgrade = raw_0006.split("def upgrade", 1)[1].split("def downgrade", 1)[0]
+    assert "uq_raw_change_record_idempotent" not in upgrade
+    assert "purpose" in sql
+    assert "audit_summary" in sql
+    assert "request_id" in sql
+    assert "completion_request" in sql
+    assert "uq_raw_push_generation_one_active" in sql
+    assert "uq_raw_ingest_batch_external_id" in sql
+    assert "uq_raw_change_record_idempotent" in sql
+    assert "transport_mode" in sql
+
+
+def test_certification_transport_mode_is_not_backfilled_from_source() -> None:
+    core_0024 = (
+        BACKEND_ROOT / "migrations/versions/core/20260830_core_0024.py"
+    ).read_text()
+    assert "FROM platform_core.ingest_source" not in core_0024
+    assert 'server_default="PULL_EXPORT"' in core_0024
 
 
 def test_retired_event_and_projection_migration_configs_are_gone() -> None:

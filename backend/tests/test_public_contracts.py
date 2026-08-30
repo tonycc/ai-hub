@@ -31,7 +31,7 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     contract = load_yaml_mapping(OPENAPI_PATH)
 
     assert contract["openapi"] == "3.1.0"
-    assert contract["info"]["version"] == "0.2.1"
+    assert contract["info"]["version"] == "0.3.4"
     assert contract["paths"]
 
     operation_ids: list[str] = []
@@ -52,6 +52,8 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
 
     assert operation_ids
     assert len(operation_ids) == len(set(operation_ids))
+    push_record = contract["components"]["schemas"]["PushRecord"]["properties"]["version"]
+    assert push_record["minimum"] == 1
 
 
 def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
@@ -69,6 +71,13 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
         "/platform-api/v1/data/objects",
         "/platform-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}",
         "/platform-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}/history",
+        "/platform-api/v1/ingest/push/capabilities",
+        "/platform-api/v1/ingest/push/generations",
+        "/platform-api/v1/ingest/push/generations/{generation_id}",
+        "/platform-api/v1/ingest/push/generations/{generation_id}/heartbeat",
+        "/platform-api/v1/ingest/push/generations/{generation_id}/batches",
+        "/platform-api/v1/ingest/push/generations/{generation_id}/complete",
+        "/platform-api/v1/ingest/push/generations/{generation_id}/abort",
     }
     assert set(contract["paths"]) == expected_paths
     security_scheme = contract["components"]["securitySchemes"]["oidcAuth"]
@@ -115,6 +124,34 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
             "ai_hub.identity",
             "platform.data.read",
         ],
+        "/platform-api/v1/ingest/push/capabilities": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
+        "/platform-api/v1/ingest/push/generations": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
+        "/platform-api/v1/ingest/push/generations/{generation_id}": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
+        "/platform-api/v1/ingest/push/generations/{generation_id}/heartbeat": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
+        "/platform-api/v1/ingest/push/generations/{generation_id}/batches": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
+        "/platform-api/v1/ingest/push/generations/{generation_id}/complete": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
+        "/platform-api/v1/ingest/push/generations/{generation_id}/abort": [
+            "ai_hub.identity",
+            "ai_hub.ingest.push",
+        ],
     }
 
     for path, path_item in contract["paths"].items():
@@ -131,6 +168,40 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
                 response_codes = set(cast(dict[str, Any], responses))
                 assert "401" in response_codes
                 assert "403" in response_codes
+
+
+def test_push_openapi_lists_runtime_error_statuses() -> None:
+    contract = load_yaml_mapping(OPENAPI_PATH)
+    paths = cast(dict[str, Any], contract["paths"])
+    create = paths["/platform-api/v1/ingest/push/generations"]["post"]["responses"]
+    assert {"400", "404", "409", "422", "503"} <= set(create)
+    heartbeat = paths[
+        "/platform-api/v1/ingest/push/generations/{generation_id}/heartbeat"
+    ]["post"]["responses"]
+    assert {"400", "404", "409", "422"} <= set(heartbeat)
+    batch = paths["/platform-api/v1/ingest/push/generations/{generation_id}/batches"][
+        "post"
+    ]["responses"]
+    assert {"400", "404", "409", "422"} <= set(batch)
+    complete = paths[
+        "/platform-api/v1/ingest/push/generations/{generation_id}/complete"
+    ]["post"]["responses"]
+    assert {"400", "404", "409", "422"} <= set(complete)
+    abort = paths["/platform-api/v1/ingest/push/generations/{generation_id}/abort"][
+        "post"
+    ]["responses"]
+    assert {"400", "404", "409", "422"} <= set(abort)
+    records = contract["components"]["schemas"]["SubmitPushBatchRequest"]["properties"][
+        "records"
+    ]
+    assert records["maxItems"] == 50000
+    assert "UnprocessableEntity" in contract["components"]["responses"]
+    generation = contract["components"]["schemas"]["PushGeneration"]
+    assert generation["properties"]["purpose"]["enum"] == [
+        "production",
+        "certification",
+    ]
+    assert "purpose" in generation["required"]
 
 
 def test_retired_event_contracts_are_not_live() -> None:

@@ -247,6 +247,8 @@ class Settings(_PlatformSettings):
     )
     oidc_client_id: str = "ai-hub-platform"
     oidc_client_secret: SecretStr = SecretStr("local-only-oidc-client-secret")
+    data_ingest_push_enabled: bool = False
+    ingest_pull_contract_enforcement_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -420,6 +422,8 @@ class RawWorkerSettings(_PlatformSettings):
     # Used only by ai-hub-ingest-seed to write platform_core; compose points this at
     # the platform migrator role. One-shot sync/reconcile CLIs use raw_database_url.
     seed_database_url: str | None = None
+    data_ingest_push_enabled: bool = False
+    ingest_pull_contract_enforcement_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:

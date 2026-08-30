@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
@@ -40,6 +42,129 @@ DATA_INGEST_EVIDENCE_KEYS = frozenset(
         "payload_contract_ok",
     }
 )
+PUSH_DATA_INGEST_EVIDENCE_KEYS = frozenset(
+    {
+        "transport_mode",
+        "inbound_identity_enforced",
+        "contract_registered",
+        "batch_digest_ok",
+        "version_monotonic",
+        "delete_captured",
+        "full_staging_once_published",
+        "replay_idempotent",
+        "payload_contract_ok",
+    }
+)
+
+
+def required_data_ingest_evidence_keys(transport_mode: str) -> frozenset[str]:
+    if transport_mode == "PUSH_AGENT":
+        return PUSH_DATA_INGEST_EVIDENCE_KEYS
+    return DATA_INGEST_EVIDENCE_KEYS
+
+
+CERTIFICATION_KINDS = frozenset(
+    {"full_regression", "incremental_regression", "rollback_drill"}
+)
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def unpack_data_ingest_check_evidence(
+    evidence: Mapping[str, Any] | None, object_type: str
+) -> dict[str, Any]:
+    """Unwrap conformance_check.evidence into the adapter DATA_INGEST body.
+
+    Official runs store adapter evidence under ``runtime``, optionally keyed
+    by object_type in ``by_source``. Flat fixtures remain accepted.
+    """
+    payload = dict(evidence or {})
+    runtime = payload.get("runtime")
+    body = dict(cast(dict[str, Any], runtime)) if isinstance(runtime, dict) else payload
+    by_source = body.get("by_source")
+    if isinstance(by_source, dict):
+        entry = cast(dict[str, Any], by_source).get(object_type)
+        if isinstance(entry, dict):
+            return dict(cast(dict[str, Any], entry))
+    return dict(body)
+
+
+def _validate_one_source_evidence(
+    evidence: dict[str, Any], transport_mode: str, *, object_type: str
+) -> None:
+    required = required_data_ingest_evidence_keys(transport_mode)
+    missing = sorted(required - set(evidence))
+    if missing:
+        raise ConformanceValidationError(
+            "DATA_INGEST evidence is missing required keys: " + ", ".join(missing)
+        )
+    if any(
+        evidence.get(key) is not True
+        for key in required
+        if key != "transport_mode"
+    ):
+        raise ConformanceValidationError(
+            "DATA_INGEST evidence checks must all be true when status is PASSED"
+        )
+    declared = evidence.get("transport_mode")
+    if declared not in {None, transport_mode}:
+        raise ConformanceValidationError(
+            "DATA_INGEST transport_mode does not match the registered ingest_source"
+        )
+    if transport_mode == "PUSH_AGENT" and declared != "PUSH_AGENT":
+        raise ConformanceValidationError(
+            "DATA_INGEST transport_mode does not match the registered ingest_source"
+        )
+    if evidence.get("object_type") != object_type:
+        raise ConformanceValidationError(
+            "DATA_INGEST evidence object_type must match the registered ingest source"
+        )
+    fingerprint = evidence.get("schema_fingerprint")
+    if not isinstance(fingerprint, str) or _SHA256_HEX.fullmatch(fingerprint) is None:
+        raise ConformanceValidationError(
+            "DATA_INGEST evidence schema_fingerprint must be a 64-character sha256 hex digest"
+        )
+    kind = evidence.get("certification_kind")
+    if kind is not None and kind not in CERTIFICATION_KINDS:
+        raise ConformanceValidationError(
+            "DATA_INGEST certification_kind must be full_regression, "
+            "incremental_regression, or rollback_drill"
+        )
+
+
+def _validate_passed_ingest_evidence(
+    evidence: dict[str, Any], transports: list[tuple[str, str]]
+) -> None:
+    if not transports:
+        raise ConformanceValidationError(
+            "DATA_INGEST evidence requires registered ingest sources"
+        )
+    if len(transports) > 1:
+        raw_by_source = evidence.get("by_source")
+        if not isinstance(raw_by_source, dict):
+            raise ConformanceValidationError(
+                "applications with more than one ingest source must supply "
+                "DATA_INGEST evidence by_source"
+            )
+        by_source = cast(dict[str, Any], raw_by_source)
+        expected = {object_type for object_type, _ in transports}
+        if set(by_source) != expected:
+            raise ConformanceValidationError(
+                "DATA_INGEST by_source keys must match registered object types"
+            )
+        for object_type, transport_mode in transports:
+            entry = by_source[object_type]
+            if not isinstance(entry, dict):
+                raise ConformanceValidationError(
+                    f"DATA_INGEST by_source.{object_type} evidence is malformed"
+                )
+            _validate_one_source_evidence(
+                cast(dict[str, Any], entry),
+                transport_mode,
+                object_type=object_type,
+            )
+        return
+    object_type, transport_mode = transports[0]
+    _validate_one_source_evidence(evidence, transport_mode, object_type=object_type)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,16 +217,10 @@ class ConformanceService:
                         "Runtime evidence for DATA_INGEST is malformed"
                     )
                 evidence = cast(dict[str, Any], raw_evidence)
-                missing = sorted(DATA_INGEST_EVIDENCE_KEYS - set(evidence))
-                if missing:
-                    raise ConformanceValidationError(
-                        "DATA_INGEST evidence is missing required keys: "
-                        + ", ".join(missing)
-                    )
-                if any(evidence.get(key) is not True for key in DATA_INGEST_EVIDENCE_KEYS):
-                    raise ConformanceValidationError(
-                        "DATA_INGEST evidence checks must all be true when status is PASSED"
-                    )
+                transports = await self._load_ingest_transports(
+                    session, application_id=application_id
+                )
+                _validate_passed_ingest_evidence(evidence, transports)
         now = datetime.now(UTC)
         if verified_at.tzinfo is None:
             raise ConformanceValidationError("verified_at must include a timezone")
@@ -388,6 +507,24 @@ class ConformanceService:
             )
         return await self.get_run(session, run_id=run_id, visible_application_ids=None)
 
+    async def _load_ingest_transports(
+        self, session: AsyncSession, *, application_id: str
+    ) -> list[tuple[str, str]]:
+        result = await session.execute(
+            sa.text(
+                """
+                SELECT object_type, transport_mode
+                FROM platform_core.ingest_source
+                WHERE source_application_id = :application_id
+                ORDER BY object_type
+                """
+            ),
+            {"application_id": application_id},
+        )
+        return [
+            (str(row.object_type), str(row.transport_mode)) for row in result.all()
+        ]
+
     async def _application_context(
         self,
         session: AsyncSession,
@@ -545,6 +682,34 @@ class ConformanceService:
                 },
             )
         passed = row["status"] == "PASSED"
+        if passed and profile == "DATA_INGEST":
+            try:
+                transports = await self._load_ingest_transports(
+                    session, application_id=application["application_id"]
+                )
+                raw_evidence = row["evidence"]
+                if not isinstance(raw_evidence, dict):
+                    raise ConformanceValidationError(
+                        "Runtime evidence for DATA_INGEST is malformed"
+                    )
+                _validate_passed_ingest_evidence(
+                    cast(dict[str, Any], raw_evidence), transports
+                )
+            except ConformanceValidationError:
+                return ConformanceCheckResult(
+                    profile,
+                    "FAILED",
+                    "Runtime evidence no longer matches registered ingest sources",
+                    {
+                        "capability_enabled": True,
+                        "runtime_evidence_present": True,
+                        "source": row["source"],
+                        "evidence_sha256": row["evidence_sha256"],
+                        "verified_at": row["verified_at"].isoformat(),
+                        "expires_at": row["expires_at"].isoformat(),
+                        "runtime": dict(row["evidence"]),
+                    },
+                )
         return ConformanceCheckResult(
             profile,
             "PASSED" if passed else "FAILED",

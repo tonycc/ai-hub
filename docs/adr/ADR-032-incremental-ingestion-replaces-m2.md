@@ -61,7 +61,12 @@ M2 解决的是"实时、不丢、不错"的问题，而当前需求只需要"�
 - 退役后：全仓检索（限定代码/配置路径）确认无 RabbitMQ/Outbox/Inbox/projection/`standard-events` 残留；`base-access` 从全新数据卷启动通过 M1 与 M7 全部门禁。
 - 若未来出现已批准的实时数据传播需求：停止以批量汇聚承接该场景，重新打开本 ADR 评审是否恢复事件能力（可参考归档契约）。
 
+## 后续修订
+
+- 2026-08-29：[ADR-033](ADR-033-push-agent-data-ingest-transport.md) 已接受：增加 `PUSH_AGENT`，作为同一 `DATA_INGEST` 的第二种**数据面**传输。本 ADR 决策第 2 点的「仅平台拉取」不再是唯一传输；统一 Raw、契约、幂等、墓碑和禁止无契约 dump 继续有效。生产 Push 仍须通过立项 A 的 C1 门禁后按来源启用。
+
 ## 关联
 
 - [增量数据汇聚与统一治理设计与实施方案](../incremental-data-ingestion-design.md)
 - [ADR-031：首个生产档位继续采用标准单节点](ADR-031-standard-single-node-production-tier.md)
+- [ADR-033：Push 作为 DATA_INGEST 的第二种数据面传输](ADR-033-push-agent-data-ingest-transport.md)

@@ -87,9 +87,41 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
         "platform.notification.request",
         "platform.application.health.write",
         "ai_hub.ingest.export",
+        "ai_hub.ingest.push",
         "platform.data.read",
     ):
         assert f"scope_name: {scope}" in blueprint
+
+
+def test_ingest_operator_uses_independent_password_secret() -> None:
+    blueprint = (PROJECT_ROOT / "deploy/authentik/ai-hub-blueprint.yaml").read_text(
+        encoding="utf-8"
+    )
+    compose = (PROJECT_ROOT / "deploy/compose.yaml").read_text(encoding="utf-8")
+    example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+    generator = (
+        PROJECT_ROOT / "scripts/deploy/generate-runtime-env.sh"
+    ).read_text(encoding="utf-8")
+    start = blueprint.index("username: ai-hub-platform-ingest-operator")
+    snippet = blueprint[start : start + 400]
+    assert "password: !Env AI_HUB_INGEST_OPERATOR_PASSWORD" in snippet
+    assert "AI_HUB_UAT_USER_PASSWORD" not in snippet
+    assert (
+        "AI_HUB_INGEST_OPERATOR_PASSWORD: ${AI_HUB_INGEST_OPERATOR_PASSWORD:?"
+        in compose
+    )
+    assert "AI_HUB_INGEST_OPERATOR_PASSWORD=$(gen_secret 32)" in generator
+    uat = next(
+        line.split("=", 1)[1]
+        for line in example.splitlines()
+        if line.startswith("AI_HUB_UAT_USER_PASSWORD=")
+    )
+    operator = next(
+        line.split("=", 1)[1]
+        for line in example.splitlines()
+        if line.startswith("AI_HUB_INGEST_OPERATOR_PASSWORD=")
+    )
+    assert uat != operator
 
 
 def test_standalone_image_build_does_not_copy_platform_source() -> None:

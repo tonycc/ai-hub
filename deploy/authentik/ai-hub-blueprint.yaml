@@ -331,6 +331,15 @@ entries:
       expression: "return {}"
 
   - model: authentik_providers_oauth2.scopemapping
+    id: ai-hub-ingest-push-scope
+    identifiers:
+      name: AI Hub ai_hub.ingest.push
+    attrs:
+      scope_name: ai_hub.ingest.push
+      description: Push object batches into platform DATA_INGEST.
+      expression: "return {}"
+
+  - model: authentik_providers_oauth2.scopemapping
     id: platform-data-read-scope
     identifiers:
       name: AI Hub platform.data.read
@@ -373,6 +382,7 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.export]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.push]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.data.read]]
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
 
@@ -539,5 +549,17 @@ entries:
       email: app-developer@ai-hub.local
       type: internal
       password: !Env AI_HUB_UAT_USER_PASSWORD
+      attributes:
+        authorization_version: 1
+
+  - model: authentik_core.user
+    state: created
+    identifiers:
+      username: ai-hub-platform-ingest-operator
+    attrs:
+      name: 数据接入运维员
+      email: platform-ingest-operator@ai-hub.local
+      type: internal
+      password: !Env AI_HUB_INGEST_OPERATOR_PASSWORD
       attributes:
         authorization_version: 1

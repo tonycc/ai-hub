@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -84,11 +86,40 @@ def test_raw_worker_settings_validate_concurrency_budget() -> None:
     assert settings.ingest_sources_path.endswith("ingest-sources.json")
 
 
+def _source(**overrides: Any) -> IngestSourceConfig:
+    payload = {
+        "source_application_id": "standalone-example",
+        "object_type": "device",
+        "export_base_url": "http://app.test",
+        "interval_seconds": 60,
+        "lookback_versions": 10,
+        "page_limit": 2,
+        "enabled": True,
+    }
+    payload.update(overrides)
+    return IngestSourceConfig.model_validate(payload)
+
+
+@dataclass
+class _QueryResult:
+    row: object | None = None
+
+    def one_or_none(self) -> object | None:
+        return self.row
+
+    def all(self) -> list[object]:
+        return [] if self.row is None else [self.row]
+
+    def scalar_one_or_none(self) -> object | None:
+        return self.row
+
+
 @dataclass
 class _FakeSession:
-    """Minimal async session stand-in for scheduler unit tests."""
+    """Async session stand-in that implements execute()/result like SQLAlchemy."""
 
     store: _InMemoryIngestStore
+    source: IngestSourceConfig
     committed: bool = False
 
     async def __aenter__(self) -> _FakeSession:
@@ -100,13 +131,38 @@ class _FakeSession:
     def begin(self) -> _FakeSession:
         return self
 
+    async def execute(self, statement: object, params: object = None) -> _QueryResult:
+        del params
+        sql = str(statement)
+        if "platform_core.ingest_source" in sql:
+            return _QueryResult(self._source_row())
+        return _QueryResult(None)
+
+    def _source_row(self) -> SimpleNamespace:
+        config = self.source
+        return SimpleNamespace(
+            source_application_id=config.source_application_id,
+            object_type=config.object_type,
+            export_base_url=config.export_base_url,
+            interval_seconds=config.interval_seconds,
+            lookback_versions=config.lookback_versions,
+            page_limit=config.page_limit,
+            enabled=config.enabled,
+            transport_mode=config.transport_mode,
+            push_protocol_version=config.push_protocol_version,
+            contract_validation_mode=config.contract_validation_mode,
+            allow_empty_full=config.allow_empty_full,
+            updated_at=datetime.now(UTC),
+        )
+
 
 @dataclass
 class _SessionFactory:
     store: _InMemoryIngestStore
+    source: IngestSourceConfig = field(default_factory=_source)
 
     def __call__(self) -> _FakeSession:
-        return _FakeSession(store=self.store)
+        return _FakeSession(store=self.store, source=self.source)
 
 
 @dataclass
@@ -154,6 +210,7 @@ class _InMemoryIngestStore:
         high_watermark: int,
         payload_contract_version: str,
         from_version: int | None = None,
+        **kwargs: object,
     ) -> Any:
         if self.fail_next_load:
             self.fail_next_load = False
@@ -172,6 +229,8 @@ class _InMemoryIngestStore:
                 "record_count": len(records),
                 "source_application_id": source_application_id,
                 "object_type": object_type,
+                "schema_fingerprint": kwargs.get("schema_fingerprint"),
+                "audit_summary": kwargs.get("audit_summary"),
             }
         )
 
@@ -205,20 +264,6 @@ class _InMemoryIngestStore:
             }
         )
         return batch_id
-
-
-def _source(**overrides: Any) -> IngestSourceConfig:
-    payload = {
-        "source_application_id": "standalone-example",
-        "object_type": "device",
-        "export_base_url": "http://app.test",
-        "interval_seconds": 60,
-        "lookback_versions": 10,
-        "page_limit": 2,
-        "enabled": True,
-    }
-    payload.update(overrides)
-    return IngestSourceConfig.model_validate(payload)
 
 
 @pytest.mark.asyncio
@@ -437,3 +482,306 @@ def test_ingest_sources_document_model() -> None:
         }
     )
     assert document.sources[0].export_base_url == "http://app-a:9000"
+
+
+@pytest.mark.asyncio
+async def test_full_enforce_aborts_before_load_when_a_page_fails_contract() -> None:
+    from ai_hub_platform.modules.ingest.contract import IngestContractValidator
+
+    store = _InMemoryIngestStore()
+    pages = [
+        {
+            "object_type": "device",
+            "payload_contract_version": "device.v1",
+            "records": [
+                {
+                    "object_id": "E-1",
+                    "operation": "upsert",
+                    "version": 1,
+                    "payload": {"name": "ok"},
+                }
+            ],
+            "has_more": True,
+            "high_watermark": 1,
+        },
+        {
+            "object_type": "device",
+            "payload_contract_version": "device.v1",
+            "records": [
+                {
+                    "object_id": "E-2",
+                    "operation": "upsert",
+                    "version": 2,
+                    "payload": {"name": "ok", "secret": True},
+                }
+            ],
+            "has_more": False,
+            "high_watermark": 2,
+        },
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = pages[min(calls["n"], 1)]
+        calls["n"] += 1
+        return httpx.Response(200, json=page)
+
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    from ai_hub_platform.modules.ingest.contract import (
+        RegisteredContract,
+        schema_fingerprint,
+    )
+
+    contract = RegisteredContract(
+        source_application_id="standalone-example",
+        object_type="device",
+        contract_version="device.v1",
+        json_schema=schema,
+        schema_fingerprint=schema_fingerprint(schema),
+        status="ACTIVE",
+    )
+    export_client = ExportClient(
+        token_provider=lambda: _async_token(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(ingest_pull_contract_enforcement_enabled=True),
+        sources=[_source(contract_validation_mode="ENFORCE")],
+        sessions=_SessionFactory(
+            store, source=_source(contract_validation_mode="ENFORCE")
+        ),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+        contract_validator=IngestContractValidator(),
+        contract_lookup=lambda source, version: contract,
+    )
+    with pytest.raises(Exception, match="ENFORCE"):
+        await scheduler.sync_source(_source(contract_validation_mode="ENFORCE"), force_full=True)
+    assert store.records == []
+    await export_client.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_persists_active_contract_fingerprint_on_pull_batches() -> None:
+    store = _InMemoryIngestStore()
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    from ai_hub_platform.modules.ingest.contract import (
+        IngestContractValidator,
+        RegisteredContract,
+        schema_fingerprint,
+    )
+
+    fingerprint = schema_fingerprint(schema)
+    contract = RegisteredContract(
+        source_application_id="standalone-example",
+        object_type="device",
+        contract_version="device.v1",
+        json_schema=schema,
+        schema_fingerprint=fingerprint,
+        status="ACTIVE",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "object_type": "device",
+                "payload_contract_version": "device.v1",
+                "records": [
+                    {
+                        "object_id": "E-1",
+                        "operation": "upsert",
+                        "version": 1,
+                        "payload": {"name": "a", "extra": True},
+                    }
+                ],
+                "has_more": False,
+                "high_watermark": 1,
+            },
+        )
+
+    export_client = ExportClient(
+        token_provider=lambda: _async_token(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[_source()],
+        sessions=_SessionFactory(store),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+        contract_validator=IngestContractValidator(),
+        contract_lookup=lambda source, version: contract,
+    )
+    await scheduler.sync_source(_source(), force_full=True)
+    assert store.batches[0]["schema_fingerprint"] == fingerprint
+    summary = store.batches[0]["audit_summary"]
+    assert isinstance(summary, dict)
+    assert summary["mode"] == "AUDIT_ONLY"
+    assert scheduler.metrics.contract_audit_issues >= 1
+    await scheduler.sync_source(_source(), force_full=False)
+    assert store.batches[-1]["schema_fingerprint"] == fingerprint
+    await export_client.close()
+
+
+def test_runtime_constructors_wire_contract_validator() -> None:
+    import inspect as inspect_mod
+
+    from ai_hub_platform.modules.ingest import rebuild as rebuild_mod
+    from ai_hub_platform.modules.ingest.scheduler import run_ingest_scheduler
+
+    assert "create_runtime_scheduler" in inspect_mod.getsource(run_ingest_scheduler)
+    assert "create_runtime_scheduler" in inspect_mod.getsource(
+        rebuild_mod.sync_configured_source
+    )
+
+
+@pytest.mark.asyncio
+async def test_reload_sources_refreshes_payload_max_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from ai_hub_platform.modules.ingest.config_store import IngestPolicy
+
+    store = _InMemoryIngestStore()
+    export_client = ExportClient(token_provider=_async_token)
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[_source()],
+        sessions=_SessionFactory(store),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+        payload_max_bytes=1_048_576,
+    )
+
+    async def fake_get_policy(self: object, session: object) -> IngestPolicy:
+        del self, session
+        return IngestPolicy(
+            retention_keep_versions=10,
+            retention_keep_days=None,
+            payload_max_bytes=2048,
+            page_limit_default=100,
+            page_limit_max=1000,
+            scheduled_reconcile_enabled=False,
+            reconcile_interval_hours=24,
+            push_staging_retention_hours=24,
+            updated_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr(
+        "ai_hub_platform.modules.ingest.scheduler.IngestConfigStore.get_policy",
+        fake_get_policy,
+    )
+
+    async def loader() -> list[IngestSourceConfig]:
+        return [_source()]
+
+    await scheduler.reload_sources(loader)
+    assert scheduler.payload_max_bytes == 2048
+    await export_client.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_aborts_publish_when_source_is_no_longer_pull() -> None:
+    store = _InMemoryIngestStore()
+    store.cursor[("standalone-example", "device")] = 10
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "object_type": "device",
+                "payload_contract_version": "device.v1",
+                "records": [
+                    {
+                        "object_id": "E-9",
+                        "operation": "upsert",
+                        "version": 11,
+                        "payload": {"name": "x"},
+                    }
+                ],
+                "has_more": False,
+                "high_watermark": 11,
+            },
+        )
+
+    async def token_provider() -> str:
+        return "tok"
+
+    export_client = ExportClient(
+        token_provider=token_provider,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[_source()],
+        sessions=_SessionFactory(store, source=_source(enabled=False)),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+    )
+    with pytest.raises(ExportClientError, match="PULL_EXPORT"):
+        await scheduler.sync_source(_source(), force_full=False)
+    assert store.cursor[("standalone-example", "device")] == 10
+    await export_client.close()
+
+
+def test_pull_revalidates_contract_after_source_lock() -> None:
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/ai_hub_platform/modules/ingest/scheduler.py"
+    ).read_text(encoding="utf-8")
+    incremental = source.split("async def _run_incremental_sync", 1)[1].split(
+        "async def _run_", 2
+    )[0]
+    full = source.split("async def _run_full_sync", 1)[1].split(
+        "async def _run_incremental_sync", 1
+    )[0]
+    assert incremental.index("lock_ingest_source") < incremental.index(
+        "_validate_locked_records"
+    )
+    assert full.index("lock_ingest_source") < full.index("_validate_locked_records")
+    assert incremental.index("_audit_pull_page") < incremental.index(
+        "lock_ingest_source"
+    )
+    assert full.index("_audit_pull_page") < full.index("lock_ingest_source")
+    audit = source.split("async def _audit_pull_page", 1)[1].split("async def ", 1)[0]
+    assert "AUDIT_ONLY" in audit
+    locked = source.split("async def _validate_locked_records", 1)[1].split(
+        "async def ", 1
+    )[0]
+    assert "session=session" in locked
+    assert "self.sessions()" not in locked
+    lookup = source.split("async def _lookup_contract", 1)[1].split("async def ", 1)[0]
+    assert "session is not None" in lookup
+    locked_source = source.split("async def _require_locked_pull_source", 1)[1].split(
+        "async def ", 1
+    )[0]
+    assert "except AttributeError" not in locked_source
+
+
+def test_policy_update_allows_omitting_push_staging_retention() -> None:
+    from ai_hub_platform.api.ingest import IngestPolicyUpdateRequest
+
+    payload = IngestPolicyUpdateRequest.model_validate(
+        {
+            "retention_keep_versions": 100,
+            "payload_max_bytes": 1048576,
+            "page_limit_default": 200,
+            "page_limit_max": 5000,
+            "scheduled_reconcile_enabled": False,
+            "reconcile_interval_hours": 24,
+        }
+    )
+    assert payload.push_staging_retention_hours is None

@@ -10,6 +10,8 @@ const props = defineProps({
 const map = {
   DRAFT: ['info', '草稿'],
   ACTIVE: ['success', '启用'],
+  APPROVED: ['success', '已批准'],
+  REJECTED: ['danger', '已拒绝'],
   DRAINING: ['warning', '过渡中'],
   DISABLED: ['info', '停用'],
   RETIRED: ['info', '已退役'],

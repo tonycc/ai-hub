@@ -153,7 +153,9 @@
         "schema_compatible": { "type": "boolean" },
         "live_data_check_required": { "const": true },
         "live_data_condition": {
-          "const": "no_environment_has_multiple_credential_rows"
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^no_environment_has_multiple_credential_rows(;no_push_ingest_sources)?(;no_enforce_pull_ingest_sources)?$"
         }
       }
     }

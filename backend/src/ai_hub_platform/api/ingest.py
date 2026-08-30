@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ai_hub_platform.api.dependencies import (
@@ -24,16 +25,30 @@ from ai_hub_platform.modules.audit.service import AuditRecord, AuditService
 from ai_hub_platform.modules.ingest.config_store import (
     IngestConfigError,
     IngestConfigStore,
+    IngestEnforceNotCertifiedError,
     IngestPolicy,
+    IngestPushNotIsolatedError,
     IngestSourceRow,
+    IngestTransportBusyError,
+    IngestTransportImmutableError,
 )
-from ai_hub_platform.modules.ingest.rebuild import rebuild, sync_configured_source
+from ai_hub_platform.modules.ingest.rebuild import (
+    SourceRebuildNotSupported,
+    rebuild,
+    sync_configured_source,
+)
 from ai_hub_platform.modules.ingest.reconcile import (
     RebuildMode,
     prune_change_records,
     reconcile_source,
 )
-from ai_hub_platform.modules.ingest.sources import IngestSourceConfig, load_sync_cursors
+from ai_hub_platform.modules.ingest.source_lock import lock_ingest_source
+from ai_hub_platform.modules.ingest.sources import (
+    IngestSourceConfig,
+    load_push_progress,
+    load_sync_cursors,
+    pull_export_sources,
+)
 from ai_hub_platform.modules.portal.service import PortalPrincipal
 
 router = APIRouter(prefix="/portal-api/v1/ingest", tags=["platform-ingest"])
@@ -49,25 +64,34 @@ class ApiModel(BaseModel):
 class IngestSourceResponse(ApiModel):
     source_application_id: str
     object_type: str
-    export_base_url: str
+    transport_mode: str = "PULL_EXPORT"
+    export_base_url: str | None = None
     interval_seconds: int
     lookback_versions: int
     page_limit: int
     enabled: bool
+    push_protocol_version: str | None = None
+    contract_validation_mode: str = "AUDIT_ONLY"
+    allow_empty_full: bool = False
     updated_at: datetime
     last_cursor: int | None = None
     last_sync_at: datetime | None = None
+    last_success_at: datetime | None = None
     last_status: str | None = None
 
 
 class IngestSourceUpsertRequest(ApiModel):
     source_application_id: str
     object_type: str
-    export_base_url: str
+    transport_mode: Literal["PULL_EXPORT", "PUSH_AGENT"] = "PULL_EXPORT"
+    export_base_url: str | None = None
     interval_seconds: int = 60
     lookback_versions: int = 100
     page_limit: int = 200
     enabled: bool = False
+    push_protocol_version: str | None = None
+    contract_validation_mode: Literal["AUDIT_ONLY", "ENFORCE"] = "AUDIT_ONLY"
+    allow_empty_full: bool = False
 
 
 class IngestPolicyResponse(ApiModel):
@@ -78,6 +102,7 @@ class IngestPolicyResponse(ApiModel):
     page_limit_max: int
     scheduled_reconcile_enabled: bool
     reconcile_interval_hours: int
+    push_staging_retention_hours: int
     updated_at: datetime
 
 
@@ -89,6 +114,7 @@ class IngestPolicyUpdateRequest(ApiModel):
     page_limit_max: int = Field(ge=1, le=50000)
     scheduled_reconcile_enabled: bool
     reconcile_interval_hours: int = Field(ge=1, le=168)
+    push_staging_retention_hours: int | None = Field(default=None, ge=1, le=168)
 
 
 class IngestConfigResponse(ApiModel):
@@ -148,16 +174,40 @@ def _source_response(
     return IngestSourceResponse(
         source_application_id=config.source_application_id,
         object_type=config.object_type,
+        transport_mode=config.transport_mode,
         export_base_url=config.export_base_url,
         interval_seconds=config.interval_seconds,
         lookback_versions=config.lookback_versions,
         page_limit=config.page_limit,
         enabled=config.enabled,
+        push_protocol_version=config.push_protocol_version,
+        contract_validation_mode=config.contract_validation_mode,
+        allow_empty_full=config.allow_empty_full,
         updated_at=row.updated_at,
-        last_cursor=cursor["last_cursor"] if cursor else None,
-        last_sync_at=cursor["last_sync_at"] if cursor else None,
-        last_status=cursor["last_status"] if cursor else None,
+        last_cursor=(
+            int(cursor["last_cursor"])
+            if cursor is not None and cursor.get("last_cursor") is not None
+            else None
+        ),
+        last_sync_at=cursor.get("last_sync_at") if cursor else None,
+        last_success_at=cursor.get("last_success_at") if cursor else None,
+        last_status=(
+            str(cursor["last_status"])
+            if cursor is not None and cursor.get("last_status") is not None
+            else None
+        ),
     )
+
+
+def _progress_for_source(
+    row: IngestSourceRow,
+    cursors: dict[tuple[str, str], dict[str, Any]],
+    push_progress: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, Any] | None:
+    key = (row.config.source_application_id, row.config.object_type)
+    if row.config.transport_mode == "PUSH_AGENT":
+        return push_progress.get(key)
+    return cursors.get(key)
 
 
 def _policy_response(policy: IngestPolicy) -> IngestPolicyResponse:
@@ -169,6 +219,7 @@ def _policy_response(policy: IngestPolicy) -> IngestPolicyResponse:
         page_limit_max=policy.page_limit_max,
         scheduled_reconcile_enabled=policy.scheduled_reconcile_enabled,
         reconcile_interval_hours=policy.reconcile_interval_hours,
+        push_staging_retention_hours=policy.push_staging_retention_hours,
         updated_at=policy.updated_at,
     )
 
@@ -183,6 +234,34 @@ def _map_source_config_error(error: ValueError) -> ApiError:
 
 def _raw_sessions(request: Request) -> async_sessionmaker[AsyncSession]:
     return request.app.state.raw_sessions
+
+
+async def _reject_if_active_push_generation(
+    session: AsyncSession,
+    *,
+    source_application_id: str,
+    object_type: str,
+) -> None:
+    result = await session.execute(
+        text(
+            """
+            SELECT generation_id
+            FROM platform_raw.raw_push_generation
+            WHERE source_application_id = :source_application_id
+              AND object_type = :object_type
+              AND status IN ('OPEN', 'RECEIVING', 'COMPLETING')
+            LIMIT 1
+            """
+        ),
+        {
+            "source_application_id": source_application_id,
+            "object_type": object_type,
+        },
+    )
+    if result.one_or_none() is not None:
+        raise IngestTransportBusyError(
+            "transport_mode cannot change while a push generation is in progress"
+        )
 
 
 @router.get("/config", response_model=IngestConfigResponse)
@@ -200,15 +279,14 @@ async def get_ingest_config(
     try:
         async with _raw_sessions(request)() as raw_session:
             cursors = await load_sync_cursors(raw_session)
+            push_progress = await load_push_progress(raw_session)
     except Exception:  # noqa: BLE001 - cursor status is best-effort for the UI
         cursors = {}
+        push_progress = {}
     return IngestConfigResponse(
         policy=_policy_response(policy),
         sources=[
-            _source_response(
-                row,
-                cursors.get((row.config.source_application_id, row.config.object_type)),
-            )
+            _source_response(row, _progress_for_source(row, cursors, push_progress))
             for row in sources
         ],
     )
@@ -229,6 +307,7 @@ async def put_ingest_policy(
     ],
 ) -> IngestPolicyResponse:
     store = IngestConfigStore()
+    existing = await store.get_policy(session)
     policy = IngestPolicy(
         retention_keep_versions=body.retention_keep_versions,
         retention_keep_days=body.retention_keep_days,
@@ -237,6 +316,11 @@ async def put_ingest_policy(
         page_limit_max=body.page_limit_max,
         scheduled_reconcile_enabled=body.scheduled_reconcile_enabled,
         reconcile_interval_hours=body.reconcile_interval_hours,
+        push_staging_retention_hours=(
+            existing.push_staging_retention_hours
+            if body.push_staging_retention_hours is None
+            else body.push_staging_retention_hours
+        ),
         updated_at=datetime.now(tz=UTC),
     )
     try:
@@ -273,23 +357,78 @@ async def put_ingest_source(
         config = IngestSourceConfig(
             source_application_id=body.source_application_id,
             object_type=body.object_type,
+            transport_mode=body.transport_mode,
             export_base_url=body.export_base_url,
             interval_seconds=body.interval_seconds,
             lookback_versions=body.lookback_versions,
             page_limit=body.page_limit,
             enabled=body.enabled,
+            push_protocol_version=body.push_protocol_version,
+            contract_validation_mode=body.contract_validation_mode,
+            allow_empty_full=body.allow_empty_full,
         )
     except ValueError as error:
         raise _map_source_config_error(error) from error
     store = IngestConfigStore()
-    saved = await store.upsert_source(session, config)
+    try:
+        await lock_ingest_source(
+            session,
+            config.source_application_id,
+            config.object_type,
+        )
+        existing = await store.get_source(
+            session,
+            source_application_id=config.source_application_id,
+            object_type=config.object_type,
+        )
+        if (
+            existing is not None
+            and existing.config.transport_mode != config.transport_mode
+        ):
+            try:
+                await _reject_if_active_push_generation(
+                    session,
+                    source_application_id=config.source_application_id,
+                    object_type=config.object_type,
+                )
+            except IngestTransportBusyError:
+                raise
+            except Exception as error:  # noqa: BLE001 - fail closed if raw is unreachable
+                raise IngestTransportBusyError(
+                    "cannot verify in-flight push generations before changing "
+                    "transport_mode"
+                ) from error
+        saved = await store.upsert_source(session, config)
+    except IngestEnforceNotCertifiedError as error:
+        raise ApiError(409, error.error_code, str(error)) from error
+    except IngestPushNotIsolatedError as error:
+        raise ApiError(409, error.error_code, str(error)) from error
+    except IngestTransportImmutableError as error:
+        raise ApiError(409, error.error_code, str(error)) from error
+    except IngestTransportBusyError as error:
+        raise ApiError(409, error.error_code, str(error)) from error
     await session.commit()
     await _audit(
         request,
         principal,
         action="platform.ingest.source.upsert",
         target_id=f"{config.source_application_id}:{config.object_type}",
-        detail={"enabled": config.enabled},
+        detail={
+            "enabled": {
+                "old": None if existing is None else existing.config.enabled,
+                "new": config.enabled,
+            },
+            "transport_mode": {
+                "old": None if existing is None else existing.config.transport_mode,
+                "new": config.transport_mode,
+            },
+            "contract_validation_mode": {
+                "old": None
+                if existing is None
+                else existing.config.contract_validation_mode,
+                "new": config.contract_validation_mode,
+            },
+        },
     )
     return _source_response(saved)
 
@@ -307,10 +446,10 @@ async def action_sync(
             )
         ),
     ],
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     settings = request.app.state.settings
     store = IngestConfigStore()
-    enabled = await store.list_enabled_source_configs(session)
+    enabled = pull_export_sources(await store.list_enabled_source_configs(session))
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     for config in enabled:
@@ -407,6 +546,8 @@ async def action_rebuild(
             source_application_id=body.source_application_id,
             object_type=body.object_type,
         )
+    except SourceRebuildNotSupported as error:
+        raise ApiError(409, error.error_code, str(error)) from error
     except ValueError as error:
         raise ApiError(400, "ingest_rebuild_rejected", str(error)) from error
     except Exception as error:  # noqa: BLE001

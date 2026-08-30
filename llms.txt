@@ -6,7 +6,7 @@ Read this file first when integrating an independent application with the AI Hub
 
 1. docs/agent-integration.md — reading order, decision tree, env vars, checklists
 2. docs/developer-integration-guide.md — human-oriented integration guide (API-only, DATA_INGEST, certification)
-3. contracts/api/platform-api.openapi.yaml — platform public API (v0.2.1+)
+3. contracts/api/platform-api.openapi.yaml — platform public API (v0.3.0+)
 
 ## Developer assets (also via API)
 

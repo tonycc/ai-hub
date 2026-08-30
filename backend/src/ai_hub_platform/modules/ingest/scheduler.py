@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import signal
@@ -22,17 +23,27 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ai_hub_platform.config import RawWorkerSettings
+from ai_hub_platform.modules.ingest.config_store import IngestConfigStore
+from ai_hub_platform.modules.ingest.contract import (
+    IngestContractValidator,
+    RegisteredContract,
+    audit_summary_payload,
+    load_active_contract,
+)
 from ai_hub_platform.modules.ingest.export_client import (
     EXPORT_TOKEN_SCOPES,
     ExportClient,
     ExportClientError,
+    ExportPage,
     records_to_ingest,
 )
-from ai_hub_platform.modules.ingest.service import IngestService, SyncMode
+from ai_hub_platform.modules.ingest.service import IngestRecord, IngestService, SyncMode
+from ai_hub_platform.modules.ingest.source_lock import lock_ingest_source
 from ai_hub_platform.modules.ingest.sources import (
     IngestSourceConfig,
     compute_since_version,
     load_source_configs_from_db,
+    pull_export_sources,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +59,7 @@ class SchedulerMetrics:
     records_loaded: int = 0
     full_syncs: int = 0
     incremental_syncs: int = 0
+    contract_audit_issues: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -58,6 +70,7 @@ class SchedulerMetrics:
             "records_loaded": self.records_loaded,
             "full_syncs": self.full_syncs,
             "incremental_syncs": self.incremental_syncs,
+            "contract_audit_issues": self.contract_audit_issues,
         }
 
 
@@ -79,6 +92,13 @@ class IngestScheduler:
         service: IngestService | None = None,
         sleep: SleepFn | None = None,
         clock: Callable[[], float] | None = None,
+        contract_validator: IngestContractValidator | None = None,
+        contract_lookup: (
+            Callable[[IngestSourceConfig, str], RegisteredContract | None]
+            | Callable[[IngestSourceConfig, str], Awaitable[RegisteredContract | None]]
+            | None
+        ) = None,
+        payload_max_bytes: int = 1_048_576,
     ) -> None:
         self.settings = settings
         self.worker_id = f"{socket.gethostname()}:{uuid4()}"
@@ -87,6 +107,9 @@ class IngestScheduler:
         self.service = service or IngestService()
         self._sleep: SleepFn = sleep or asyncio.sleep
         self._clock = clock or time.monotonic
+        self.contract_validator = contract_validator
+        self.contract_lookup = contract_lookup
+        self.payload_max_bytes = payload_max_bytes
         self.metrics = SchedulerMetrics()
         self._global_sem = asyncio.Semaphore(settings.max_concurrent_sources)
         self._app_sems: dict[str, asyncio.Semaphore] = {}
@@ -121,6 +144,24 @@ class IngestScheduler:
             )
             return
         self._replace_runtimes(sources)
+        await self._refresh_policy()
+
+    async def _refresh_policy(self) -> None:
+        try:
+            async with self.sessions() as session:
+                policy = await IngestConfigStore().get_policy(session)
+        except Exception:
+            LOGGER.exception(
+                json.dumps(
+                    {
+                        "event": "ingest_policy_reload_failed",
+                        "worker_id": self.worker_id,
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            return
+        self.payload_max_bytes = policy.payload_max_bytes
 
     def _app_semaphore(self, application_id: str) -> asyncio.Semaphore:
         semaphore = self._app_sems.get(application_id)
@@ -206,6 +247,117 @@ class IngestScheduler:
             baseline_cursor=last_version,
         )
 
+    def _pull_url(self, source: IngestSourceConfig) -> str:
+        if source.export_base_url is None:
+            raise ExportClientError(
+                f"PULL_EXPORT source {source.source_application_id}/{source.object_type} "
+                "is missing export_base_url"
+            )
+        return source.export_base_url
+
+    async def _lookup_contract(
+        self,
+        source: IngestSourceConfig,
+        payload_contract_version: str,
+        session: AsyncSession | None = None,
+    ) -> RegisteredContract | None:
+        if self.contract_lookup is not None:
+            result = self.contract_lookup(source, payload_contract_version)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        if session is not None:
+            try:
+                return await load_active_contract(
+                    session,
+                    source_application_id=source.source_application_id,
+                    object_type=source.object_type,
+                    contract_version=payload_contract_version,
+                )
+            except AttributeError:
+                return None
+        async with self.sessions() as owned:
+            try:
+                return await load_active_contract(
+                    owned,
+                    source_application_id=source.source_application_id,
+                    object_type=source.object_type,
+                    contract_version=payload_contract_version,
+                )
+            except AttributeError:
+                return None
+
+    async def _validate_pull_page(
+        self, source: IngestSourceConfig, page: ExportPage
+    ) -> None:
+        if self.contract_validator is None:
+            return
+        contract = await self._lookup_contract(source, page.payload_contract_version)
+        self.contract_validator.validate_records(
+            records_to_ingest(page.records),
+            source=source,
+            payload_contract_version=page.payload_contract_version,
+            contract=contract,
+            payload_max_bytes=self.payload_max_bytes,
+            pull_enforcement_gate=self.settings.ingest_pull_contract_enforcement_enabled,
+        )
+
+    async def _audit_pull_page(
+        self, source: IngestSourceConfig, page: ExportPage
+    ) -> None:
+        # Pre-lock: collect audit issues only. Cached ENFORCE must not reject a
+        # page after operators have already reverted the source to AUDIT_ONLY.
+        await self._validate_pull_page(
+            source.model_copy(update={"contract_validation_mode": "AUDIT_ONLY"}),
+            page,
+        )
+
+    async def _require_locked_pull_source(
+        self, session: AsyncSession, source: IngestSourceConfig
+    ) -> IngestSourceConfig:
+        row = await IngestConfigStore().get_source(
+            session,
+            source_application_id=source.source_application_id,
+            object_type=source.object_type,
+        )
+        if (
+            row is None
+            or not row.config.enabled
+            or row.config.transport_mode != "PULL_EXPORT"
+        ):
+            raise ExportClientError(
+                f"ingest source {source.source_application_id}/{source.object_type} "
+                "is no longer an enabled PULL_EXPORT source"
+            )
+        return row.config
+
+    async def _validate_locked_records(
+        self,
+        source: IngestSourceConfig,
+        records: list[IngestRecord],
+        payload_contract_version: str,
+        session: AsyncSession,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        contract = await self._lookup_contract(
+            source, payload_contract_version, session=session
+        )
+        fingerprint = contract.schema_fingerprint if contract is not None else None
+        audit_summary: dict[str, Any] | None = None
+        if self.contract_validator is None:
+            return fingerprint, audit_summary
+        result = self.contract_validator.validate_records(
+            records,
+            source=source,
+            payload_contract_version=payload_contract_version,
+            contract=contract,
+            payload_max_bytes=self.payload_max_bytes,
+            pull_enforcement_gate=self.settings.ingest_pull_contract_enforcement_enabled,
+        )
+        if result.status == "audit" and result.issues:
+            audit_summary = audit_summary_payload(result.issues)
+            self.metrics.contract_audit_issues += len(result.issues)
+        return fingerprint, audit_summary
+
     async def _run_full_sync(
         self,
         source: IngestSourceConfig,
@@ -214,16 +366,26 @@ class IngestScheduler:
     ) -> dict[str, Any]:
         # Collect every page before load so absence tombstones see the full snapshot.
         records, high_watermark, contract = await self.export_client.fetch_all_pages(
-            export_base_url=source.export_base_url,
+            export_base_url=self._pull_url(source),
             object_type=source.object_type,
             since_version=since_version,
             limit=source.page_limit,
             mode="full",
+            on_page=lambda page: self._audit_pull_page(source, page),
         )
         self.metrics.pages_fetched += 1
         ingest_records = records_to_ingest(records)
         async with self.sessions() as session:
             async with session.begin():
+                await lock_ingest_source(
+                    session,
+                    source.source_application_id,
+                    source.object_type,
+                )
+                locked = await self._require_locked_pull_source(session, source)
+                fingerprint, audit_summary = await self._validate_locked_records(
+                    locked, ingest_records, contract, session
+                )
                 loaded = await self.service.load_batch(
                     session,
                     source_application_id=source.source_application_id,
@@ -233,6 +395,8 @@ class IngestScheduler:
                     high_watermark=high_watermark,
                     payload_contract_version=contract,
                     from_version=since_version,
+                    schema_fingerprint=fingerprint,
+                    audit_summary=audit_summary,
                 )
                 await self.service.advance_cursor(
                     session,
@@ -267,7 +431,7 @@ class IngestScheduler:
         last_batch_id: str | None = None
         while True:
             page = await self.export_client.fetch_page(
-                export_base_url=source.export_base_url,
+                export_base_url=self._pull_url(source),
                 object_type=source.object_type,
                 since_version=cursor,
                 limit=source.page_limit,
@@ -280,8 +444,18 @@ class IngestScheduler:
                     f"got {page.object_type}"
                 )
             ingest_records = records_to_ingest(page.records)
+            await self._audit_pull_page(source, page)
             async with self.sessions() as session:
                 async with session.begin():
+                    await lock_ingest_source(
+                        session,
+                        source.source_application_id,
+                        source.object_type,
+                    )
+                    locked = await self._require_locked_pull_source(session, source)
+                    fingerprint, audit_summary = await self._validate_locked_records(
+                        locked, ingest_records, page.payload_contract_version, session
+                    )
                     loaded = await self.service.load_batch(
                         session,
                         source_application_id=source.source_application_id,
@@ -291,6 +465,8 @@ class IngestScheduler:
                         high_watermark=page.high_watermark,
                         payload_contract_version=page.payload_contract_version,
                         from_version=cursor,
+                        schema_fingerprint=fingerprint,
+                        audit_summary=audit_summary,
                     )
                     await self.service.advance_cursor(
                         session,
@@ -416,6 +592,28 @@ class IngestScheduler:
                 runtime.next_run_at = self._clock() + runtime.config.interval_seconds
 
 
+async def create_runtime_scheduler(
+    settings: RawWorkerSettings,
+    *,
+    sources: Sequence[IngestSourceConfig],
+    sessions: async_sessionmaker[AsyncSession],
+    export_client: ExportClient,
+    service: IngestService | None = None,
+) -> IngestScheduler:
+    """Construct a scheduler with DB contract lookup and the global size policy."""
+    async with sessions() as session:
+        policy = await IngestConfigStore().get_policy(session)
+    return IngestScheduler(
+        settings,
+        sources=sources,
+        sessions=sessions,
+        export_client=export_client,
+        service=service,
+        contract_validator=IngestContractValidator(),
+        payload_max_bytes=policy.payload_max_bytes,
+    )
+
+
 async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -427,10 +625,10 @@ async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
 
     async def load_sources() -> list[IngestSourceConfig]:
         async with sessions() as session:
-            return await load_source_configs_from_db(session)
+            return pull_export_sources(await load_source_configs_from_db(session))
 
     async with sessions() as session:
-        initial_sources = await load_source_configs_from_db(session)
+        initial_sources = pull_export_sources(await load_source_configs_from_db(session))
 
     oidc = OidcClient(
         settings.oidc_issuer,
@@ -445,7 +643,7 @@ async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
         token_provider=token_provider,
         timeout_seconds=settings.http_timeout_seconds,
     )
-    scheduler = IngestScheduler(
+    scheduler = await create_runtime_scheduler(
         settings,
         sources=initial_sources,
         sessions=sessions,

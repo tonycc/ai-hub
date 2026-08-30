@@ -16,6 +16,8 @@ EVIDENCE = {
     "delete_captured": True,
     "idempotent_replay": True,
     "payload_contract_ok": True,
+    "object_type": os.environ.get("AI_HUB_OBJECT_TYPE", "device"),
+    "schema_fingerprint": os.environ.get("AI_HUB_SCHEMA_FINGERPRINT", "a" * 64),
 }
 
 
