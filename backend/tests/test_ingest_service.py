@@ -320,11 +320,11 @@ def test_change_record_conflict_compares_operation_and_content_hash() -> None:
         "async def ", 1
     )[0]
     assert "DO NOTHING" in insert
-    assert "SELECT operation, content_hash, purpose" in insert
+    assert "SELECT operation, content_hash" in insert
     assert ":purpose" in insert
     conflict = insert.split("ON CONFLICT", 1)[1].split("DO NOTHING", 1)[0]
-    assert "purpose" not in conflict
-    assert "AND purpose = :purpose" not in insert
-    assert "already exists with a different purpose" in insert
+    assert "purpose" in conflict
+    assert "AND purpose = :purpose" in insert
+    assert "already exists with a different purpose" not in insert
     assert "IngestRecordConflictError" in insert
     assert IngestRecordConflictError.error_code == "record_version_conflict"

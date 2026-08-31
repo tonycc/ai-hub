@@ -48,6 +48,41 @@ ai-hub-release verify-manifest \
   --verify-repository-digests
 ~~~
 
+### 3.1 `raw_change_record` purpose contract 窗口
+
+`20260831_raw_0007` 是独立 contract 发布，不得混入普通滚动发布。它把
+`raw_change_record` 的幂等唯一键从四列替换为包含 `purpose` 的五列键；旧 Pull
+镜像仍显式引用四列冲突目标，迁移提交后不能继续写入。执行前必须同时满足：
+
+1. `DATA_INGEST_PUSH_ENABLED=false`，目标库不存在 `PUSH_AGENT` 来源，所有 Pull 来源已退回 `AUDIT_ONLY`；这是当前清单预检对不可镜像回滚 Schema 的失败关闭条件；
+2. 当前 raw head 为 `20260830_raw_0006`，C1-B 代码门禁与本发布全部 CI 已通过；
+3. 停止平台 API、ingest scheduler 和所有一次性 sync/reconcile 写进程，并确认没有旧镜像或写事务；发布预检会拒绝仍在运行的 API 或 scheduler；
+4. 完成 60 分钟内的异机验证备份，记录维护窗口、批准人和修复前进方案。
+
+先显式检查唯一的 contract 跃迁：
+
+~~~bash
+ai-hub-release check-migrations \
+  --project-root /opt/ai-hub \
+  --previous-head core=CORE_HEAD \
+  --previous-head raw=20260830_raw_0006 \
+  --target-head core=CORE_HEAD \
+  --target-head raw=20260831_raw_0007 \
+  --allow-contract
+~~~
+
+创建该发布清单时必须在正常参数外增加 `--allow-contract`，并用 `--risk` 记录旧镜像
+不再兼容。保持旧写进程停止，依次执行 preflight、canary 和 promote；promote 会重建
+候选版本的 API、ingest scheduler 和 Portal。提升完成后确认新约束
+`uq_raw_change_record_idempotent_purpose` 存在、旧约束不存在。迁移完成不等于允许生产
+Push：完成 C1-C、来源认证和目标环境演练前仍保持
+`DATA_INGEST_PUSH_ENABLED=false`。
+
+该发布的 Schema 不支持旧镜像回滚，`ai-hub-release rollback` 会拒绝包含 contract 的
+发布清单。失败时优先修复前进；需要恢复旧版本时使用维护窗口前的完整备份，禁止在
+生产现场临时执行 Alembic downgrade。迁移自带的 downgrade 只用于隔离验证，并会在
+已产生跨 purpose 同版本数据时显式拒绝，绝不删除数据。
+
 ## 4. 预检与金丝雀
 
 预检确认备份仍不超过 RPO、制品已拉取、本机数据库迁移头只处于上一版或目标版、Schema 允许旧镜像读取，并执行实时数据条件检查。`base-access` 检查并执行平台核心迁移与 raw 贴源层迁移。当前凭据扩展迁移在任何环境已经出现两行凭据后，旧版应用读取语义不再可靠；预检和回滚会失败关闭。

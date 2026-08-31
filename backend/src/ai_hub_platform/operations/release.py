@@ -22,6 +22,8 @@ RELEASE_ENVIRONMENTS = {"local", "test", "integration", "uat", "production"}
 RELEASE_PROFILES = {"base-access"}
 RELEASE_STATUSES = {"CANDIDATE", "APPROVED", "DEPLOYED", "ROLLED_BACK"}
 MIGRATION_COMPONENTS = ("core", "raw")
+CONTRACT_WRITER_SERVICES = ("platform-api", "platform-ingest-scheduler")
+PLATFORM_RELEASE_SERVICES = (*CONTRACT_WRITER_SERVICES, "portal")
 PROFILE_MIGRATION_COMPONENTS = {
     "base-access": MIGRATION_COMPONENTS,
 }
@@ -432,6 +434,19 @@ def validate_migration_transition(
             phases=tuple(cast(str, migration.phase) for migration in pending),
             rollback_schema_compatible=rollback_compatible,
         )
+    pending_revisions = [
+        (component, revision, phase)
+        for component, transition in transitions.items()
+        for revision, phase in zip(
+            transition.revisions, transition.phases, strict=True
+        )
+    ]
+    if any(phase == "contract" for _, _, phase in pending_revisions) and (
+        len(pending_revisions) != 1 or pending_revisions[0][2] != "contract"
+    ):
+        raise ReleaseError(
+            "A contract migration must be the only pending revision in its approved window"
+        )
     return transitions
 
 
@@ -566,6 +581,8 @@ def validate_release_manifest(
     migrations = _expect_object(manifest, "migrations")
     if set(migrations) != set(MIGRATION_COMPONENTS):
         raise ReleaseError("Release manifest must record every platform migration component")
+    pending_revision_count = 0
+    contract_revision_count = 0
     for component in MIGRATION_COMPONENTS:
         entry = migrations[component]
         if not isinstance(entry, dict):
@@ -575,10 +592,29 @@ def validate_release_manifest(
             typed.get("target_head"), str
         ):
             raise ReleaseError(f"Migration entry {component} lacks revision heads")
-        if not isinstance(typed.get("revisions"), list) or not isinstance(
+        revisions = typed.get("revisions")
+        phases = typed.get("phases")
+        if not isinstance(revisions, list) or not isinstance(phases, list) or not isinstance(
             typed.get("rollback_schema_compatible"), bool
         ):
             raise ReleaseError(f"Migration entry {component} has invalid compatibility data")
+        typed_revisions = cast(list[object], revisions)
+        typed_phases = cast(list[object], phases)
+        if (
+            len(typed_revisions) != len(typed_phases)
+            or any(not isinstance(revision, str) for revision in typed_revisions)
+            or any(phase not in {"expand", "contract"} for phase in typed_phases)
+        ):
+            raise ReleaseError(f"Migration entry {component} has invalid release phases")
+        pending_revision_count += len(typed_revisions)
+        contract_revision_count += typed_phases.count("contract")
+    has_contract_migration = contract_revision_count > 0
+    if has_contract_migration and (
+        pending_revision_count != 1 or contract_revision_count != 1
+    ):
+        raise ReleaseError(
+            "A contract migration must be the only pending revision in its approved window"
+        )
     contracts = _expect_object(manifest, "contracts")
     if set(contracts) != {str(path) for path in CONTRACT_PATHS}:
         raise ReleaseError("Release manifest contract inventory is incomplete")
@@ -613,6 +649,14 @@ def validate_release_manifest(
     if not isinstance(approval.get("approved_by"), str) or not approval["approved_by"].strip():
         raise ReleaseError("Release manifest requires an approver")
     _parse_time(approval.get("approved_at"), "approval.approved_at")
+    remaining_risks = approval.get("remaining_risks")
+    if not isinstance(remaining_risks, list) or any(
+        not isinstance(risk, str) or not risk.strip()
+        for risk in cast(list[object], remaining_risks)
+    ):
+        raise ReleaseError("Release manifest approval.remaining_risks must be strings")
+    if has_contract_migration and not remaining_risks:
+        raise ReleaseError("Contract release manifests must document the remaining risk")
     rollback = _expect_object(manifest, "rollback")
     if not isinstance(rollback.get("previous_manifest_sha256"), str):
         raise ReleaseError("Release manifest lacks the previous approved manifest digest")
@@ -734,6 +778,7 @@ def create_release_manifest(
     previous_manifest_path: Path,
     gate_paths: Mapping[str, Path],
     approved_by: str,
+    allow_contract: bool = False,
     risks: Sequence[str] = (),
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -749,7 +794,12 @@ def create_release_manifest(
         for component in MIGRATION_COMPONENTS
     }
     target_heads = migration_heads(project_root)
-    transitions = validate_migration_transition(project_root, previous_heads, target_heads)
+    transitions = validate_migration_transition(
+        project_root,
+        previous_heads,
+        target_heads,
+        allow_contract=allow_contract,
+    )
     backup = validate_backup_receipt(
         backup_receipt,
         now=created_at,
@@ -898,6 +948,37 @@ def live_migration_heads(target: ReleaseTarget) -> dict[str, str]:
     return heads
 
 
+def assert_pending_contract_writers_stopped(
+    manifest: Mapping[str, Any],
+    target: ReleaseTarget,
+    live_heads: Mapping[str, str],
+) -> None:
+    migrations = _expect_object(manifest, "migrations")
+    contract_pending = False
+    for component in _target_components(target):
+        entry = cast(dict[str, Any], migrations[component])
+        if (
+            live_heads.get(component) == str(entry["previous_head"])
+            and "contract" in entry.get("phases", [])
+        ):
+            contract_pending = True
+            break
+    if not contract_pending:
+        return
+    running: list[str] = []
+    for service in CONTRACT_WRITER_SERVICES:
+        result = _run(target.command("ps", "--quiet", service), check=False)
+        if result.returncode != 0:
+            raise ReleaseError(f"Cannot verify contract writer state: {service}")
+        if result.stdout.strip():
+            running.append(service)
+    if running:
+        raise ReleaseError(
+            "Contract migration requires every old writer to be stopped: "
+            + ", ".join(running)
+        )
+
+
 def parse_live_data_conditions(value: object) -> tuple[str, ...]:
     if not isinstance(value, str) or not value.strip():
         raise ReleaseError("Release manifest rollback.live_data_condition is required")
@@ -945,6 +1026,18 @@ def assert_image_rollback_declared(
         raise ReleaseError("Release lacks a schema-compatible image rollback path")
     if LIVE_DATA_CONDITION_NO_ENFORCE_PULL not in conditions:
         raise ReleaseError("Release lacks a schema-compatible image rollback path")
+
+
+def assert_manifest_image_rollback_allowed(manifest: Mapping[str, Any]) -> None:
+    migrations = _expect_object(manifest, "migrations")
+    if any(
+        "contract" in cast(dict[str, Any], migrations[component]).get("phases", [])
+        for component in MIGRATION_COMPONENTS
+    ):
+        raise ReleaseError(
+            "Image rollback is forbidden after a contract migration; "
+            "use a forward fix or restore the verified backup"
+        )
 
 
 def _psql_count(target: ReleaseTarget, sql: str, *, error: str) -> int:
@@ -1095,6 +1188,7 @@ def release_preflight(
             raise ReleaseError(
                 f"Live {component} migration head is outside the approved transition"
             )
+    assert_pending_contract_writers_stopped(manifest, target, live_heads)
     rollback = _expect_object(manifest, "rollback")
     live_conditions = parse_live_data_conditions(rollback.get("live_data_condition"))
     assert_image_rollback_declared(
@@ -1239,12 +1333,12 @@ def promote_release(
     preflight = release_preflight(manifest_path, target, project_root)
     canary = _run_verified_canary(manifest_path, target)
     environment = _release_environment(manifest)
-    services = ["platform-api", "portal"]
+    services = list(PLATFORM_RELEASE_SERVICES)
     _run(
         target.command("up", "--detach", "--no-deps", *services),
         environment=environment,
     )
-    for service in ("platform-api", "portal"):
+    for service in PLATFORM_RELEASE_SERVICES:
         _wait_healthy(_compose_service_container(target, service))
     return {
         "promoted": True,
@@ -1262,6 +1356,7 @@ def rollback_release(
 ) -> dict[str, Any]:
     current = _load_json_object(current_manifest_path)
     validate_release_manifest(current)
+    assert_manifest_image_rollback_allowed(current)
     _assert_target_matches_manifest(target, current)
     rollback = _expect_object(current, "rollback")
     live_conditions = parse_live_data_conditions(rollback.get("live_data_condition"))
@@ -1295,12 +1390,12 @@ def rollback_release(
     production = _expect_object(previous, "deployment")["environment"] == "production"
     for reference in _expect_object(previous, "images").values():
         _ensure_release_image(str(reference), production=production)
-    services = ["platform-api", "portal"]
+    services = list(PLATFORM_RELEASE_SERVICES)
     _run(
         target.command("up", "--detach", "--no-deps", *services),
         environment=environment,
     )
-    for service in ("platform-api", "portal"):
+    for service in PLATFORM_RELEASE_SERVICES:
         _wait_healthy(_compose_service_container(target, service))
     return {
         "rolled_back": True,
@@ -1357,6 +1452,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--previous-manifest", required=True)
     create.add_argument("--gate", action="append", default=[])
     create.add_argument("--approved-by", required=True)
+    create.add_argument("--allow-contract", action="store_true")
     create.add_argument("--risk", action="append", default=[])
     create.add_argument("--output", required=True)
 
@@ -1410,6 +1506,7 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
                 for key, value in _parse_assignment(cast(list[str], args.gate), "--gate").items()
             },
             approved_by=str(args.approved_by),
+            allow_contract=bool(args.allow_contract),
             risks=cast(list[str], args.risk),
         )
         output = Path(args.output).resolve()

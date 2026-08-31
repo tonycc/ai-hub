@@ -295,21 +295,28 @@ class SqlGenerationStore:
                     transition_id, generation_id, from_status, to_status, reason,
                     actor, request_id
                 )
-                SELECT :transition_id, generation_id, status, :to_status,
+                SELECT :transition_id, generation_id, status,
+                       CAST(:to_status AS varchar(20)),
                        CASE
                          WHEN CAST(:force_transition AS boolean)
                               THEN :transition_reason
-                         WHEN status IS DISTINCT FROM :to_status
-                              AND :to_status = 'EXPIRED' THEN 'client_lease_expired'
-                         WHEN status IS DISTINCT FROM :to_status
-                              AND :to_status = 'FAILED' THEN 'completion_failed'
-                         WHEN status = 'COMPLETING' AND :to_status = 'COMPLETED'
+                         WHEN status IS DISTINCT FROM CAST(:to_status AS varchar(20))
+                              AND CAST(:to_status AS varchar(20)) = 'EXPIRED'
+                              THEN 'client_lease_expired'
+                         WHEN status IS DISTINCT FROM CAST(:to_status AS varchar(20))
+                              AND CAST(:to_status AS varchar(20)) = 'FAILED'
+                              THEN 'completion_failed'
+                         WHEN status = 'COMPLETING'
+                              AND CAST(:to_status AS varchar(20)) = 'COMPLETED'
                               THEN 'publish'
-                         WHEN status IS DISTINCT FROM :to_status
-                              AND :to_status = 'COMPLETING' THEN 'complete'
-                         WHEN status IS DISTINCT FROM :to_status
-                              AND :to_status = 'ABORTED' THEN 'abort'
-                         WHEN status = 'OPEN' AND :to_status = 'RECEIVING'
+                         WHEN status IS DISTINCT FROM CAST(:to_status AS varchar(20))
+                              AND CAST(:to_status AS varchar(20)) = 'COMPLETING'
+                              THEN 'complete'
+                         WHEN status IS DISTINCT FROM CAST(:to_status AS varchar(20))
+                              AND CAST(:to_status AS varchar(20)) = 'ABORTED'
+                              THEN 'abort'
+                         WHEN status = 'OPEN'
+                              AND CAST(:to_status AS varchar(20)) = 'RECEIVING'
                               THEN 'first_batch'
                          ELSE NULL
                        END,
@@ -318,7 +325,7 @@ class SqlGenerationStore:
                 FROM platform_raw.raw_push_generation
                 WHERE generation_id = :generation_id
                   AND (
-                    status IS DISTINCT FROM :to_status
+                    status IS DISTINCT FROM CAST(:to_status AS varchar(20))
                     OR CAST(:force_transition AS boolean)
                   )
                 """

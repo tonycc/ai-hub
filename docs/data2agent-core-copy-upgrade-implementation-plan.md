@@ -4,20 +4,22 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V0.4.3 |
+| 文档版本 | V0.4.5 |
 | 文档状态 | 实施中（立项 A） |
 | 编制日期 | 2026-08-28 |
-| 修订日期 | 2026-08-30 |
+| 修订日期 | 2026-08-31 |
 | 目标项目 | AI Hub |
 | 来源项目 | data2agent |
-| 来源代码基线 | `866da6c7e239ac012452775ec09b27c2ed2e922a`，`pyproject.toml` 版本 `0.6.5` |
-| AI Hub 代码基线 | `22eb424fa7e9529f2b724b82e56cc676a9530dca` |
+| 来源代码基线 | `60bcbe22f0db6457d81d24a0d9924723e085cdae`，`pyproject.toml` 版本 `0.6.5` |
+| AI Hub 代码基线 | `d6a21f72c3d671f6bbd12163081616c5e7d09ac0` |
 | 实施原则 | 只直接复用纯模型/纯函数，其他能力按行为语义移植或 PostgreSQL 重写；Push 作为现有 M7 `DATA_INGEST` 的新增传输适配器，复用其 Raw 数据面、身份、权限、审计、运维和管理端 |
 | V0.3 修订 | 新增 ADR-033；契约中心覆盖 Pull/Push；拆分平台端与参考中间机交付门；明确 Push 重建、Raw/MCP 消费边界和固定表模型策略 |
 | V0.4 修订 | C0 拆为立项 A/B 两组；补齐存量 Pull 契约推导、审计、认证和回退；冻结 Push generation 状态机、并发锁和崩溃恢复；首期验收与语义/MCP 解耦 |
 | V0.4.1 修订 | 起草 ADR-033；冻结 Pull full + `ENFORCE` 时任一页契约失败则整次 full 失败，禁止残页墓碑 |
 | V0.4.2 修订 | 接受 ADR-033 |
 | V0.4.3 修订 | 记录 C1-A 平台接收端代码门禁已通过；下一步为 C1-B。不改变 V0.4.2 冻结决策。`DATA_INGEST_PUSH_ENABLED` 仍默认关闭；`CHANGE_RECORD_PURPOSE_UNIQUE` 仍为 false，contract 阶段五列唯一约束完成前不得启用 Push |
+| V0.4.4 修订 | 记录 data2agent C1-B 已合入并通过独立门禁；AI Hub 增加 `20260831_raw_0007` purpose 五列唯一约束 contract 候选及独立维护窗口门禁。迁移和 C1-C 完成前 `DATA_INGEST_PUSH_ENABLED` 仍保持关闭 |
+| V0.4.5 修订 | 固定 AI Hub/data2agent 版本组合并记录 C1-C 自动化兼容门禁通过：隔离空库、真实 PostgreSQL 双会话、三对象全量/增量/删除、断网恢复、重建、冒充拒绝和关闭 Push 后 Pull 回归均通过。生产维护窗口、目标环境容量/备份/凭据轮换和人工批准仍未执行，Push 默认关闭 |
 
 ---
 
@@ -853,23 +855,23 @@ shared database / identity / permission / audit
 | **立项 A：M7 共用契约与 Push 扩展** | C0-A、C1-A、C1-B、C1-C | Pull/Push 共用契约；中间机数据经同一 Ingest Core 进入现有 Raw 四表 |
 | **立项 B：语义中心与 MCP** | C0-B、C2～C5 | 本体 DRAFT、固定表模型发布和只读 MCP；单独排期、预算和验收 |
 
-进度（2026-08-30，相对 AI Hub `22eb424`）：
+进度（2026-08-31，相对 AI Hub `d6a21f7`、data2agent `60bcbe2`）：
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | C0-A | **已完成** | ADR-033 已接受；第 2–6 项以 V0.4.2 为冻结文本 |
-| C1-A | **代码门禁已通过** | 平台接收端、共用契约、generation/staging 与门户已合入 `main`；Push 默认关闭。见下方未关闭项 |
-| C1-B | **下一步 / 未开始** | data2agent 仓库实现 `AiHubObjectPushSink`，与本仓分仓交付 |
-| C1-C | 未开始 | 跨仓兼容与按来源启用生产 Push |
+| C1-A | **代码门禁已通过** | 平台接收端、共用契约、generation/staging 与门户已合入 `main`；purpose contract 候选进入验证，Push 默认关闭 |
+| C1-B | **独立门禁已通过** | data2agent PR #5 已实现 `AiHubObjectPushSink`；专项 106 项、全仓 1336 项及兼容/架构/smoke 门禁通过 |
+| C1-C | **自动化兼容门禁已通过；生产启用待批准** | 锁定组合的隔离空库与真实 PostgreSQL 故障矩阵已通过；目标环境维护窗口、容量/恢复演练及按来源批准尚待执行 |
 | C0-B、C2～C5 | 未开始 | 立项 B；不得作为立项 A 或启用 Push 的前置 |
 
-C1-A 未关闭、不得据此启用 Push：`raw_change_record` 仍保留四列唯一约束，`CHANGE_RECORD_PURPOSE_UNIQUE = false`；目标环境 Authentik 双人批准、真 Postgres 双会话竞态和空库 Push 开通尚未演练。本仓库若继续收口，先做 purpose 五列唯一约束的 **contract** 迁移，再进入 C1-C。立项 B 不得提前开工来替代 C1-B。
+C1-A/C1-B 与 C1-C 自动化代码门禁完成仍不得据此启用生产 Push：`20260831_raw_0007` 是待批准维护窗口执行的 **contract** 候选，旧 Pull 镜像在迁移后不兼容。隔离环境已完成真实 PostgreSQL 双会话竞态、空库 Push 开通和跨仓恢复；目标环境仍须完成 Authentik 双人批准、容量、备份恢复、凭据轮换和监控/回滚门禁。候选代码将 `CHANGE_RECORD_PURPOSE_UNIQUE` 与五列约束一同切换，但仓库默认 `DATA_INGEST_PUSH_ENABLED=false`。
 
 ### C0-A：立项 A 开工决策冻结
 
 任务：
 
-1. **已完成：** 接受 [ADR-033](adr/ADR-033-push-agent-data-ingest-transport.md)，替代《增量数据汇聚设计》§8 第 6 项“Push 只提示、不承载业务数据”；ADR-032 其余统一 Raw、幂等、墓碑和契约约束继续有效。生产 Push 仍须完成 C1-B / C1-C，以及变更日志 purpose 唯一约束的 contract 迁移。
+1. **已完成：** 接受 [ADR-033](adr/ADR-033-push-agent-data-ingest-transport.md)，替代《增量数据汇聚设计》§8 第 6 项“Push 只提示、不承载业务数据”；ADR-032 其余统一 Raw、幂等、墓碑和契约约束继续有效。生产 Push 仍须完成 purpose contract 维护窗口和 C1-C。
 2. 冻结 `platform_core.ingest_contract` 为 Pull/Push 共用登记中心，以及存量 Pull 的样本推导、`AUDIT_ONLY` 不拒绝、缺契约告警、按来源认证/切换 `ENFORCE`、Pull full `ENFORCE` 残页则整次失败，和无迁移回退策略。
 3. 冻结 transport/重建矩阵：Pull 与 Push 均可日志重放；只有 Pull 可由平台 `rebuild_from_source`，Push 源重建必须由中间机发起新 full generation。
 4. 冻结 data2agent 表级 v3 到 AI Hub 对象级协议的兼容映射，以及 generation 状态机、单活约束、有序批次、双租约、full/incremental 互斥和可重入 complete；确认必须新增 `AiHubObjectPushSink`，不能只修改 `HttpPushSink` URL。
@@ -895,7 +897,7 @@ C0-B 在立项 B 启动时执行，不是 C1-A、C1-B 或 C1-C 的前置条件�
 
 ### C1-A：AI Hub 平台接收端门禁
 
-**状态（2026-08-30）：代码门禁已通过**，合入 AI Hub `main`（`22eb424`）。`DATA_INGEST_PUSH_ENABLED` 默认关闭。expand 窗口保留 `uq_raw_change_record_idempotent` 四列唯一约束，`CHANGE_RECORD_PURPOSE_UNIQUE = false`，capabilities 与写入 API 在该 contract 完成前保持关闭。
+**状态（2026-08-31）：代码门禁已通过**，合入 AI Hub `main`（PR #16，`d6a21f7`）。`DATA_INGEST_PUSH_ENABLED` 默认关闭。`20260831_raw_0007` contract 候选以五列 purpose 键替换四列约束并切换运行时代码；该迁移必须在旧写进程全部停止的批准窗口执行，不能作为滚动 expand 发布。
 
 任务（第 1–7 项的平台实现与仓库内测试已完成）：
 
@@ -913,7 +915,7 @@ C0-B 在立项 B 启动时执行，不是 C1-A、C1-B 或 C1-C 的前置条件�
 
 ### C1-B：data2agent 参考中间机门禁
 
-**状态：未开始（立项 A 下一步）。** 在 data2agent 仓库实施，不依赖本仓继续开发语义/MCP。
+**状态（2026-08-31）：独立代码门禁已通过。** data2agent PR #5（实现提交 `8f477349`，当前 `main` 为 `60bcbe2`）已落地；本地复验为专项 `106 passed`、全仓 `1336 passed / 16 skipped`，OpenAPI、管理端 smoke、metamodel、ingest 兼容和架构分层门禁通过。跳过项仅为需 MSSQL、PowerShell 或可选 MCP 依赖的环境测试。生产启用仍属于 C1-C。
 
 任务：
 
@@ -927,16 +929,18 @@ C0-B 在立项 B 启动时执行，不是 C1-A、C1-B 或 C1-C 的前置条件�
 
 ### C1-C：兼容联调与 Push 生产门禁
 
-**状态：未开始。** 前置为 C1-A 代码门禁（已通过）、C1-B 独立门禁，以及 purpose 五列唯一约束的 contract 迁移。
+**状态（2026-08-31）：自动化兼容门禁已通过；生产启用待批准。** [锁定清单](../deploy/integration-lock.json) 固定 AI Hub Push protocol `1`、raw head `20260831_raw_0007` 与 data2agent `60bcbe2` / `0.6.5`。M7 在全新隔离栈中应用 contract，并使用 data2agent 实际适配器、Authentik Client Credentials 与真实 PostgreSQL 完成端到端故障矩阵。生产目标环境的 contract 维护窗口、容量/恢复/凭据演练和双人批准尚未执行。
 
 任务：
 
 1. 固定 AI Hub 接收协议版本与 data2agent 适配器版本组合，运行跨仓兼容测试和制品清单校验。
 2. 完成一个参考来源的增量、跨分页全量、显式删除、断网重放、进程重启、generation 重叠拒绝、complete 回执丢失恢复、对账和来源冒充端到端测试。
 3. 分别演练平台日志重放、Pull 平台源重建、Push 中间机新 full generation 源重建，确认 UI/CLI 不暴露错误动作。
-4. 先部署平台 expand-only 迁移和接收端，再部署参考中间机；只在监控、回滚和容量门禁通过后按来源开启 Push。
+4. 先部署平台 expand-only 迁移和接收端，再在停止旧写进程的批准窗口单独应用 purpose contract，最后部署参考中间机；只在监控、修复前进/备份恢复和容量门禁通过后按来源开启 Push。
 
 退出条件：两道独立门禁和跨仓兼容门禁全部通过；中间机按已激活共用契约把数据写入 AI Hub 现有 Raw 四表；关闭 Push 后 Pull 行为与升级前一致。至此立项 A 可单独上线和验收，不依赖 C2～C5。
+
+**自动化证据：** 第 1–3 项及第 4 项的隔离部署/关闭回归已由 `scripts/ci/m7-runtime.sh` 通过；覆盖首次多分页 full 的发布前不可见、重启放弃旧 generation、三个对象、增量更新/删除、batch 与 complete 丢回执、两数据库会话竞态、来源冒充、Push/Pull 两类重建、日志重放和关闭 Push 后失败关闭。第 4 项的生产部署与按来源启用仍须按运行手册在目标环境执行，不由 CI 代替批准。
 
 ### C2：本体定义与自动草稿
 
@@ -1196,7 +1200,7 @@ MCP_SERVICE_ENABLED
 7. AI Hub 平台接收端与 data2agent 参考中间机通过各自独立门禁及跨仓兼容门禁；关闭 Push 或回退 Pull 契约强制校验不影响现有 Pull。
 8. 立项 A 的静态检查、单元测试、契约/迁移/回归测试、目标环境容量、凭据轮换、断网重放、备份恢复和故障降级演练通过，并形成运行手册。
 
-进度（2026-08-30）：第 1 项已完成。第 2、4 项以及第 3 项的代码路径已由 C1-A 落地（Push 默认关闭）。第 3 项的目标环境认证/`ENFORCE`/即时回退演练、第 5–8 项仍待 C1-B、C1-C 及 purpose 唯一约束 contract 迁移。
+进度（2026-08-31）：第 1、2、4、5、6、7 项的仓库实现与自动化门禁已通过；第 3 项代码路径已落地，但目标环境认证/`ENFORCE`/即时回退仍待执行；第 8 项的静态、单元、契约/迁移/回归和隔离断网/降级门禁已通过，目标环境容量、凭据轮换、备份恢复与批准窗口仍未完成。Push 默认关闭，立项 A 尚不宣称生产验收完成。
 
 ### 13.2 立项 B 完成定义
 
@@ -1223,7 +1227,7 @@ payload 契约：erp.item、erp.sales_order、erp.sales_order_line
 Push 控制面：raw_push_generation、raw_push_staging
 ```
 
-进度（2026-08-30）：演示第 1–3、6–8 项的平台侧实现与仓库内协议模拟器/回归测试已随 C1-A 代码门禁通过。第 4 项属 C1-B，未开始。第 5 项及目标环境双人批准、真 Postgres 双会话、空库 Push 开通属 C1-C 前演练。purpose 五列唯一约束的 contract 迁移尚未做，Push 仍不可启用。
+进度（2026-08-31）：第 1–8 项的仓库测试与隔离自动化演示均已通过；第 4–8 项还由锁定的真实 data2agent 适配器对全新 AI Hub/PostgreSQL/Authentik 栈完成端到端复验。purpose 五列 contract 仅在隔离库验证，生产批准窗口、目标环境双人批准、容量/恢复和凭据轮换尚未执行，Push 仍不可在生产启用。
 
 验收演示：
 
