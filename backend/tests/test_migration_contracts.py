@@ -126,6 +126,7 @@ def test_platform_raw_migration_establishes_ingest_tables_without_core_objects()
     assert "20260830_raw_0004" in sql
     assert "20260830_raw_0005" in sql
     assert "20260830_raw_0006" in sql
+    assert "20260831_raw_0007" in sql
     raw_0006 = (BACKEND_ROOT / "migrations/versions/raw/20260830_raw_0006.py").read_text()
     upgrade = raw_0006.split("def upgrade", 1)[1].split("def downgrade", 1)[0]
     assert "uq_raw_change_record_idempotent" not in upgrade
@@ -136,7 +137,16 @@ def test_platform_raw_migration_establishes_ingest_tables_without_core_objects()
     assert "uq_raw_push_generation_one_active" in sql
     assert "uq_raw_ingest_batch_external_id" in sql
     assert "uq_raw_change_record_idempotent" in sql
+    assert "uq_raw_change_record_idempotent_purpose" in sql
     assert "transport_mode" in sql
+    raw_0007 = (BACKEND_ROOT / "migrations/versions/raw/20260831_raw_0007.py").read_text()
+    assert 'release_phase = "contract"' in raw_0007
+    assert "rollback_compatible_with" not in raw_0007
+    contract_upgrade = raw_0007.split("def upgrade", 1)[1].split(
+        "def downgrade", 1
+    )[0]
+    assert "PURPOSE_CONSTRAINT" in contract_upgrade
+    assert "LEGACY_CONSTRAINT" in contract_upgrade
 
 
 def test_certification_transport_mode_is_not_backfilled_from_source() -> None:

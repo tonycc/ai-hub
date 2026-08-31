@@ -16,11 +16,10 @@ TransportMode = Literal["PULL_EXPORT", "PUSH_AGENT"]
 ContractValidationMode = Literal["AUDIT_ONLY", "ENFORCE"]
 PUSH_PROTOCOL_VERSION = "1"
 SUPPORTED_PUSH_PROTOCOL_VERSIONS = frozenset({PUSH_PROTOCOL_VERSION})
-# Expand window: raw_change_record uniqueness is still the four-column Pull
-# key. Flip to True in the contract revision that replaces
-# uq_raw_change_record_idempotent with (..., purpose). Enabling Push before
-# that lets certification observations occupy production versions.
-CHANGE_RECORD_PURPOSE_UNIQUE = False
+# Contract revision 20260831_raw_0007 replaces the legacy four-column Pull
+# key with (source_application_id, object_type, object_id, version, purpose).
+# DATA_INGEST_PUSH_ENABLED remains the independent runtime rollout gate.
+CHANGE_RECORD_PURPOSE_UNIQUE = True
 
 
 def _blank_to_none(value: Any) -> Any:

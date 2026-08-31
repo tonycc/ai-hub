@@ -417,7 +417,7 @@ class IngestService:
                     :payload_contract_version, :content_hash, :purpose
                 )
                 ON CONFLICT (
-                    source_application_id, object_type, object_id, version
+                    source_application_id, object_type, object_id, version, purpose
                 )
                 DO NOTHING
                 RETURNING id
@@ -442,12 +442,13 @@ class IngestService:
         existing = await session.execute(
             text(
                 """
-                SELECT operation, content_hash, purpose
+                SELECT operation, content_hash
                 FROM platform_raw.raw_change_record
                 WHERE source_application_id = :source_application_id
                   AND object_type = :object_type
                   AND object_id = :object_id
                   AND version = :version
+                  AND purpose = :purpose
                 """
             ),
             {
@@ -455,17 +456,10 @@ class IngestService:
                 "object_type": object_type,
                 "object_id": record.object_id,
                 "version": record.version,
+                "purpose": purpose,
             },
         )
         row = existing.one()
-        existing_purpose = (
-            "production" if row.purpose is None else str(row.purpose)
-        )
-        if existing_purpose != purpose:
-            raise IngestRecordConflictError(
-                f"object_id/version already exists with a different purpose: "
-                f"{record.object_id}@{record.version}"
-            )
         incoming_hash = payload_content_hash(payload)
         if (
             str(row.operation) == record.operation

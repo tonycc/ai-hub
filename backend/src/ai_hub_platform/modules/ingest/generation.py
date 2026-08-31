@@ -602,17 +602,9 @@ class InMemoryGenerationStore:
                 record.object_id,
                 record.version,
             )
-            existing_key = next(
-                (key for key in self.changes if key[:4] == version_key),
-                None,
-            )
-            if existing_key is not None:
-                existing_change = self.changes[existing_key]
-                if existing_key[4] != purpose:
-                    raise IngestRecordConflictError(
-                        f"object_id/version already exists with a different purpose: "
-                        f"{record.object_id}@{record.version}"
-                    )
+            existing_key = (*version_key, purpose)
+            existing_change = self.changes.get(existing_key)
+            if existing_change is not None:
                 if (
                     existing_change.operation != record.operation
                     or payload_content_hash(existing_change.payload)
@@ -623,7 +615,7 @@ class InMemoryGenerationStore:
                         f"{record.object_id}@{record.version}"
                     )
             else:
-                self.changes[(*version_key, purpose)] = record
+                self.changes[existing_key] = record
             if not apply_current_state:
                 continue
             state_key = (source_application_id, object_type, record.object_id)

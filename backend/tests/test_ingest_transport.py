@@ -340,31 +340,10 @@ async def test_disabled_push_to_pull_enforce_still_requires_certification(
         )
 
 
-@pytest.mark.asyncio
-async def test_enabling_push_source_blocked_until_change_log_isolated() -> None:
-    from ai_hub_platform.modules.ingest.config_store import (
-        IngestConfigStore,
-        IngestPushNotIsolatedError,
-    )
+def test_change_log_purpose_unique_contract_is_active() -> None:
     from ai_hub_platform.modules.ingest.sources import CHANGE_RECORD_PURPOSE_UNIQUE
 
-    class _EmptyResult:
-        def one_or_none(self) -> None:
-            return None
-
-        def all(self) -> list[object]:
-            return []
-
-    class _Session:
-        async def execute(self, *args: object, **kwargs: object) -> _EmptyResult:
-            return _EmptyResult()
-
-    assert CHANGE_RECORD_PURPOSE_UNIQUE is False
-    with pytest.raises(IngestPushNotIsolatedError, match="unique key"):
-        await IngestConfigStore().upsert_source(
-            _Session(),  # type: ignore[arg-type]
-            _push(enabled=True),
-        )
+    assert CHANGE_RECORD_PURPOSE_UNIQUE is True
 
 
 @pytest.mark.asyncio
@@ -545,8 +524,9 @@ def test_production_replay_and_history_exclude_certification_purpose() -> None:
         "async def ", 1
     )[0]
     conflict = insert.split("ON CONFLICT", 1)[1].split("DO NOTHING", 1)[0]
-    assert "purpose" not in conflict
-    assert "already exists with a different purpose" in insert
+    assert "purpose" in conflict
+    assert "AND purpose = :purpose" in insert
+    assert "already exists with a different purpose" not in insert
     assert "PARTITION BY source_application_id, object_type, object_id, purpose" in prune
 
 

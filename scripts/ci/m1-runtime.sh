@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# M1 identity/API runtime gate. Container OIDC issuer URLs stay on Traefik's
+# listen port 8088; host curls and callbacks use the configurable published
+# M1_EDGE_PORT so this gate can coexist with a local development stack.
 
 set -euo pipefail
 
@@ -9,9 +12,12 @@ M1_ENV_FILE="${M1_PROJECT_ROOT}/.env.example"
 M1_PROJECT_NAME="ai-hub-m1-runtime-$PPID-$$"
 M1_WORK_DIR="$(mktemp -d /tmp/ai-hub-m1-runtime.XXXXXX)"
 M1_COOKIE_JAR="${M1_WORK_DIR}/cookies"
-M1_EDGE_PORT=8088
+M1_EDGE_PORT="${M1_EDGE_PORT:-8088}"
 M1_POSTGRES_PORT="${M1_POSTGRES_PORT:-15433}"
+M1_INTERNAL_API_PORT="${M1_INTERNAL_API_PORT:-18080}"
+M1_TRAEFIK_LISTEN_PORT=8088
 M1_AUTH_BASE="http://auth.localhost:${M1_EDGE_PORT}"
+M1_ISSUER_AUTH_BASE="http://auth.localhost:${M1_TRAEFIK_LISTEN_PORT}"
 M1_PLATFORM_BASE="http://platform.localhost:${M1_EDGE_PORT}"
 M1_APP_BASE="http://app.localhost:${M1_EDGE_PORT}"
 
@@ -21,7 +27,10 @@ export STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS=1
 export STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS=3600
 export AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS=1
 export STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS=10
+export AI_HUB_EDGE_PORT="${M1_EDGE_PORT}"
 export AI_HUB_POSTGRES_PORT="${M1_POSTGRES_PORT}"
+export AI_HUB_INTERNAL_API_PORT="${M1_INTERNAL_API_PORT}"
+export STANDALONE_OIDC_REDIRECT_URI="http://app.localhost:${M1_EDGE_PORT}/auth/callback"
 
 m1_compose() {
   docker compose \
@@ -79,6 +88,10 @@ m1_location_from() {
   sed -n 's/^[Ll]ocation: //p' "$1" | tr -d '\r' | tail -n 1
 }
 
+m1_hostify_edge_url() {
+  printf '%s' "$1" | sed "s/:${M1_TRAEFIK_LISTEN_PORT}/:${M1_EDGE_PORT}/g"
+}
+
 m1_expect_code() {
   m1_expected_code=$1
   m1_actual_code=$2
@@ -105,12 +118,28 @@ m1_assert_audit() {
 
 m1_service_token() {
   m1_token_scopes=$1
-  m1_token_response="$(curl --fail --silent --show-error --max-time 15 \
-    --user 'standalone-example:local-only-standalone-oidc-client-secret' \
-    --data-urlencode 'grant_type=client_credentials' \
-    --data-urlencode "scope=${m1_token_scopes}" \
-    "${M1_AUTH_BASE}/application/o/token/")"
-  printf '%s' "${m1_token_response}" | jq --exit-status --raw-output '.access_token'
+  # Request service tokens on the compose network so their issuer remains the
+  # configured :8088 issuer even when the host edge port is overridden.
+  m1_compose exec -T platform-api \
+    python -c "
+import asyncio
+import sys
+
+from ai_hub_sdk import OidcClient
+
+async def main() -> None:
+    client = OidcClient(
+        sys.argv[1],
+        'standalone-example',
+        'local-only-standalone-oidc-client-secret',
+    )
+    try:
+        print(await client.client_credentials_token(tuple(sys.argv[2].split())), end='')
+    finally:
+        await client.close()
+
+asyncio.run(main())
+" "${M1_ISSUER_AUTH_BASE}/application/o/standalone-example/" "${m1_token_scopes}"
 }
 
 m1_login() {
@@ -126,7 +155,7 @@ m1_login() {
     --cookie-jar "${M1_COOKIE_JAR}" \
     --output /dev/null \
     "${M1_APP_BASE}/auth/login"
-  m1_authorize_url="$(m1_location_from "${m1_login_headers}")"
+  m1_authorize_url="$(m1_hostify_edge_url "$(m1_location_from "${m1_login_headers}")")"
   [[ "${m1_authorize_url}" == "${M1_AUTH_BASE}/application/o/authorize/"* ]] || \
     m1_fail "standalone login did not redirect to authentik"
   [[ "${m1_authorize_url}" == *"code_challenge_method=S256"* ]] || \
@@ -176,7 +205,7 @@ m1_login() {
     --cookie-jar "${M1_COOKIE_JAR}" \
     --output /dev/null \
     "${M1_AUTH_BASE}${m1_oauth_redirect}"
-  m1_callback_url="$(m1_location_from "${m1_oauth_headers}")"
+  m1_callback_url="$(m1_hostify_edge_url "$(m1_location_from "${m1_oauth_headers}")")"
   [[ "${m1_callback_url}" == "${M1_APP_BASE}/auth/callback"* ]] || \
     m1_fail "authentik did not return an application authorization code"
 
@@ -232,7 +261,7 @@ m1_token_header="$(printf '%s' "${m1_full_service_token}" | cut -d. -f1 | tr '_-
 printf '%s' "${m1_token_header}" | jq --exit-status '.alg == "RS256" and (.kid | type == "string")' >/dev/null
 m1_full_service_claims="$(printf '%s' "${m1_full_service_token}" | cut -d. -f2 | tr '_-' '/+' | awk '{ padding = (4 - length($0) % 4) % 4; printf "%s", $0; for (i = 0; i < padding; i++) printf "=" }' | base64 --decode 2>/dev/null)"
 printf '%s' "${m1_full_service_claims}" | jq --exit-status \
-  --arg issuer "${M1_AUTH_BASE}/application/o/standalone-example/" \
+  --arg issuer "${M1_ISSUER_AUTH_BASE}/application/o/standalone-example/" \
   '.iss == $issuer and .aud == "standalone-example" and .actor_type == "service" and .application_id == "standalone-example" and .authorization_version == 1 and (.exp > .iat)' \
   >/dev/null
 m1_bad_client_code="$(curl --silent --show-error --max-time 15 \

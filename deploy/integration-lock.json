@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "combination_id": "push-agent-v1-data2agent-0.6.5-c1c",
+  "ai_hub": {
+    "push_protocol_version": "1",
+    "raw_contract_revision": "20260831_raw_0007"
+  },
+  "data2agent": {
+    "repository": "xingyekuo-spec/data2agent",
+    "commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+    "package_version": "0.6.5",
+    "adapter": "data2agent.middle.extract.ai_hub_object_push_sink.AiHubObjectPushSink"
+  },
+  "source_application_id": "standalone-example",
+  "objects": [
+    {
+      "table": "ITEM",
+      "object_type": "erp.item",
+      "contract_version": "item.v1",
+      "schema_fingerprint": "efa50ed62f2674e7796cc34288287003db806e32c3e4b79f1323919623886312",
+      "payload_columns": ["ITEM_CODE", "ITEM_NAME"],
+      "delete_flag_column": "DELETED",
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "ITEM_CODE": {"type": "string"},
+          "ITEM_NAME": {"type": "string"}
+        },
+        "required": ["ITEM_CODE", "ITEM_NAME"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "table": "SALES_ORDER",
+      "object_type": "erp.sales_order",
+      "contract_version": "sales-order.v1",
+      "schema_fingerprint": "243cfdcad5c77d1acf8872f42fe95967945bacee0d527bb7f9e0713fbc02de85",
+      "payload_columns": ["ORDER_NO", "CUSTOMER_CODE", "ORDER_STATUS"],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "ORDER_NO": {"type": "string"},
+          "CUSTOMER_CODE": {"type": "string"},
+          "ORDER_STATUS": {"type": "string"}
+        },
+        "required": ["ORDER_NO", "CUSTOMER_CODE", "ORDER_STATUS"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "table": "SALES_ORDER_D",
+      "object_type": "erp.sales_order_line",
+      "contract_version": "sales-order-line.v1",
+      "schema_fingerprint": "5713c1dd5767ce1b443034fdec799ba95890d321832d4b4e9f4351216098734f",
+      "payload_columns": ["ORDER_NO", "LINE_NO", "ITEM_CODE", "QTY"],
+      "json_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "ORDER_NO": {"type": "string"},
+          "LINE_NO": {"type": "string"},
+          "ITEM_CODE": {"type": "string"},
+          "QTY": {"type": "string"}
+        },
+        "required": ["ORDER_NO", "LINE_NO", "ITEM_CODE", "QTY"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

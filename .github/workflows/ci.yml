@@ -80,7 +80,7 @@ jobs:
         run: bash scripts/ci/m1-runtime.sh
 
   m7-runtime:
-    name: M7 incremental ingest runtime
+    name: M7 ingest and C1-C compatibility runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -88,7 +88,16 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - name: Check out locked data2agent adapter
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: xingyekuo-spec/data2agent
+          ref: 60bcbe22f0db6457d81d24a0d9924723e085cdae
+          path: external/data2agent
+          persist-credentials: false
       - name: Run isolated M7 runtime gate
+        env:
+          DATA2AGENT_ROOT: ${{ github.workspace }}/external/data2agent
         run: bash scripts/ci/m7-runtime.sh
 
   required-gate:

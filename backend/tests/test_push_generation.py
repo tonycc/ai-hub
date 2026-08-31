@@ -882,6 +882,8 @@ async def test_sql_store_serializes_retries_and_starts_lease_reaper() -> None:
         __import__("pathlib").Path(__file__).resolve().parents[2]
         / "backend/migrations/versions/raw/20260830_raw_0003.py"
     ).read_text(encoding="utf-8")
+    transition_save = inspect.getsource(sql_mod.SqlGenerationStore.save)
+    assert transition_save.count("CAST(:to_status AS varchar(20))") >= 10
     assert "request_id" in (
         __import__("pathlib").Path(__file__).resolve().parents[2]
         / "backend/migrations/versions/raw/20260830_raw_0004.py"
@@ -913,6 +915,13 @@ async def test_sql_store_serializes_retries_and_starts_lease_reaper() -> None:
     assert "uq_raw_change_record_idempotent" not in upgrade
     assert "drop_constraint:uq_raw_change_record_idempotent" not in raw_0006
     assert "raw_change_record" in raw_0006
+    raw_0007 = (
+        __import__("pathlib").Path(__file__).resolve().parents[2]
+        / "backend/migrations/versions/raw/20260831_raw_0007.py"
+    ).read_text(encoding="utf-8")
+    assert 'release_phase = "contract"' in raw_0007
+    assert "uq_raw_change_record_idempotent_purpose" in raw_0007
+    assert "rollback_compatible_with" not in raw_0007
     assert "AuditService" in inspect.getsource(push_api)
     assert "pg_advisory_xact_lock" in inspect.getsource(lock_mod)
     assert "AND raw_batch_id IS NULL" in module
@@ -2048,7 +2057,7 @@ async def test_production_generation_does_not_reuse_certification_receipt() -> N
     assert store.current[("e10-adapter", "erp.item", "I-2")].payload == {"name": "prod"}
 
 
-async def test_expand_window_blocks_cross_purpose_change_record_versions() -> None:
+async def test_contract_key_allows_cross_purpose_change_record_versions() -> None:
     service, store, source, contract = _service()
     disabled = _source(enabled=False)
     cert_record = IngestRecord("I-1", "upsert", 1, {"name": "cert"})
@@ -2085,29 +2094,32 @@ async def test_expand_window_blocks_cross_purpose_change_record_versions() -> No
         high_watermark=1,
     )
     production = await _open(service, source, contract, external_id="prod-version")
-    with pytest.raises(PushIngestError) as conflict:
-        await service.submit_batch(
-            production.generation_id,
-            source=source,
-            contract=contract,
-            caller_application_id="e10-adapter",
-            sequence_no=1,
-            external_batch_id="prod-v1",
-            records=[production_record],
-            high_watermark=1,
-            payload_contract_version="item.v1",
-            schema_fingerprint=contract.schema_fingerprint,
-            content_sha256=batch_content_sha256([production_record]),
-        )
-    assert conflict.value.error_code == "record_version_conflict"
+    accepted = await service.submit_batch(
+        production.generation_id,
+        source=source,
+        contract=contract,
+        caller_application_id="e10-adapter",
+        sequence_no=1,
+        external_batch_id="prod-v1",
+        records=[production_record],
+        high_watermark=1,
+        payload_contract_version="item.v1",
+        schema_fingerprint=contract.schema_fingerprint,
+        content_sha256=batch_content_sha256([production_record]),
+    )
+    assert accepted["idempotent"] is False
     assert store.changes[
         ("e10-adapter", "erp.item", "I-1", 1, "certification")
     ].payload == {"name": "cert"}
-    assert ("e10-adapter", "erp.item", "I-1", 1, "production") not in store.changes
-    assert ("e10-adapter", "erp.item", "I-1") not in store.current
+    assert store.changes[
+        ("e10-adapter", "erp.item", "I-1", 1, "production")
+    ].payload == {"name": "prod"}
+    assert store.current[("e10-adapter", "erp.item", "I-1")].payload == {
+        "name": "prod"
+    }
 
 
-async def test_expand_window_rejects_same_content_cross_purpose_as_conflict() -> None:
+async def test_contract_key_keeps_same_content_separate_by_purpose() -> None:
     service, store, source, contract = _service()
     disabled = _source(enabled=False)
     record = IngestRecord("I-1", "upsert", 1, {"name": "bolt"})
@@ -2143,26 +2155,29 @@ async def test_expand_window_rejects_same_content_cross_purpose_as_conflict() ->
         high_watermark=1,
     )
     production = await _open(service, source, contract, external_id="prod-same")
-    with pytest.raises(PushIngestError) as conflict:
-        await service.submit_batch(
-            production.generation_id,
-            source=source,
-            contract=contract,
-            caller_application_id="e10-adapter",
-            sequence_no=1,
-            external_batch_id="prod-same-v1",
-            records=[record],
-            high_watermark=1,
-            payload_contract_version="item.v1",
-            schema_fingerprint=contract.schema_fingerprint,
-            content_sha256=batch_content_sha256([record]),
-        )
-    assert conflict.value.error_code == "record_version_conflict"
+    accepted = await service.submit_batch(
+        production.generation_id,
+        source=source,
+        contract=contract,
+        caller_application_id="e10-adapter",
+        sequence_no=1,
+        external_batch_id="prod-same-v1",
+        records=[record],
+        high_watermark=1,
+        payload_contract_version="item.v1",
+        schema_fingerprint=contract.schema_fingerprint,
+        content_sha256=batch_content_sha256([record]),
+    )
+    assert accepted["idempotent"] is False
     assert store.changes[
         ("e10-adapter", "erp.item", "I-1", 1, "certification")
     ].payload == {"name": "bolt"}
-    assert ("e10-adapter", "erp.item", "I-1", 1, "production") not in store.changes
-    assert ("e10-adapter", "erp.item", "I-1") not in store.current
+    assert store.changes[
+        ("e10-adapter", "erp.item", "I-1", 1, "production")
+    ].payload == {"name": "bolt"}
+    assert store.current[("e10-adapter", "erp.item", "I-1")].payload == {
+        "name": "bolt"
+    }
 
 
 async def test_full_publish_conflict_rolls_back_partial_raw_writes() -> None:
@@ -2449,4 +2464,3 @@ async def test_sql_lease_candidates_include_absolute_lifetime() -> None:
     query = inspect.getsource(generation_sql.SqlGenerationStore.list_lease_candidates)
     assert "lifetime_cutoff" in query
     assert "created_at <=" in query
-
