@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 from ai_hub_platform.modules.ingest.contract import schema_fingerprint
 from ai_hub_platform.modules.ingest.contract_store import (
+    OBSERVATION_REPLAY_MAX_ROWS,
     IngestCertificationRow,
     IngestContractConflictError,
     IngestContractError,
@@ -636,6 +637,7 @@ async def test_create_certification_rejects_unbound_observation_window(
     assert "unpack_data_ingest_check_evidence" in bind
     assert "SELECT COUNT(*)" not in bind
     assert "actual_rows = len(records)" in bind
+    assert "LIMIT :record_limit" in bind
     from ai_hub_platform.modules.ingest import contract_store as store_mod
 
     assert "expires_at" in inspect.getsource(store_mod)
@@ -842,6 +844,48 @@ async def test_bind_certification_rejects_count_select_drift() -> None:
             schema_fingerprint=fingerprint,
             json_schema={"type": "object"},
             rows_validated=2,
+            observation_batch_from=batch_from,
+            observation_batch_to=batch_to,
+            exemption_summary={"items": []},
+            full_regression_evidence_ref=str(uuid4()),
+            incremental_regression_evidence_ref=str(uuid4()),
+            rollback_drill_evidence_ref=str(uuid4()),
+            transport_mode="PULL_EXPORT",
+        )
+
+
+@pytest.mark.asyncio
+async def test_bind_certification_bounds_observation_rows_before_replay() -> None:
+    batch_from = uuid4()
+    batch_to = uuid4()
+    fingerprint = "a" * 64
+
+    class _Session:
+        async def execute(self, statement: object, params: object = None) -> _Rows:
+            sql = str(statement)
+            if "raw_ingest_batch" in sql and "raw_change_record" not in sql:
+                return _Rows(
+                    [
+                        _BatchRow(batch_from, fingerprint=fingerprint),
+                        _BatchRow(batch_to, fingerprint=fingerprint),
+                    ]
+                )
+            if "record.object_id" in sql:
+                assert "LIMIT :record_limit" in sql
+                assert isinstance(params, dict)
+                assert params["record_limit"] == OBSERVATION_REPLAY_MAX_ROWS + 1
+                row = _ChangeRow({"name": "ok"})
+                return _Rows([row] * (OBSERVATION_REPLAY_MAX_ROWS + 1))
+            raise AssertionError("oversized windows must fail before evidence lookup")
+
+    with pytest.raises(IngestContractError, match="too large to replay"):
+        await bind_certification_evidence(
+            _Session(),  # type: ignore[arg-type]
+            source_application_id="e10-adapter",
+            object_type="erp.item",
+            schema_fingerprint=fingerprint,
+            json_schema={"type": "object"},
+            rows_validated=OBSERVATION_REPLAY_MAX_ROWS + 2,
             observation_batch_from=batch_from,
             observation_batch_to=batch_to,
             exemption_summary={"items": []},
@@ -1863,4 +1907,3 @@ async def test_infer_draft_keeps_newest_change_record_version(
             "origin": "change_record",
         }
     ]
-

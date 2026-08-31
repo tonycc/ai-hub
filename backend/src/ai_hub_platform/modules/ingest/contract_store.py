@@ -381,6 +381,7 @@ async def bind_certification_evidence(
               AND batch.started_at >= :window_start
               AND batch.started_at <= :window_end
             ORDER BY record.version, record.object_id
+            LIMIT :record_limit
             """
         ),
         {
@@ -390,6 +391,7 @@ async def bind_certification_evidence(
             "transport_mode": transport_mode,
             "window_start": window_start,
             "window_end": started_end,
+            "record_limit": OBSERVATION_REPLAY_MAX_ROWS + 1,
         },
     )
     records: list[IngestRecord] = []
@@ -408,13 +410,13 @@ async def bind_certification_evidence(
         raise IngestContractError(
             "observation window does not contain any Raw change records"
         )
-    if actual_rows != rows_validated:
-        raise IngestContractError(
-            "rows_validated does not match the observation window record count"
-        )
     if actual_rows > OBSERVATION_REPLAY_MAX_ROWS:
         raise IngestContractError(
             "observation window is too large to replay against the target schema"
+        )
+    if actual_rows != rows_validated:
+        raise IngestContractError(
+            "rows_validated does not match the observation window record count"
         )
     observed = replay_payloads_against_schema(json_schema, records)
     exempted = [issue for issue in observed if _issue_is_exempted(issue, exemption_summary)]
