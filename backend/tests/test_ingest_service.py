@@ -305,3 +305,26 @@ def test_empty_full_export_tombstones_all_current_objects() -> None:
     )
     assert result["tombstones"] == 1
     assert store.current == {}
+
+
+def test_change_record_conflict_compares_operation_and_content_hash() -> None:
+    from pathlib import Path
+
+    from ai_hub_platform.modules.ingest.service import IngestRecordConflictError
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/ai_hub_platform/modules/ingest/service.py"
+    ).read_text(encoding="utf-8")
+    insert = source.split("async def _insert_change_record", 1)[1].split(
+        "async def ", 1
+    )[0]
+    assert "DO NOTHING" in insert
+    assert "SELECT operation, content_hash, purpose" in insert
+    assert ":purpose" in insert
+    conflict = insert.split("ON CONFLICT", 1)[1].split("DO NOTHING", 1)[0]
+    assert "purpose" not in conflict
+    assert "AND purpose = :purpose" not in insert
+    assert "already exists with a different purpose" in insert
+    assert "IngestRecordConflictError" in insert
+    assert IngestRecordConflictError.error_code == "record_version_conflict"

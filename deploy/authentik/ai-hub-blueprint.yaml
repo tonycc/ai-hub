@@ -7,6 +7,16 @@ metadata:
 entries:
   # Keep the identity provider as the authentication authority, while making
   # its hosted flow feel like a native AI Hub platform entry point.
+  # - theme.base=light and locale=zh-Hans are forced at the brand level so the
+  #   login page renders light-themed Chinese UI regardless of the visitor's
+  #   OS color scheme or browser locale (the portal is light-only).
+  # - branding_logo/branding_favicon point at the portal-hosted AI Hub icon so
+  #   no authentik default logo or favicon is ever served for this brand.
+  # - branding_custom_css is injected by authentik as a global <style> in the
+  #   document head (not inside a shadow root), so :host selectors are invalid
+  #   here and only document-level selectors may be used. The stylesheet must
+  #   also avoid the characters <, > and &, which the Django template context
+  #   escapes for safe embedding.
   - model: authentik_brands.brand
     id: ai-hub-auth-brand
     state: present
@@ -14,185 +24,176 @@ entries:
       domain: !Env [AI_HUB_AUTHENTIK_BRAND_DOMAIN, auth.localhost:8088]
     attrs:
       branding_title: AI Hub 平台门户
+      branding_logo: !Env [AI_HUB_BRAND_ICON_URL, http://platform.localhost:8088/ai-hub-icon.svg]
+      branding_favicon: !Env [AI_HUB_BRAND_ICON_URL, http://platform.localhost:8088/ai-hub-icon.svg]
+      attributes:
+        settings:
+          locale: zh-Hans
+          theme:
+            base: light
       branding_custom_css: |
-        :host {
-          --ak-c-login__main-ColumnWidth: min(30rem, calc(100vw - 3rem));
-          --ak-c-login__main--BackgroundColor: #ffffff;
-          --ak-c-login--BackgroundColorOverlay: #eef1f4;
-          --pf-global--primary-color--100: #c95724;
-          --pf-global--primary-color--200: #a64a21;
-          --pf-global--link--Color: #a64a21;
-          --pf-global--link--Color--hover: #c95724;
-          --pf-global--FontFamily--sans-serif: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-          --pf-global--FontFamily--heading--sans-serif: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        /* ============================================================
+           AI Hub 统一登录页品牌样式（与平台门户同一套设计语言）。
+           ============================================================ */
+
+        /* ---------- 全局底色与字体 ---------- */
+
+        html,
+        body {
+            background: #eef1f4 !important;
+            font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
         }
 
         .pf-c-login {
-          background: #eef1f4;
+            font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+
+            --pf-global--FontFamily--sans-serif: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+            --pf-global--FontFamily--heading--sans-serif: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+            --pf-global--primary-color--100: #c95724;
+            --pf-global--primary-color--200: #a64a21;
+            --pf-global--link--Color: #a64a21;
+            --pf-global--link--Color--hover: #c95724;
         }
 
+        /* 覆盖默认背景遮罩与流程背景图 */
         .pf-c-login::before {
-          background: linear-gradient(90deg, #17232d 0 31%, #eef1f4 31% 100%) !important;
+            background: #eef1f4 !important;
         }
+
+        .pf-c-login::after {
+            background: none !important;
+        }
+
+        /* ---------- 顶部门牌：AI Hub 图标 + 字标 ---------- */
 
         .pf-c-login__header {
-          position: relative;
-          z-index: 1;
-          min-height: 8rem;
-          padding: 2rem 2.5rem;
-          align-content: start;
-          justify-items: start;
-        }
-
-        ak-locale-select {
-          display: none !important;
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+            min-height: auto;
+            padding: 2rem 2.5rem;
         }
 
         .pf-c-login__header::before {
-          display: block;
-          color: #17232d;
-          content: "AI Hub";
-          font-size: 1.5rem;
-          font-weight: 750;
-          letter-spacing: -0.02em;
-          line-height: 1.2;
+            content: "";
+            width: 2.25rem;
+            height: 2.25rem;
+            flex: none;
+            border-radius: 0.5rem;
+            background: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%23c95724'/%3E%3Cpath%20d='M32%2010C34.2%2023%2041%2029.8%2054%2032%2041%2034.2%2034.2%2041%2032%2054%2029.8%2041%2023%2034.2%2010%2032%2023%2029.8%2029.8%2023%2032%2010Z'%20fill='%23ffffff'/%3E%3C/svg%3E") center / contain no-repeat;
         }
 
         .pf-c-login__header::after {
-          display: block;
-          margin-top: 0.35rem;
-          color: #71808c;
-          content: "平台门户 · 统一身份认证";
-          font-size: 0.75rem;
-          letter-spacing: 0.08em;
+            content: "AI Hub";
+            font-size: 1.375rem;
+            font-weight: 750;
+            letter-spacing: -0.02em;
+            color: #17232d;
         }
+
+        /* 语言选择器：locale 已由 brand 强制，不再展示切换 */
+        ak-locale-select {
+            display: none !important;
+        }
+
+        /* ---------- 登录卡片 ---------- */
 
         .pf-c-login__main {
-          align-self: center;
-          border: 1px solid #dfe5e9;
-          border-radius: 0.75rem;
-          box-shadow: 0 1rem 2.5rem rgb(20 33 43 / 12%);
+            background: #ffffff !important;
+            color: #1f2a33 !important;
+            border: 1px solid #dfe5e9 !important;
+            border-radius: 0.75rem !important;
+            box-shadow: 0 1rem 2.5rem rgb(20 33 43 / 10%) !important;
         }
 
+        /* 卡片内的 authentik 品牌图区域隐藏，品牌由顶部门牌承担 */
         .pf-c-login__main-header.pf-c-brand {
-          display: none;
+            display: none !important;
         }
 
         .pf-c-login__main-header .pf-c-title {
-          color: #1f2a33;
-          font-weight: 700;
-          letter-spacing: -0.03em;
+            color: #1f2a33 !important;
+            font-weight: 700;
+            letter-spacing: -0.01em;
         }
 
-        .pf-c-login__main-header .pf-c-title {
-          font-size: 0;
-        }
-
-        .pf-c-login__main-header .pf-c-title::after {
-          content: "登录 AI Hub 平台门户";
-          font-size: 1.65rem;
-        }
+        /* ---------- 表单 ---------- */
 
         .pf-c-login__main-body {
-          color: #71808c;
+            color: #465663;
         }
 
-        .pf-c-form > p {
-          font-size: 0;
-        }
-
-        .pf-c-form > p::after {
-          content: "使用企业账号访问平台能力与应用服务";
-          font-size: 0.875rem;
-        }
-
-        .pf-c-form__label[for="ak-identifier-input"] .pf-c-form__label-text {
-          font-size: 0;
-        }
-
-        .pf-c-form__label[for="ak-identifier-input"] .pf-c-form__label-text::after {
-          content: "账号或邮箱";
-          font-size: 0.875rem;
-        }
-
-        .pf-c-form__label[for="ak-identifier-input"][aria-required="true"] .pf-c-form__label-text::after {
-          content: "账号或邮箱 *";
-          margin-left: 0;
-          font-size: 0.875rem;
+        .pf-c-form__label,
+        .pf-c-form__label-text {
+            color: #465663 !important;
         }
 
         .pf-c-form-control {
-          border-color: #cbd5db;
-          border-radius: 0.375rem;
-          background: #ffffff;
-          color: #1f2a33;
+            height: 2.75rem;
+            background: #ffffff !important;
+            color: #1f2a33 !important;
+            border: 1px solid #cbd5db !important;
+            border-radius: 0.375rem !important;
+            font-size: 0.9375rem;
+        }
+
+        .pf-c-form-control::placeholder {
+            color: #98a4ad;
         }
 
         .pf-c-form-control:focus {
-          border-color: #c95724;
-          box-shadow: 0 0 0 0.2rem rgb(201 87 36 / 14%);
+            border-color: #c95724 !important;
+            box-shadow: 0 0 0 0.2rem rgb(201 87 36 / 14%) !important;
         }
+
+        /* ---------- 登录按钮 ---------- */
 
         .pf-c-button.pf-m-primary {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 2.75rem;
-          padding: 0.75rem 1rem;
-          border-radius: 0.375rem;
-          background: #c95724;
-          font-weight: 650;
-          font-size: 0;
-          line-height: 1.25;
-        }
-
-        .pf-c-button.pf-m-primary::after {
-          display: inline-block;
-          content: "登录";
-          font-size: 0.875rem;
-          line-height: 1.25;
+            min-height: 2.75rem;
+            background: #c95724 !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 0.375rem !important;
+            font-size: 0.9375rem;
+            font-weight: 600;
         }
 
         .pf-c-button.pf-m-primary:hover,
         .pf-c-button.pf-m-primary:focus {
-          background: #a64a21;
+            background: #a64a21 !important;
+            color: #ffffff !important;
         }
 
-        .pf-c-login__footer .pf-c-list {
-          color: #71808c;
-          font-size: 0;
+        /* ---------- 页脚：替换默认 "Powered by authentik" ---------- */
+
+        ak-brand-links {
+            display: none !important;
         }
 
-        .pf-c-login__footer .pf-c-list li {
-          font-size: 0;
+        .pf-c-login__footer {
+            color: #8a97a1 !important;
+            filter: none !important;
         }
 
-        .pf-c-login__footer .pf-c-list li::after {
-          content: "AI Hub 统一身份服务";
-          font-size: 0.75rem;
+        .pf-c-login__footer::after {
+            content: "AI Hub 统一身份服务";
+            font-size: 0.75rem;
+            letter-spacing: 0.02em;
         }
 
-        ::slotted(ak-brand-links) {
-          display: none !important;
+        /* ---------- 错误与提示 ---------- */
+
+        .pf-c-form__helper-text.pf-m-error,
+        .pf-c-form__helper-text.pf-m-error .pf-c-form__helper-text-icon {
+            color: #b8423e !important;
         }
 
-        @media (max-width: 48rem) {
-          .pf-c-login::before {
-            background: #eef1f4 !important;
-          }
+        /* ---------- 移动端 ---------- */
 
-          .pf-c-login__header {
-            min-height: 5rem;
-            padding: 1.5rem;
-          }
-
-          .pf-c-login__header::before {
-            color: #17232d;
-          }
-
-          .pf-c-login__header::after {
-            color: #71808c;
-          }
+        @media (max-width: 35rem) {
+            .pf-c-login__header {
+                padding: 1.25rem;
+            }
         }
 
   - model: authentik_flows.flow
@@ -330,6 +331,15 @@ entries:
       expression: "return {}"
 
   - model: authentik_providers_oauth2.scopemapping
+    id: ai-hub-ingest-push-scope
+    identifiers:
+      name: AI Hub ai_hub.ingest.push
+    attrs:
+      scope_name: ai_hub.ingest.push
+      description: Push object batches into platform DATA_INGEST.
+      expression: "return {}"
+
+  - model: authentik_providers_oauth2.scopemapping
     id: platform-data-read-scope
     identifiers:
       name: AI Hub platform.data.read
@@ -372,6 +382,7 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.export]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.push]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.data.read]]
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
 
@@ -538,5 +549,17 @@ entries:
       email: app-developer@ai-hub.local
       type: internal
       password: !Env AI_HUB_UAT_USER_PASSWORD
+      attributes:
+        authorization_version: 1
+
+  - model: authentik_core.user
+    state: created
+    identifiers:
+      username: ai-hub-platform-ingest-operator
+    attrs:
+      name: 数据接入运维员
+      email: platform-ingest-operator@ai-hub.local
+      type: internal
+      password: !Env AI_HUB_INGEST_OPERATOR_PASSWORD
       attributes:
         authorization_version: 1

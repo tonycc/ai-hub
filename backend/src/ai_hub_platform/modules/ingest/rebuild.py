@@ -10,11 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ai_hub_platform.config import RawWorkerSettings
 from ai_hub_platform.modules.ingest.export_client import EXPORT_TOKEN_SCOPES, ExportClient
 from ai_hub_platform.modules.ingest.reconcile import RebuildMode, rebuild_from_log
-from ai_hub_platform.modules.ingest.scheduler import IngestScheduler
+from ai_hub_platform.modules.ingest.scheduler import create_runtime_scheduler
 from ai_hub_platform.modules.ingest.sources import (
     IngestSourceConfig,
     load_source_configs_from_db,
 )
+
+
+class SourceRebuildNotSupported(ValueError):
+    error_code = "source_rebuild_not_supported"
+
+    def __init__(self, source_application_id: str, object_type: str) -> None:
+        self.source_application_id = source_application_id
+        self.object_type = object_type
+        super().__init__(
+            "source rebuild is not supported for PUSH_AGENT "
+            f"{source_application_id}/{object_type}; start a new full generation"
+        )
 
 
 async def _matching_ingest_source(
@@ -36,6 +48,8 @@ async def _matching_ingest_source(
             "No ingest source configured for "
             f"{source_application_id}/{object_type} in platform_core.ingest_source"
         )
+    if matching[0].transport_mode == "PUSH_AGENT":
+        raise SourceRebuildNotSupported(source_application_id, object_type)
     return matching[0]
 
 
@@ -68,7 +82,7 @@ async def sync_configured_source(
             token_provider=token_provider,
             timeout_seconds=settings.http_timeout_seconds,
         )
-        scheduler = IngestScheduler(
+        scheduler = await create_runtime_scheduler(
             settings,
             sources=[source],
             sessions=sessions,

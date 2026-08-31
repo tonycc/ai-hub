@@ -187,6 +187,23 @@ BEGIN
 
     IF NOT has_table_privilege('ai_hub_raw', 'platform_core.ingest_source', 'SELECT')
        OR NOT has_table_privilege('ai_hub_raw', 'platform_core.ingest_policy', 'SELECT')
+       OR (
+            to_regclass('platform_core.ingest_contract') IS NOT NULL
+            AND (
+                NOT has_table_privilege('ai_hub_raw', 'platform_core.ingest_contract', 'SELECT')
+                OR NOT has_table_privilege(
+                    'ai_hub_raw', 'platform_core.ingest_contract_certification', 'SELECT'
+                )
+                OR has_table_privilege(
+                    'ai_hub_raw', 'platform_core.ingest_contract', 'INSERT,UPDATE,DELETE'
+                )
+                OR has_table_privilege(
+                    'ai_hub_raw',
+                    'platform_core.ingest_contract_certification',
+                    'INSERT,UPDATE,DELETE'
+                )
+            )
+       )
        OR has_table_privilege('ai_hub_raw', 'platform_core.ingest_source', 'INSERT,UPDATE,DELETE')
        OR has_table_privilege('ai_hub_raw', 'platform_core.ingest_policy', 'INSERT,UPDATE,DELETE') THEN
         RAISE EXCEPTION 'raw runtime ingest config privilege is not read-only';
@@ -204,7 +221,12 @@ BEGIN
         SELECT 1
         FROM pg_tables
         WHERE schemaname = 'platform_core'
-          AND tablename NOT IN ('ingest_source', 'ingest_policy')
+          AND tablename NOT IN (
+              'ingest_source',
+              'ingest_policy',
+              'ingest_contract',
+              'ingest_contract_certification'
+          )
           AND has_table_privilege(
               'ai_hub_raw',
               format('%I.%I', schemaname, tablename),
@@ -265,6 +287,73 @@ BEGIN
                'ai_hub_raw', 'platform_raw.raw_ingest_batch', 'SELECT,INSERT,UPDATE,DELETE'
            ) THEN
             RAISE EXCEPTION 'raw runtime platform_raw privilege is invalid';
+        END IF;
+
+        IF to_regclass('platform_raw.raw_push_generation') IS NOT NULL THEN
+            IF NOT has_table_privilege(
+                   'ai_hub_raw',
+                   'platform_raw.raw_push_generation',
+                   'SELECT,INSERT,UPDATE,DELETE'
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_raw',
+                   'platform_raw.raw_push_staging',
+                   'SELECT,INSERT,UPDATE,DELETE'
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_raw',
+                   'platform_raw.raw_push_batch_receipt',
+                   'SELECT,INSERT,UPDATE,DELETE'
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_raw',
+                   'platform_raw.raw_push_committed_watermark',
+                   'SELECT,INSERT,UPDATE,DELETE'
+               )
+               OR (
+                    to_regclass('platform_raw.raw_push_generation_transition') IS NOT NULL
+                    AND NOT has_table_privilege(
+                        'ai_hub_raw',
+                        'platform_raw.raw_push_generation_transition',
+                        'SELECT,INSERT,UPDATE,DELETE'
+                    )
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_platform', 'platform_raw.raw_push_generation', 'SELECT'
+               )
+               OR has_table_privilege(
+                   'ai_hub_platform',
+                   'platform_raw.raw_push_generation',
+                   'INSERT,UPDATE,DELETE'
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_platform', 'platform_raw.raw_push_staging', 'SELECT'
+               )
+               OR has_table_privilege(
+                   'ai_hub_platform',
+                   'platform_raw.raw_push_staging',
+                   'INSERT,UPDATE,DELETE'
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_platform', 'platform_raw.raw_push_batch_receipt', 'SELECT'
+               )
+               OR has_table_privilege(
+                   'ai_hub_platform',
+                   'platform_raw.raw_push_batch_receipt',
+                   'INSERT,UPDATE,DELETE'
+               )
+               OR NOT has_table_privilege(
+                   'ai_hub_platform',
+                   'platform_raw.raw_push_committed_watermark',
+                   'SELECT'
+               )
+               OR has_table_privilege(
+                   'ai_hub_platform',
+                   'platform_raw.raw_push_committed_watermark',
+                   'INSERT,UPDATE,DELETE'
+               ) THEN
+                RAISE EXCEPTION 'push raw table privilege is invalid';
+            END IF;
         END IF;
 
         IF (

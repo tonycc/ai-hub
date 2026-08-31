@@ -10,6 +10,7 @@ dependencies = [
   "cryptography>=46,<51",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
+  "jsonschema>=4.25,<5",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.10,<3",
   "pyjwt[crypto]>=2.10,<3",
@@ -23,7 +24,6 @@ ai-hub-sdk = { workspace = true }
 [dependency-groups]
 dev = [
   "import-linter>=2.3,<3",
-  "jsonschema>=4.25,<5",
   "pyright>=1.1.403",
   "pytest>=8.4",
   "pytest-asyncio>=1.0",

@@ -16,6 +16,7 @@ from ai_hub_platform.modules.ingest.service import (
     payload_content_hash,
     should_apply_version,
 )
+from ai_hub_platform.modules.ingest.source_lock import lock_ingest_source
 
 RebuildMode = Literal["log", "source"]
 
@@ -180,10 +181,14 @@ class IngestReconcileService:
                     """
                     SELECT object_id, operation, version, payload,
                            payload_contract_version, content_hash
-                    FROM platform_raw.raw_change_record
-                    WHERE source_application_id = :source_application_id
-                      AND object_type = :object_type
-                    ORDER BY version ASC, id ASC
+                    FROM platform_raw.raw_change_record AS record
+                    JOIN platform_raw.raw_ingest_batch AS batch
+                      ON batch.batch_id = record.batch_id
+                    WHERE record.source_application_id = :source_application_id
+                      AND record.object_type = :object_type
+                      AND COALESCE(batch.purpose, 'production') = 'production'
+                      AND COALESCE(record.purpose, 'production') = 'production'
+                    ORDER BY record.version ASC, record.id ASC
                     """
                 ),
                 {
@@ -286,6 +291,7 @@ class IngestReconcileService:
         object_type: str,
     ) -> dict[str, Any]:
         """Replace current-state rows by replaying the authoritative change log."""
+        await lock_ingest_source(session, source_application_id, object_type)
         entries = await self.load_change_log(
             session,
             source_application_id=source_application_id,
@@ -404,7 +410,7 @@ async def prune_change_records(
     ranked = """
         SELECT id,
                ROW_NUMBER() OVER (
-                   PARTITION BY source_application_id, object_type, object_id
+                   PARTITION BY source_application_id, object_type, object_id, purpose
                    ORDER BY version DESC
                ) AS version_rank,
                received_at

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal
 
@@ -14,6 +15,7 @@ EXPORT_SCOPE = "ai_hub.ingest.export"
 IDENTITY_SCOPE = "ai_hub.identity"
 EXPORT_TOKEN_SCOPES = (IDENTITY_SCOPE, EXPORT_SCOPE)
 TokenProvider = Callable[[], Awaitable[str]]
+PageCallback = Callable[["ExportPage"], Awaitable[None] | None]
 
 
 class ExportClientError(RuntimeError):
@@ -129,6 +131,7 @@ class ExportClient:
         since_version: int,
         limit: int,
         mode: Literal["full", "incremental"] = "incremental",
+        on_page: PageCallback | None = None,
     ) -> tuple[list[ExportRecord], int, str]:
         """Paginate until exhausted.
 
@@ -160,6 +163,10 @@ class ExportClient:
                 )
             all_records.extend(page.records)
             high_watermark = max(high_watermark, page.high_watermark)
+            if on_page is not None:
+                outcome = on_page(page)
+                if inspect.isawaitable(outcome):
+                    await outcome
             if not page.has_more:
                 break
             if not page.records:

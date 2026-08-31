@@ -234,6 +234,34 @@ def portal_permission_dependency(
     return dependency
 
 
+def portal_any_permission_dependency(
+    *permission_codes: str,
+    require_csrf: bool = False,
+):
+    async def dependency(
+        request: Request,
+        principal: Annotated[PortalPrincipal, Depends(portal_principal)],
+        csrf_header: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+    ) -> PortalPrincipal:
+        if not any(principal.allows(code) for code in permission_codes):
+            await _audit_portal_denial(
+                get_database(request),
+                request,
+                error_code="platform_permission_denied",
+                actor_id=principal.subject,
+            )
+            raise ApiError(
+                403,
+                "platform_permission_denied",
+                "Platform role does not permit this operation for the requested resource",
+            )
+        if require_csrf:
+            await _validate_portal_csrf(request, principal, csrf_header)
+        return principal
+
+    return dependency
+
+
 async def _validate_portal_csrf(
     request: Request,
     principal: PortalPrincipal,

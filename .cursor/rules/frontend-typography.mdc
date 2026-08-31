@@ -1,0 +1,52 @@
+---
+description: 门户前端排版标尺 — 所有页面字体和间距必须使用 CSS 变量，不得硬编码像素值
+globs: src/**/*.vue, src/**/*.css
+alwaysApply: false
+---
+
+# 前端排版标尺
+
+所有 Vue 组件和 CSS 文件中的字体大小、卡片间距必须使用 `src/styles/index.css` 中定义的 CSS 变量，禁止硬编码像素值。
+
+## 字体标尺
+
+| 变量 | 大小 | 用途 |
+| --- | --- | --- |
+| `--font-eyebrow` | 11px | 眉题、标签前缀、辅助 code |
+| `--font-caption` | 12px | 辅助说明、提示、时间戳、状态前缀 |
+| `--font-body` | 13px | 正文、表格内容、区块描述 |
+| `--font-body-lg` | 14px | 卡片标题、强调正文、提醒条标题 |
+| `--font-heading` | 16px / 字重 600 | 区块标题 h2/h3 |
+| `--font-page-title` | 18px | 页面主标题 |
+| `--font-metric` | 25px | 指标数值 |
+
+## 间距标尺
+
+| 变量 | 大小 | 用途 |
+| --- | --- | --- |
+| `--space-gap` | 12px | 元素间距 |
+| `--space-gap-lg` | 14px | 网格间距 |
+| `--space-card` | 15px | 卡片内边距 |
+| `--space-card-lg` | 17px | 大卡片/提醒条内边距 |
+
+## 规则
+
+1. **字体和间距只能引用上述变量**，新增语义时在 `:root` 追加变量，不直接在组件中写像素值
+2. 组件 `scoped` 样式中的 `font-size` 必须出现 `var(--font-*)`
+3. 卡片 `padding` 和网格 `gap` 必须出现 `var(--space-*)`
+4. 图标尺寸（`font-size` 在图标容器上）可以硬编码，但应遵循 18-21px 递增
+5. Element Plus 组件（`el-table`、`el-button` 等）的全局覆盖在 `index.css` 中统一设置，组件内不重复覆盖
+
+## 反例
+
+```css
+/* BAD — 硬编码像素 */
+.card-title { font-size: 14px; }
+.section-heading p { font-size: 11px; }
+.card { padding: 15px; gap: 12px; }
+
+/* GOOD — 引用排版变量 */
+.card-title { font-size: var(--font-body-lg); }
+.section-heading p { font-size: var(--font-caption); }
+.card { padding: var(--space-card); gap: var(--space-gap); }
+```

@@ -36,3 +36,38 @@ export async function ingestRunRebuild({ mode, sourceApplicationId, objectType }
 export async function ingestRunPrune(dryRun) {
   return apiRequest('ingest/actions/prune', { method: 'POST', body: { dry_run: dryRun } })
 }
+
+export async function ingestListContracts() {
+  return apiRequest('ingest/contracts')
+}
+
+export async function ingestSaveContract(body) {
+  return apiRequest('ingest/contracts', { method: 'PUT', body })
+}
+
+export async function ingestInferContract(body) {
+  return apiRequest('ingest/contracts/infer', { method: 'POST', body })
+}
+
+export async function ingestActivateContract(body) {
+  return apiRequest('ingest/contracts/activate', { method: 'POST', body })
+}
+
+export async function ingestRejectContract(body) {
+  return apiRequest('ingest/contracts/reject', { method: 'POST', body })
+}
+
+export async function ingestListCertifications() {
+  return apiRequest('ingest/contracts/certifications')
+}
+
+export async function ingestCreateCertification(body) {
+  return apiRequest('ingest/contracts/certifications', { method: 'POST', body })
+}
+
+export async function ingestApproveCertification(certificationId) {
+  return apiRequest(`ingest/contracts/certifications/${certificationId}/approve`, {
+    method: 'POST',
+    body: {},
+  })
+}

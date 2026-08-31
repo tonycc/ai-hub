@@ -7,14 +7,22 @@ from typing import Any
 
 import pytest
 from ai_hub_platform.operations.release import (
+    LIVE_DATA_CONDITION_CREDENTIALS,
+    LIVE_DATA_CONDITION_NO_ENFORCE_PULL,
+    LIVE_DATA_CONDITION_NO_PUSH_SOURCES,
     RELEASE_SCHEMA_VERSION,
     ReleaseError,
+    assert_image_rollback_declared,
+    format_live_data_condition,
+    live_data_conditions_for_rollback,
     migration_heads,
+    parse_live_data_conditions,
     validate_backup_receipt,
     validate_migration_transition,
     validate_release_manifest,
 )
 from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPERATIONS = PROJECT_ROOT / "deploy" / "operations"
@@ -107,6 +115,14 @@ def test_release_manifest_matches_schema_and_runtime_invariants() -> None:
     validate_release_manifest(manifest)
 
 
+def test_release_manifest_rejects_inconsistent_rollback_schema_compatible() -> None:
+    manifest = _manifest()
+    manifest["migrations"]["core"]["rollback_schema_compatible"] = False
+    manifest["rollback"]["schema_compatible"] = True
+    with pytest.raises(ReleaseError, match="rollback.schema_compatible must equal"):
+        validate_release_manifest(manifest)
+
+
 def test_production_manifest_rejects_mutable_images_and_secret_fields() -> None:
     manifest = _manifest()
     manifest["images"]["platform"] = "registry.example.test/ai-hub/platform:latest"
@@ -159,6 +175,11 @@ def test_m4_credential_migration_is_expand_only_and_old_schema_compatible() -> N
         "20260824_core_0017",
         "20260824_core_0018",
         "20260824_core_0019",
+        "20260829_core_0020",
+        "20260829_core_0021",
+        "20260830_core_0022",
+        "20260830_core_0023",
+        "20260830_core_0024",
     )
     assert transitions["core"].phases == (
         "expand",
@@ -177,10 +198,100 @@ def test_m4_credential_migration_is_expand_only_and_old_schema_compatible() -> N
         "expand",
         "expand",
         "expand",
+        "expand",
+        "expand",
+        "expand",
+        "expand",
+        "expand",
     )
-    assert transitions["core"].rollback_schema_compatible is True
-    assert transitions["raw"].revisions == ()
+    assert transitions["core"].rollback_schema_compatible is False
+    assert transitions["raw"].revisions == (
+        "20260829_raw_0002",
+        "20260830_raw_0003",
+        "20260830_raw_0004",
+        "20260830_raw_0005",
+        "20260830_raw_0006",
+    )
+    assert transitions["raw"].phases == (
+        "expand",
+        "expand",
+        "expand",
+        "expand",
+        "expand",
+    )
+    assert transitions["raw"].rollback_schema_compatible is True
     assert set(transitions) == {"core", "raw"}
+
+
+def test_image_rollback_without_schema_compat_requires_no_push_sources() -> None:
+    credentials = (LIVE_DATA_CONDITION_CREDENTIALS,)
+    combined = live_data_conditions_for_rollback(schema_compatible=False)
+    assert format_live_data_condition() == LIVE_DATA_CONDITION_CREDENTIALS
+    assert LIVE_DATA_CONDITION_NO_PUSH_SOURCES not in parse_live_data_conditions(
+        format_live_data_condition()
+    )
+    assert LIVE_DATA_CONDITION_NO_PUSH_SOURCES in combined
+    assert LIVE_DATA_CONDITION_NO_ENFORCE_PULL in combined
+    assert_image_rollback_declared(schema_compatible=True, conditions=credentials)
+    assert_image_rollback_declared(schema_compatible=False, conditions=combined)
+    with pytest.raises(ReleaseError, match="schema-compatible image rollback"):
+        assert_image_rollback_declared(schema_compatible=False, conditions=credentials)
+    with pytest.raises(ReleaseError, match="schema-compatible image rollback"):
+        assert_image_rollback_declared(
+            schema_compatible=False,
+            conditions=(*credentials, LIVE_DATA_CONDITION_NO_PUSH_SOURCES),
+        )
+    with pytest.raises(ReleaseError, match="Unknown rollback live-data condition"):
+        parse_live_data_conditions("not_a_real_condition")
+    with pytest.raises(ReleaseError, match="must include"):
+        parse_live_data_conditions(LIVE_DATA_CONDITION_NO_PUSH_SOURCES)
+
+
+def test_push_rollback_probe_does_not_parse_ingest_source_on_old_schema() -> None:
+    source = (
+        PROJECT_ROOT / "backend/src/ai_hub_platform/operations/release.py"
+    ).read_text(encoding="utf-8")
+    exists_sql = source.split("_PUSH_COLUMN_EXISTS_SQL = ", 1)[1].split(
+        "_PUSH_SOURCE_COUNT_SQL", 1
+    )[0]
+    count_sql = source.split("_PUSH_SOURCE_COUNT_SQL = ", 1)[1].split(
+        "def _assert_no_push_ingest_sources", 1
+    )[0]
+    function = source.split("def _assert_no_push_ingest_sources", 1)[1].split(
+        "\ndef assert_live_rollback_compatible", 1
+    )[0]
+    assert "FROM platform_core.ingest_source" not in exists_sql
+    assert "information_schema.columns" in exists_sql
+    assert "FROM platform_core.ingest_source" in count_sql
+    assert function.index("_PUSH_COLUMN_EXISTS_SQL") < function.index(
+        "_PUSH_SOURCE_COUNT_SQL"
+    )
+    assert "SELECT CASE" not in function
+    enforce_sql = source.split("_ENFORCE_PULL_COUNT_SQL = ", 1)[1].split(
+        "def _assert_no_push_ingest_sources", 1
+    )[0]
+    assert "contract_validation_mode = 'ENFORCE'" in enforce_sql
+    assert "AND enabled" not in enforce_sql
+    assert "_assert_no_enforce_pull_ingest_sources" in function
+
+
+def test_release_manifest_rejects_omitting_credential_live_data_condition() -> None:
+    manifest = _manifest()
+    manifest["rollback"]["live_data_condition"] = LIVE_DATA_CONDITION_NO_PUSH_SOURCES
+    schema = json.loads((OPERATIONS / "release-manifest.schema.json").read_text(encoding="utf-8"))
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(  # pyright: ignore[reportUnknownMemberType]
+            manifest
+        )
+    with pytest.raises(ReleaseError, match="must include"):
+        validate_release_manifest(manifest)
+    manifest = _manifest()
+    manifest["rollback"]["live_data_condition"] = format_live_data_condition()
+    schema = json.loads((OPERATIONS / "release-manifest.schema.json").read_text(encoding="utf-8"))
+    Draft202012Validator(schema, format_checker=FormatChecker()).validate(  # pyright: ignore[reportUnknownMemberType]
+        manifest
+    )
+    validate_release_manifest(manifest)
 
 
 def test_expand_migration_gate_rejects_unreviewed_destructive_operation(

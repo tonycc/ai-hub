@@ -140,6 +140,8 @@ printf 'Frontend command (another terminal): npm run dev\n'
 printf 'Backend: Uvicorn reload + debug logs.\n'
 printf 'Platform administrator: ai-hub-platform-admin\n'
 printf 'Password source:        AI_HUB_UAT_USER_PASSWORD in .env\n'
+printf 'Ingest operator:        ai-hub-platform-ingest-operator\n'
+printf 'Operator password:      AI_HUB_INGEST_OPERATOR_PASSWORD in .env\n'
 printf 'Testing guide:          docs/local-full-flow-test-guide.md\n'
 
 if ((LOCAL_FIRST_RUN == 1)); then

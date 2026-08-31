@@ -47,7 +47,7 @@ ASSETS: tuple[AssetDefinition, ...] = (
         "platform-openapi",
         "OPENAPI",
         "Platform API OpenAPI",
-        "0.2.1",
+        "0.3.4",
         "contracts/api/platform-api.openapi.yaml",
         "application/yaml",
         "API_CLIENT",

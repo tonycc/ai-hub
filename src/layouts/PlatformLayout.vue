@@ -54,7 +54,7 @@ const routePermissions = {
   '/platform/integrations': 'platform.application.read',
   '/platform/audit': 'platform.audit.read',
   '/platform/operations': 'platform.operations.read',
-  '/platform/ingest': 'platform.operations.read',
+  '/platform/ingest': 'platform.ingest.read',
   '/platform/settings': 'platform.operations.read',
   '/platform/developer': 'platform.developer.read',
   '/platform/platform-users': 'platform.identity.read',

@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: AI Hub Platform API
-  version: 0.2.1
+  version: 0.3.4
   description: |
-    Versioned public identity, authorization, application, notification, aggregated data, and health API.
+    Versioned public identity, authorization, application, notification, aggregated data, DATA_INGEST Push, and health API.
 
-    **Authentication:** Bearer access token from authentik OIDC. Every protected operation requires scope `ai_hub.identity` plus the operation-specific scopes listed on each path.
+    **Authentication:** Bearer access token from authentik OIDC. Every protected operation requires scope `ai_hub.identity` plus the operation-specific scopes listed on each path. Push ingest additionally requires `ai_hub.ingest.push` on a DATA_INGEST service token.
 
     **Application context:** Send `X-Application-ID` when the operation is scoped to a registered application (see parameter descriptions).
 
@@ -332,6 +332,189 @@ paths:
               schema: {$ref: "#/components/schemas/AggregatedObjectHistoryList"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/ingest/push/capabilities:
+    get:
+      operationId: getPushIngestCapabilities
+      summary: Push ingest capabilities
+      description: |
+        Returns supported protocol versions, contract requirements, and batch limits.
+        Available even when `DATA_INGEST_PUSH_ENABLED` is false so adapters can detect the flag.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      responses:
+        "200":
+          description: Push protocol capabilities for this platform.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushCapabilities"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /platform-api/v1/ingest/push/generations:
+    post:
+      operationId: createPushGeneration
+      summary: Start a Push generation
+      description: |
+        Create an OPEN generation for one source/object and sync mode.
+        Identical request digest is idempotent; a conflicting digest returns 409.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreatePushGenerationRequest"}
+      responses:
+        "200":
+          description: Created or replayed generation state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushGeneration"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /platform-api/v1/ingest/push/generations/{generation_id}:
+    get:
+      operationId: getPushGeneration
+      summary: Read Push generation status
+      description: Crash-recovery read of status, next sequence, leases, and the durable receipt.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      parameters:
+        - {$ref: "#/components/parameters/PushGenerationId"}
+      responses:
+        "200":
+          description: Current generation state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushGeneration"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /platform-api/v1/ingest/push/generations/{generation_id}/heartbeat:
+    post:
+      operationId: heartbeatPushGeneration
+      summary: Extend the client lease
+      description: Monotonically extend `client_lease_expires_at` while the generation is OPEN or RECEIVING.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      parameters:
+        - {$ref: "#/components/parameters/PushGenerationId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PushHeartbeatRequest"}
+      responses:
+        "200":
+          description: Generation with the extended lease.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushGeneration"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /platform-api/v1/ingest/push/generations/{generation_id}/batches:
+    post:
+      operationId: submitPushBatch
+      summary: Submit an ordered Push batch
+      description: |
+        Accept the next contiguous `sequence_no`. Identical `external_batch_id` + digest
+        within the same generation `purpose` returns the original receipt and does not
+        rewrite Raw. Uniqueness is `(source_application_id, object_type, purpose)`. A
+        completed or already materialized batch stays unique across later generations
+        of that purpose; an aborted batch that never received `raw_batch_id` may be
+        claimed by a later generation. Envelope fields (watermark, contract version,
+        fingerprint) are persisted with the receipt.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      parameters:
+        - {$ref: "#/components/parameters/PushGenerationId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SubmitPushBatchRequest"}
+      responses:
+        "200":
+          description: Durable batch receipt.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushBatchReceipt"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /platform-api/v1/ingest/push/generations/{generation_id}/complete:
+    post:
+      operationId: completePushGeneration
+      summary: Complete a Push generation
+      description: |
+        Reentrant complete. Full mode publishes staging and synthesizes tombstones in the
+        final transaction. Incremental mode only verifies persisted batches.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      parameters:
+        - {$ref: "#/components/parameters/PushGenerationId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CompletePushGenerationRequest"}
+      responses:
+        "200":
+          description: Completed generation and durable receipt.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushGeneration"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /platform-api/v1/ingest/push/generations/{generation_id}/abort:
+    post:
+      operationId: abortPushGeneration
+      summary: Abort an unpublished Push generation
+      description: Abandon unpublished full staging. Incremental batches already committed are not reversed.
+      tags: [ingest-push]
+      security:
+        - oidcAuth: [ai_hub.identity, ai_hub.ingest.push]
+      parameters:
+        - {$ref: "#/components/parameters/PushGenerationId"}
+      responses:
+        "200":
+          description: Aborted generation state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PushGeneration"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
 components:
   securitySchemes:
     oidcAuth:
@@ -357,6 +540,12 @@ components:
       required: true
       description: Registered application id path parameter.
       schema: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"}
+    PushGenerationId:
+      name: generation_id
+      in: path
+      required: true
+      description: Platform generation UUID returned by create.
+      schema: {type: string, format: uuid}
   responses:
     Unauthorized:
       description: Missing, malformed, expired, or otherwise invalid bearer token.
@@ -370,6 +559,26 @@ components:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
     NotFound:
       description: The requested resource was not found in the caller's scope.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    BadRequest:
+      description: Request body or envelope failed validation.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Conflict:
+      description: Generation, sequence, digest, or source concurrency conflict.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    UnprocessableEntity:
+      description: Request body or path parameters failed schema validation.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    ServiceUnavailable:
+      description: DATA_INGEST Push is disabled on this platform.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -573,3 +782,171 @@ components:
         message: {type: string, description: Human-readable summary safe to show operators.}
         details: {type: object, additionalProperties: true, description: Structured validation or context fields.}
         request_id: {type: string, description: Correlation id; echo on support requests.}
+    PushCapabilities:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - protocol_versions
+        - contract_required
+        - payload_max_bytes
+        - page_limit_max
+        - active_generation_limit
+        - max_batches
+        - max_generation_rows
+        - max_generation_bytes
+        - max_generation_lifetime_seconds
+      properties:
+        enabled: {type: boolean, description: Whether DATA_INGEST Push traffic is accepted.}
+        protocol_versions:
+          type: array
+          items: {type: string}
+          description: Supported Push protocol versions.
+        contract_required: {type: boolean, description: Push always requires an ACTIVE ingest contract.}
+        payload_max_bytes: {type: integer, minimum: 1, description: Maximum payload bytes per record.}
+        page_limit_max: {type: integer, minimum: 1, description: Maximum records per batch.}
+        active_generation_limit: {type: integer, minimum: 1, description: Concurrent active generations per source/object.}
+        max_batches: {type: integer, minimum: 1, description: Maximum accepted batches per generation, including empty batches.}
+        max_generation_rows: {type: integer, minimum: 1, description: Maximum cumulative records per generation.}
+        max_generation_bytes: {type: integer, minimum: 1, description: Maximum cumulative canonical payload bytes per generation.}
+        max_generation_lifetime_seconds: {type: integer, minimum: 1, description: Absolute generation lifetime from created_at, independent of client lease renewals.}
+    CreatePushGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [source_application_id, object_type, external_generation_id, sync_mode]
+      properties:
+        source_application_id: {type: string, minLength: 1, maxLength: 63}
+        object_type: {type: string, minLength: 1, maxLength: 100}
+        external_generation_id: {type: string, minLength: 1, maxLength: 200}
+        sync_mode: {type: string, enum: [full, incremental]}
+        protocol_version: {type: string, default: "1"}
+        lease_seconds: {type: integer, minimum: 5, maximum: 3600, default: 60}
+        purpose: {type: string, enum: [production, certification], default: production, description: certification allows a disabled Push source to submit observation batches before enablement. Enabling the source still requires an APPROVED certification.}
+    PushHeartbeatRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        lease_seconds: {type: integer, minimum: 5, maximum: 3600, default: 60}
+    PushRecord:
+      type: object
+      additionalProperties: false
+      required: [object_id, operation, version]
+      properties:
+        object_id: {type: string, minLength: 1, maxLength: 200}
+        operation: {type: string, enum: [upsert, delete]}
+        version: {type: integer, format: int64, minimum: 1, maximum: 9223372036854775807}
+        payload: {type: [object, "null"], additionalProperties: true}
+    SubmitPushBatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - sequence_no
+        - external_batch_id
+        - payload_contract_version
+        - high_watermark
+        - content_sha256
+        - schema_fingerprint
+        - records
+      properties:
+        sequence_no: {type: integer, minimum: 1}
+        external_batch_id: {type: string, minLength: 1, maxLength: 200}
+        payload_contract_version: {type: string, minLength: 1, maxLength: 100}
+        high_watermark: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775807}
+        content_sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Lowercase SHA-256 hex digest of the batch records.
+
+            Canonicalization (must match the server exactly):
+            1. For each record, in request order, build an object with keys
+               object_id, operation, version, payload, content_hash.
+            2. payload is the JSON object, or null for deletes.
+            3. content_hash is SHA-256 of the UTF-8 bytes of canonical JSON of
+               payload, or SHA-256 of empty bytes when payload is null
+               (e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855).
+            4. Canonical JSON is json.dumps(..., ensure_ascii=True,
+               separators=(",", ":"), sort_keys=True). Unicode is escaped.
+               Object keys are sorted. Empty objects are {}. JSON null is null.
+            5. Digest that array with the same canonical JSON, then SHA-256 hex.
+            An empty records array digests `[]`.
+        schema_fingerprint: {type: string, minLength: 64, maxLength: 64, pattern: "^[0-9a-f]{64}$"}
+        records:
+          type: array
+          maxItems: 50000
+          items: {$ref: "#/components/schemas/PushRecord"}
+    CompletePushGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_batch_count, total_rows, ordered_batch_digest, high_watermark]
+      properties:
+        expected_batch_count: {type: integer, minimum: 0}
+        total_rows: {type: integer, minimum: 0}
+        ordered_batch_digest:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Lowercase SHA-256 hex digest of accepted batches in sequence order.
+
+            Canonicalization (must match the server exactly):
+            1. For each accepted batch, in sequence_no order, build an object
+               with keys sequence_no, external_batch_id, content_sha256.
+            2. Canonical JSON is json.dumps(..., ensure_ascii=True,
+               separators=(",", ":"), sort_keys=True).
+            3. Digest that array, then SHA-256 hex.
+            A generation with zero batches digests `[]`.
+        high_watermark: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775807}
+        confirm_empty_full: {type: boolean, default: false}
+    PushGeneration:
+      type: object
+      additionalProperties: true
+      required:
+        - generation_id
+        - source_application_id
+        - object_type
+        - external_generation_id
+        - sync_mode
+        - status
+        - next_sequence_no
+        - purpose
+      properties:
+        generation_id: {type: string, format: uuid}
+        source_application_id: {type: string}
+        object_type: {type: string}
+        external_generation_id: {type: string}
+        sync_mode: {type: string, enum: [full, incremental]}
+        status:
+          type: string
+          enum: [OPEN, RECEIVING, COMPLETING, COMPLETED, ABORTED, EXPIRED, FAILED]
+        next_sequence_no: {type: integer, minimum: 1}
+        purpose: {type: string, enum: [production, certification]}
+        client_lease_expires_at: {type: string, format: date-time}
+        worker_lease_expires_at: {type: [string, "null"], format: date-time}
+        accepted_batch_count: {type: integer, minimum: 0}
+        payload_contract_version: {type: [string, "null"]}
+        schema_fingerprint: {type: [string, "null"]}
+        final_receipt: {type: [object, "null"], additionalProperties: true}
+        error_code: {type: [string, "null"]}
+    PushBatchReceipt:
+      type: object
+      additionalProperties: true
+      required: [idempotent, sequence_no, external_batch_id, content_sha256, record_count, high_watermark]
+      properties:
+        idempotent: {type: boolean}
+        sequence_no: {type: integer, minimum: 1}
+        external_batch_id: {type: string}
+        content_sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+          description: Echo of the canonical batch content digest. See SubmitPushBatchRequest.content_sha256.
+        record_count: {type: integer, minimum: 0}
+        high_watermark: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775807}
+        payload_contract_version: {type: string}
+        schema_fingerprint: {type: [string, "null"]}
+        raw_batch_id: {type: [string, "null"]}

@@ -196,10 +196,14 @@ class DataQueryService:
                     text(
                         """
                         SELECT COUNT(*)::integer
-                        FROM platform_raw.raw_change_record
-                        WHERE source_application_id = :source_application_id
-                          AND object_type = :object_type
-                          AND object_id = :object_id
+                        FROM platform_raw.raw_change_record AS record
+                        JOIN platform_raw.raw_ingest_batch AS batch
+                          ON batch.batch_id = record.batch_id
+                        WHERE record.source_application_id = :source_application_id
+                          AND record.object_type = :object_type
+                          AND record.object_id = :object_id
+                          AND COALESCE(batch.purpose, 'production') = 'production'
+                          AND COALESCE(record.purpose, 'production') = 'production'
                         """
                     ),
                     params,
@@ -210,14 +214,19 @@ class DataQueryService:
             await session.execute(
                 text(
                     """
-                    SELECT source_application_id, object_type, object_id, operation,
-                           version, payload, payload_contract_version, content_hash,
-                           received_at, batch_id
-                    FROM platform_raw.raw_change_record
-                    WHERE source_application_id = :source_application_id
-                      AND object_type = :object_type
-                      AND object_id = :object_id
-                    ORDER BY version DESC, id DESC
+                    SELECT record.source_application_id, record.object_type, record.object_id,
+                           record.operation, record.version, record.payload,
+                           record.payload_contract_version, record.content_hash,
+                           record.received_at, record.batch_id
+                    FROM platform_raw.raw_change_record AS record
+                    JOIN platform_raw.raw_ingest_batch AS batch
+                      ON batch.batch_id = record.batch_id
+                    WHERE record.source_application_id = :source_application_id
+                      AND record.object_type = :object_type
+                      AND record.object_id = :object_id
+                      AND COALESCE(batch.purpose, 'production') = 'production'
+                      AND COALESCE(record.purpose, 'production') = 'production'
+                    ORDER BY record.version DESC, record.id DESC
                     LIMIT :limit OFFSET :offset
                     """
                 ),
