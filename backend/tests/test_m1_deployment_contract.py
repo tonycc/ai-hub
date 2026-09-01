@@ -80,6 +80,7 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
     assert "matching_mode: strict" in blueprint
     assert "issuer_mode: per_provider" in blueprint
     assert "access_token_validity: minutes=5" in blueprint
+    assert "goauthentik.io/providers/oauth2/scope-offline_access" in blueprint
     for scope in (
         "platform.me.read",
         "platform.application.read",
@@ -94,9 +95,9 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
 
 
 def test_ingest_operator_uses_independent_password_secret() -> None:
-    blueprint = (PROJECT_ROOT / "deploy/authentik/ai-hub-blueprint.yaml").read_text(
-        encoding="utf-8"
-    )
+    blueprint = (
+        PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
+    ).read_text(encoding="utf-8")
     compose = (PROJECT_ROOT / "deploy/compose.yaml").read_text(encoding="utf-8")
     example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
     generator = (

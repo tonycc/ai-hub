@@ -184,6 +184,7 @@ class AuthentikAdminClient:
             "openid",
             "profile",
             "email",
+            "offline_access",
             "ai_hub.identity",
         }
         property_mappings = await self._scope_mapping_ids(required_scopes)
@@ -324,7 +325,7 @@ class AuthentikAdminClient:
         if not isinstance(provider_id, int):
             raise AuthentikManagementError("authentik provider identifier is invalid")
         property_mappings = await self._scope_mapping_ids(
-            set(scopes) | {"openid", "profile", "email", "ai_hub.identity"}
+            set(scopes) | {"openid", "profile", "email", "offline_access", "ai_hub.identity"}
         )
         await self._json_request(
             "PATCH",

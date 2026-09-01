@@ -229,6 +229,9 @@ class Settings(_PlatformSettings):
     public_asset_root: str = "/workspace/public-assets"
     public_platform_base_url: str = "http://platform.localhost:8088"
     public_identity_base_url: str = "http://auth.localhost:8088"
+    # The neutral reference app is a local/CI conformance fixture. Production
+    # overlays disable it explicitly so it is not exposed as a business app.
+    reference_application_enabled: bool = True
     sandbox_application_id: str = "standalone-example"
     sandbox_user_subject: str = "ai-hub-demo-user"
     # Public entry points of the reference standalone application. Used when
@@ -324,29 +327,30 @@ class Settings(_PlatformSettings):
             field_name="public_identity_base_url",
             strict=strict,
         )
-        _validate_application_id(self.sandbox_application_id)
-        _validate_redirect_uri(
-            self.standalone_portal_url,
-            field_name="standalone_portal_url",
-            strict=strict,
-        )
-        _validate_redirect_uri(
-            self.standalone_api_base_url,
-            field_name="standalone_api_base_url",
-            strict=strict,
-        )
-        _validate_redirect_uri(
-            self.standalone_health_url,
-            field_name="standalone_health_url",
-            strict=strict,
-        )
-        _validate_redirect_uri(
-            self.standalone_oidc_redirect_uri,
-            field_name="standalone_oidc_redirect_uri",
-            strict=strict,
-        )
-        if not self.sandbox_user_subject.strip():
-            raise ValueError("sandbox_user_subject cannot be empty")
+        if self.reference_application_enabled:
+            _validate_application_id(self.sandbox_application_id)
+            _validate_redirect_uri(
+                self.standalone_portal_url,
+                field_name="standalone_portal_url",
+                strict=strict,
+            )
+            _validate_redirect_uri(
+                self.standalone_api_base_url,
+                field_name="standalone_api_base_url",
+                strict=strict,
+            )
+            _validate_redirect_uri(
+                self.standalone_health_url,
+                field_name="standalone_health_url",
+                strict=strict,
+            )
+            _validate_redirect_uri(
+                self.standalone_oidc_redirect_uri,
+                field_name="standalone_oidc_redirect_uri",
+                strict=strict,
+            )
+            if not self.sandbox_user_subject.strip():
+                raise ValueError("sandbox_user_subject cannot be empty")
         if strict and self.monitor_token is not None:
             if _has_placeholder_secret(self.monitor_token.get_secret_value()):
                 raise ValueError("monitor_token cannot use a placeholder outside local/test")

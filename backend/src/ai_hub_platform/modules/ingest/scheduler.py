@@ -37,13 +37,13 @@ from ai_hub_platform.modules.ingest.export_client import (
     ExportPage,
     records_to_ingest,
 )
+from ai_hub_platform.modules.ingest.reconcile import IngestReconcileService
 from ai_hub_platform.modules.ingest.service import IngestRecord, IngestService, SyncMode
 from ai_hub_platform.modules.ingest.source_lock import lock_ingest_source
 from ai_hub_platform.modules.ingest.sources import (
     IngestSourceConfig,
     compute_since_version,
     load_source_configs_from_db,
-    pull_export_sources,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -60,6 +60,10 @@ class SchedulerMetrics:
     full_syncs: int = 0
     incremental_syncs: int = 0
     contract_audit_issues: int = 0
+    reconcile_started: int = 0
+    reconcile_succeeded: int = 0
+    reconcile_failed: int = 0
+    reconcile_drifted: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -71,6 +75,10 @@ class SchedulerMetrics:
             "full_syncs": self.full_syncs,
             "incremental_syncs": self.incremental_syncs,
             "contract_audit_issues": self.contract_audit_issues,
+            "reconcile_started": self.reconcile_started,
+            "reconcile_succeeded": self.reconcile_succeeded,
+            "reconcile_failed": self.reconcile_failed,
+            "reconcile_drifted": self.reconcile_drifted,
         }
 
 
@@ -99,6 +107,9 @@ class IngestScheduler:
             | None
         ) = None,
         payload_max_bytes: int = 1_048_576,
+        scheduled_reconcile_enabled: bool = False,
+        reconcile_interval_hours: int = 24,
+        reconcile_service: IngestReconcileService | None = None,
     ) -> None:
         self.settings = settings
         self.worker_id = f"{socket.gethostname()}:{uuid4()}"
@@ -110,15 +121,21 @@ class IngestScheduler:
         self.contract_validator = contract_validator
         self.contract_lookup = contract_lookup
         self.payload_max_bytes = payload_max_bytes
+        self.reconcile_service = reconcile_service or IngestReconcileService()
+        self._scheduled_reconcile_enabled = scheduled_reconcile_enabled
+        self._reconcile_interval_hours = reconcile_interval_hours
+        self._next_reconcile_at = 0.0
         self.metrics = SchedulerMetrics()
         self._global_sem = asyncio.Semaphore(settings.max_concurrent_sources)
         self._app_sems: dict[str, asyncio.Semaphore] = {}
         self._runtimes: dict[tuple[str, str], _SourceRuntime] = {}
+        self._reconcile_sources: list[IngestSourceConfig] = []
         self._replace_runtimes(sources)
 
     def _replace_runtimes(self, sources: Sequence[IngestSourceConfig]) -> None:
-        enabled = [source for source in sources if source.enabled]
-        desired = {source.source_key: source for source in enabled}
+        self._reconcile_sources = [source for source in sources if source.enabled]
+        pull_enabled = [source for source in self._reconcile_sources if source.is_pull_export]
+        desired = {source.source_key: source for source in pull_enabled}
         for key in list(self._runtimes):
             if key not in desired:
                 del self._runtimes[key]
@@ -162,6 +179,16 @@ class IngestScheduler:
             )
             return
         self.payload_max_bytes = policy.payload_max_bytes
+        policy_changed = (
+            self._scheduled_reconcile_enabled != policy.scheduled_reconcile_enabled
+            or self._reconcile_interval_hours != policy.reconcile_interval_hours
+        )
+        self._scheduled_reconcile_enabled = policy.scheduled_reconcile_enabled
+        self._reconcile_interval_hours = policy.reconcile_interval_hours
+        if not self._scheduled_reconcile_enabled:
+            self._next_reconcile_at = 0.0
+        elif policy_changed:
+            self._next_reconcile_at = self._clock()
 
     def _app_semaphore(self, application_id: str) -> asyncio.Semaphore:
         semaphore = self._app_sems.get(application_id)
@@ -572,6 +599,11 @@ class IngestScheduler:
             tasks = [asyncio.create_task(self._run_due(runtime)) for runtime in due]
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+            if (
+                self._scheduled_reconcile_enabled
+                and self._next_reconcile_at <= self._clock()
+            ):
+                await self._run_scheduled_reconcile()
             try:
                 await asyncio.wait_for(
                     stop.wait(), timeout=self.settings.tick_interval_seconds
@@ -590,6 +622,74 @@ class IngestScheduler:
                 pass
             finally:
                 runtime.next_run_at = self._clock() + runtime.config.interval_seconds
+
+    async def _run_scheduled_reconcile(self) -> None:
+        succeeded = 0
+        failed = 0
+        drifted = 0
+        try:
+            for source in self._reconcile_sources:
+                self.metrics.reconcile_started += 1
+                try:
+                    async with self.sessions() as session:
+                        async with session.begin():
+                            report = await self.reconcile_service.reconcile(
+                                session,
+                                source_application_id=source.source_application_id,
+                                object_type=source.object_type,
+                            )
+                except Exception:
+                    failed += 1
+                    self.metrics.reconcile_failed += 1
+                    LOGGER.exception(
+                        json.dumps(
+                            {
+                                "event": "ingest_scheduled_reconcile_failed",
+                                "worker_id": self.worker_id,
+                                "source_application_id": source.source_application_id,
+                                "object_type": source.object_type,
+                            },
+                            separators=(",", ":"),
+                        )
+                    )
+                    continue
+                succeeded += 1
+                self.metrics.reconcile_succeeded += 1
+                if report.drifted:
+                    drifted += 1
+                    self.metrics.reconcile_drifted += 1
+                    LOGGER.warning(
+                        json.dumps(
+                            {
+                                "event": "ingest_scheduled_reconcile_drifted",
+                                "worker_id": self.worker_id,
+                                "source_application_id": report.source_application_id,
+                                "object_type": report.object_type,
+                                "expected_count": report.expected_count,
+                                "actual_count": report.actual_count,
+                                "drift_count": len(report.drifts),
+                            },
+                            separators=(",", ":"),
+                        )
+                    )
+            LOGGER.info(
+                json.dumps(
+                    {
+                        "event": "ingest_scheduled_reconcile_completed",
+                        "worker_id": self.worker_id,
+                        "sources": len(self._reconcile_sources),
+                        "succeeded": succeeded,
+                        "failed": failed,
+                        "drifted": drifted,
+                        "metrics": self.metrics.as_dict(),
+                    },
+                    separators=(",", ":"),
+                )
+            )
+        finally:
+            self._next_reconcile_at = (
+                self._clock() + self._reconcile_interval_hours * 60 * 60
+            )
 
 
 async def create_runtime_scheduler(
@@ -611,6 +711,8 @@ async def create_runtime_scheduler(
         service=service,
         contract_validator=IngestContractValidator(),
         payload_max_bytes=policy.payload_max_bytes,
+        scheduled_reconcile_enabled=policy.scheduled_reconcile_enabled,
+        reconcile_interval_hours=policy.reconcile_interval_hours,
     )
 
 
@@ -625,10 +727,10 @@ async def run_ingest_scheduler(settings: RawWorkerSettings) -> None:
 
     async def load_sources() -> list[IngestSourceConfig]:
         async with sessions() as session:
-            return pull_export_sources(await load_source_configs_from_db(session))
+            return await load_source_configs_from_db(session)
 
     async with sessions() as session:
-        initial_sources = pull_export_sources(await load_source_configs_from_db(session))
+        initial_sources = await load_source_configs_from_db(session)
 
     oidc = OidcClient(
         settings.oidc_issuer,

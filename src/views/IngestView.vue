@@ -14,6 +14,7 @@ import {
   ingestInferContract,
   ingestListCertifications,
   ingestListContracts,
+  ingestListOperations,
   ingestRejectContract,
   ingestRunPrune,
   ingestRunRebuild,
@@ -36,14 +37,6 @@ const sources = ref([])
 const contracts = ref([])
 const certifications = ref([])
 const runs = ref([])
-
-function pushRun(entry) {
-  runs.value.unshift({
-    run_id: `run-${Date.now()}`,
-    at: new Date().toISOString(),
-    ...entry,
-  })
-}
 
 const tabs = [
   ['sources', '数据来源'],
@@ -172,15 +165,17 @@ async function loadAll() {
   loading.value = true
   error.value = null
   try {
-    const config = await ingestGetConfig()
-    sources.value = config.sources
-    Object.assign(policyForm, config.policy)
-    const [contractRows, certificationRows] = await Promise.all([
+    const [config, contractRows, certificationRows, operationRows] = await Promise.all([
+      ingestGetConfig(),
       ingestListContracts(),
       ingestListCertifications(),
+      ingestListOperations(),
     ])
+    sources.value = config.sources
+    Object.assign(policyForm, config.policy)
     contracts.value = contractRows
     certifications.value = certificationRows
+    runs.value = operationRows
     if (!actionState.rebuildSource && config.sources.length) {
       actionState.rebuildSource = sourceKey(config.sources[0])
     }
@@ -188,6 +183,15 @@ async function loadAll() {
     error.value = caught
   } finally {
     loading.value = false
+  }
+}
+
+async function loadOperationHistory() {
+  try {
+    runs.value = await ingestListOperations()
+  } catch {
+    // The action result remains visible through its toast; a full refresh will
+    // expose a history loading error through ApiState.
   }
 }
 
@@ -213,7 +217,7 @@ function openSourceDialog(mode, row) {
       export_base_url: '',
       interval_seconds: 60,
       lookback_versions: 100,
-      page_limit: 200,
+      page_limit: policyForm.page_limit_default,
       enabled: false,
       push_protocol_version: '',
       contract_validation_mode: 'AUDIT_ONLY',
@@ -265,9 +269,25 @@ async function saveSource() {
   await loadAll()
 }
 
+function sourcePayload(row) {
+  return {
+    source_application_id: row.source_application_id,
+    object_type: row.object_type,
+    transport_mode: row.transport_mode || 'PULL_EXPORT',
+    export_base_url: row.export_base_url || null,
+    interval_seconds: row.interval_seconds,
+    lookback_versions: row.lookback_versions,
+    page_limit: row.page_limit,
+    enabled: row.enabled,
+    push_protocol_version: row.push_protocol_version || null,
+    contract_validation_mode: row.contract_validation_mode || 'AUDIT_ONLY',
+    allow_empty_full: Boolean(row.allow_empty_full),
+  }
+}
+
 async function toggleSource(row) {
   try {
-    await ingestSaveSource({ ...row })
+    await ingestSaveSource(sourcePayload(row))
     ElMessage.success(row.enabled ? '已启用' : '已停用')
   } catch (caught) {
     row.enabled = !row.enabled
@@ -529,12 +549,11 @@ async function approveCertification(row, asRole) {
 async function runSync() {
   try {
     const result = await ingestRunSync(actionState.syncMode)
-    pushRun({ action: 'sync', mode: actionState.syncMode, summary: `成功 ${result.succeeded} 个来源` })
     ElMessage.success(`同步完成：${result.succeeded} 个来源`)
     await loadAll()
   } catch (caught) {
-    pushRun({ action: 'sync', mode: actionState.syncMode, summary: `失败：${errorText(caught)}` })
     ElMessage.error(errorText(caught))
+    await loadOperationHistory()
   }
 }
 
@@ -542,14 +561,11 @@ async function runReconcile() {
   try {
     const result = await ingestRunReconcile()
     driftResult.value = (result.reports || []).filter((report) => report.drifted)
-    pushRun({
-      action: 'reconcile',
-      mode: '-',
-      summary: `检查 ${result.sources} 个来源 · 不一致 ${result.drifted} 个`,
-    })
     ElMessage.success(result.drifted ? '一致性检查完成：发现不一致' : '一致性检查完成：全部一致')
+    await loadOperationHistory()
   } catch (caught) {
     ElMessage.error(errorText(caught))
+    await loadOperationHistory()
   }
 }
 
@@ -573,12 +589,11 @@ async function runRebuild(mode) {
   actionState.rebuilding = true
   try {
     const result = await ingestRunRebuild({ mode, sourceApplicationId, objectType })
-    pushRun({ action: 'rebuild', mode, summary: `重新同步 ${actionState.rebuildSource} 完成` })
     ElMessage.success(`重新同步完成（${result.rebuilt_count ?? result.record_count ?? '—'} 条）`)
     await loadAll()
   } catch (caught) {
-    pushRun({ action: 'rebuild', mode, summary: `失败：${errorText(caught)}` })
     ElMessage.error(errorText(caught))
+    await loadOperationHistory()
   } finally {
     actionState.rebuilding = false
   }
@@ -599,17 +614,50 @@ async function runPrune(apply) {
   actionState.pruning = true
   try {
     const result = await ingestRunPrune(!apply)
-    pushRun({
-      action: 'prune',
-      mode: apply ? 'apply' : 'dry-run',
-      summary: apply ? `已清理 ${result.deleted} 条` : `预览：将清理 ${result.candidates} 条`,
-    })
     ElMessage.success(apply ? `清理完成，删除 ${result.deleted} 条` : `预览：将清理 ${result.candidates} 条`)
   } catch (caught) {
     ElMessage.error(errorText(caught))
   } finally {
     actionState.pruning = false
+    await loadOperationHistory()
   }
+}
+
+const operationLabels = {
+  sync: '同步',
+  reconcile: '一致性检查',
+  rebuild: '重新同步',
+  prune: '清理历史',
+}
+
+const operationModeLabels = {
+  incremental: '增量',
+  full: '全量',
+  log: '变更记录',
+  source: '来源全量',
+  apply: '执行',
+  'dry-run': '预览',
+}
+
+function operationSummary(row) {
+  const detail = row.details || {}
+  if (row.status === 'FAILED') {
+    if (row.action === 'sync' || row.action === 'reconcile') {
+      return `成功 ${detail.succeeded ?? detail.sources ?? 0} 个，失败 ${detail.failed ?? 0} 个`
+    }
+    return detail.error_code ? `失败：${detail.error_code}` : '执行失败'
+  }
+  if (row.action === 'sync') return `成功同步 ${detail.succeeded ?? 0} 个来源`
+  if (row.action === 'reconcile') {
+    return `检查 ${detail.sources ?? 0} 个来源 · 不一致 ${detail.drifted ?? 0} 个`
+  }
+  if (row.action === 'rebuild') {
+    const source = [detail.source_application_id, detail.object_type].filter(Boolean).join(' / ')
+    return `${source || '数据来源'} · ${detail.record_count ?? '—'} 条`
+  }
+  return detail.dry_run
+    ? `预计清理 ${detail.candidates ?? 0} 条`
+    : `已清理 ${detail.deleted ?? 0} 条`
 }
 
 onMounted(loadAll)
@@ -947,7 +995,8 @@ onMounted(loadAll)
             <el-input-number v-model="policyForm.page_limit_default" :min="1" :max="policyForm.page_limit_max" />
           </el-form-item>
           <el-form-item label="每页条数上限">
-            <el-input-number v-model="policyForm.page_limit_max" :min="1" :max="50000" />
+            <el-input-number v-model="policyForm.page_limit_max" :min="1" :max="5000" />
+            <span class="form-hint">平台硬上限 5000</span>
           </el-form-item>
           <el-form-item label="推送暂存保留（小时）">
             <el-input-number v-model="policyForm.push_staging_retention_hours" :min="1" :max="168" />
@@ -1043,12 +1092,21 @@ onMounted(loadAll)
         <section class="surface-panel page-section">
           <div class="panel-toolbar"><strong>最近操作</strong></div>
           <el-table :data="runs" style="width: 100%">
-            <el-table-column prop="run_id" label="批次" width="140">
+            <el-table-column prop="run_id" label="审计记录" min-width="230">
               <template #default="scope"><span class="mono">{{ scope.row.run_id }}</span></template>
             </el-table-column>
-            <el-table-column prop="action" label="操作" width="110" />
-            <el-table-column prop="mode" label="模式" width="110" />
-            <el-table-column prop="summary" label="摘要" min-width="260" />
+            <el-table-column label="操作" width="120">
+              <template #default="scope">{{ operationLabels[scope.row.action] || scope.row.action }}</template>
+            </el-table-column>
+            <el-table-column label="模式" width="110">
+              <template #default="scope">{{ operationModeLabels[scope.row.mode] || scope.row.mode || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="scope"><StatusTag :status="scope.row.status" /></template>
+            </el-table-column>
+            <el-table-column label="摘要" min-width="260">
+              <template #default="scope">{{ operationSummary(scope.row) }}</template>
+            </el-table-column>
             <el-table-column label="时间" width="185">
               <template #default="scope">{{ formatTime(scope.row.at) }}</template>
             </el-table-column>

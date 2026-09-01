@@ -254,6 +254,7 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
                             "openid",
                             "profile",
                             "email",
+                            "offline_access",
                             "ai_hub.identity",
                             "platform.me.read",
                         )
@@ -296,6 +297,7 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
     assert provider_payload["client_id"] == "sample-app__uat__v1"
     assert provider_payload["name"] == provider_payload["client_id"]
     assert provider_payload["client_secret"] != "must-not-be-copied"
+    assert "scope-offline_access" in provider_payload["property_mappings"]
     assert set(provider_payload) == {
         "name",
         "authentication_flow",

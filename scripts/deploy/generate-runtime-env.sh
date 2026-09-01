@@ -11,7 +11,6 @@
 #   bash scripts/deploy/generate-runtime-env.sh \
 #     --platform-host platform.example.internal \
 #     --auth-host     auth.example.internal \
-#     --app-host      app.example.internal \
 #     [--output deploy/secrets/runtime.env]
 #
 # The script refuses to overwrite an existing output unless --force is given.
@@ -20,7 +19,6 @@ set -euo pipefail
 
 PLATFORM_HOST=""
 AUTH_HOST=""
-APP_HOST=""
 OUTPUT="deploy/secrets/runtime.env"
 FORCE=0
 
@@ -32,7 +30,7 @@ while (($# > 0)); do
   case "$1" in
     --platform-host) PLATFORM_HOST="${2:?}"; shift 2 ;;
     --auth-host) AUTH_HOST="${2:?}"; shift 2 ;;
-    --app-host) APP_HOST="${2:?}"; shift 2 ;;
+    --app-host) : "${2:?}"; shift 2 ;; # Deprecated; accepted for old automation.
     --output) OUTPUT="${2:?}"; shift 2 ;;
     --force) FORCE=1; shift ;;
     -h | --help) usage; exit 0 ;;
@@ -42,7 +40,6 @@ done
 
 [[ -n "${PLATFORM_HOST}" ]] || fail "--platform-host is required"
 [[ -n "${AUTH_HOST}" ]] || fail "--auth-host is required"
-[[ -n "${APP_HOST}" ]] || fail "--app-host is required"
 
 if [[ -e "${OUTPUT}" && "${FORCE}" -ne 1 ]]; then
   fail "output ${OUTPUT} already exists (use --force to overwrite)"
@@ -68,6 +65,9 @@ cat >"${OUTPUT}" <<EOF
 # Encrypt with SOPS+age before committing; do NOT commit this plaintext file.
 AI_HUB_ENVIRONMENT=production
 AI_HUB_APPLICATION_ID=ai-hub-platform
+AI_HUB_REFERENCE_APPLICATION_ENABLED=false
+AI_HUB_PLATFORM_HOST=${PLATFORM_HOST}
+AI_HUB_AUTH_HOST=${AUTH_HOST}
 
 # Public endpoints (HTTPS via Traefik ACME)
 AI_HUB_OIDC_ISSUER=https://${AUTH_HOST}/application/o/ai-hub/
@@ -89,19 +89,20 @@ AI_HUB_PUBLIC_PLATFORM_BASE_URL=https://${PLATFORM_HOST}
 AI_HUB_PUBLIC_IDENTITY_BASE_URL=https://${AUTH_HOST}
 AI_HUB_PORTAL_EXTERNAL_URL=https://${PLATFORM_HOST}
 
-# Reference application
+# Inactive reference-profile compatibility. The production overlay does not
+# start or publish these services; Compose still resolves the base definition.
 STANDALONE_ENVIRONMENT=production
 STANDALONE_APPLICATION_ID=standalone-example
 STANDALONE_PLATFORM_API_BASE_URL=https://${PLATFORM_HOST}
 STANDALONE_OIDC_ISSUER=https://${AUTH_HOST}/application/o/standalone-example/
 STANDALONE_OIDC_AUDIENCE=standalone-example
 STANDALONE_OIDC_CLIENT_ID=standalone-example
-STANDALONE_OIDC_REDIRECT_URI=https://${APP_HOST}/auth/callback
-STANDALONE_PORTAL_URL=https://${APP_HOST}/
-AI_HUB_STANDALONE_PORTAL_URL=https://${APP_HOST}/
-AI_HUB_STANDALONE_API_BASE_URL=https://${APP_HOST}/api/v1
-AI_HUB_STANDALONE_HEALTH_URL=https://${APP_HOST}/health/live
-AI_HUB_STANDALONE_OIDC_REDIRECT_URI=https://${APP_HOST}/auth/callback
+STANDALONE_OIDC_REDIRECT_URI=https://reference.invalid/auth/callback
+STANDALONE_PORTAL_URL=https://reference.invalid/
+AI_HUB_STANDALONE_PORTAL_URL=https://reference.invalid/
+AI_HUB_STANDALONE_API_BASE_URL=https://reference.invalid/api/v1
+AI_HUB_STANDALONE_HEALTH_URL=https://reference.invalid/health/live
+AI_HUB_STANDALONE_OIDC_REDIRECT_URI=https://reference.invalid/auth/callback
 
 # Generated secrets (URI-unreserved; embedded in connection URLs)
 POSTGRES_SUPERUSER_PASSWORD=$(gen_secret 48)

@@ -22,7 +22,7 @@ const navGroups = [
     items: [
       { label: '平台首页', path: '/', icon: 'HomeFilled' },
       { label: '应用中心', path: '/applications', icon: 'Grid' },
-      { label: '通知中心', path: '/platform/notifications', icon: 'Bell', badge: true },
+      { label: '通知中心', path: '/platform/notifications', icon: 'Bell' },
     ],
   },
   {
@@ -72,7 +72,11 @@ const canViewIdentity = computed(() => session.hasPermission('platform.identity.
 const canViewPermissions = computed(() => session.hasPermission('platform.authorization.read'))
 
 const userInitial = computed(() => session.principal.value?.display_name?.slice(0, 1) || '访')
-const unreadCount = ref(0)
+const environmentLabel = computed(() => {
+  const labels = { local: '本地', test: '测试', uat: 'UAT', production: '生产' }
+  const environment = session.principal.value?.environment
+  return labels[environment] || environment || '加载中'
+})
 
 const breadcrumbItems = computed(() => route.meta.breadcrumb || [])
 
@@ -193,7 +197,6 @@ onBeforeUnmount(() => {
             >
               <el-icon><component :is="item.icon" /></el-icon>
               <span v-if="!collapsed">{{ item.label }}</span>
-              <em v-if="!collapsed && item.badge && unreadCount">{{ unreadCount }}</em>
             </button>
           </el-tooltip>
         </div>
@@ -204,7 +207,7 @@ onBeforeUnmount(() => {
           <el-icon><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
           <span v-if="!collapsed">收起导航</span>
         </button>
-        <div v-if="!collapsed" class="environment-label"><i /> 平台基线 · M4</div>
+        <div v-if="!collapsed" class="environment-label"><i /> 部署环境 · {{ environmentLabel }}</div>
       </div>
     </el-aside>
 
@@ -226,15 +229,12 @@ onBeforeUnmount(() => {
         </button>
 
         <div class="header-actions">
-          <button type="button" class="plant-selector">
+          <div class="environment-context" title="当前平台部署环境">
             <el-icon><Monitor /></el-icon>
-            <span>集成环境</span>
-            <el-icon class="plant-selector__arrow"><ArrowDown /></el-icon>
-          </button>
+            <span>{{ environmentLabel }}</span>
+          </div>
           <el-tooltip content="消息中心" placement="bottom">
-          <el-badge :value="unreadCount" :max="9" :hidden="!unreadCount">
-              <button type="button" class="icon-button" @click="navigate('/platform/notifications')"><el-icon><Bell /></el-icon></button>
-            </el-badge>
+            <button type="button" class="icon-button" aria-label="打开消息中心" @click="navigate('/platform/notifications')"><el-icon><Bell /></el-icon></button>
           </el-tooltip>
           <el-dropdown @command="handleUserCommand">
             <button type="button" class="user-button">
@@ -276,7 +276,7 @@ onBeforeUnmount(() => {
         </el-input>
       </template>
       <div class="search-results">
-        <p>{{ searchText ? '搜索结果' : '最近访问' }}</p>
+        <p>{{ searchText ? '搜索结果' : '平台入口' }}</p>
         <small v-if="applicationSearchUnavailable" class="search-results__notice">应用索引暂不可用，平台能力仍可搜索</small>
         <button v-for="item in searchResults" :key="`${item.type}-${item.title}`" type="button" @click="navigate(item.path)">
           <span class="search-result__icon"><el-icon><component :is="item.icon" /></el-icon></span>
@@ -563,7 +563,7 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.plant-selector,
+.environment-context,
 .user-button,
 .icon-button {
   display: flex;
@@ -571,21 +571,20 @@ onBeforeUnmount(() => {
   border: 0;
   color: #53636f;
   background: transparent;
+}
+
+.user-button,
+.icon-button {
   cursor: pointer;
 }
 
-.plant-selector {
+.environment-context {
   height: 32px;
   gap: 6px;
   padding: 0 9px;
   border: 1px solid #e0e5e8;
   border-radius: 5px;
   font-size: 12px;
-}
-
-.plant-selector__arrow {
-  margin-left: 2px;
-  color: #9aa4aa;
 }
 
 .icon-button {
@@ -712,7 +711,7 @@ onBeforeUnmount(() => {
     grid-template-columns: minmax(160px, 1fr) minmax(240px, 400px) auto;
   }
 
-  .plant-selector span,
+  .environment-context span,
   .user-button > span {
     display: none;
   }
@@ -746,7 +745,7 @@ onBeforeUnmount(() => {
     display: none;
   }
 
-  .plant-selector {
+  .environment-context {
     display: none;
   }
 

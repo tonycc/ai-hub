@@ -41,12 +41,14 @@ class DeveloperCatalogResponse(ApiModel):
 
 
 class SandboxResponse(ApiModel):
-    application_id: str
+    available: bool
+    message: str | None = None
+    application_id: str | None
     platform_base_url: str
-    oidc_issuer: str
-    oidc_discovery_url: str
-    oidc_audience: str
-    user_subject: str
+    oidc_issuer: str | None
+    oidc_discovery_url: str | None
+    oidc_audience: str | None
+    user_subject: str | None
     default_capabilities: list[str]
     optional_capabilities: list[str]
     client_secret_included: bool
@@ -128,6 +130,23 @@ async def sandbox_configuration(
     ],
 ) -> SandboxResponse:
     settings = request.app.state.settings
+    if not settings.reference_application_enabled:
+        return SandboxResponse(
+            available=False,
+            message=(
+                "The neutral reference sandbox is disabled in this deployment; "
+                "register a real application environment to obtain credentials."
+            ),
+            application_id=None,
+            platform_base_url=settings.public_platform_base_url,
+            oidc_issuer=None,
+            oidc_discovery_url=None,
+            oidc_audience=None,
+            user_subject=None,
+            default_capabilities=[],
+            optional_capabilities=[],
+            client_secret_included=False,
+        )
     # The sandbox developer copies these values into their app's environment,
     # so they must describe the sandbox application's own dedicated provider,
     # not the shared platform issuer/audience.
@@ -136,6 +155,7 @@ async def sandbox_configuration(
         f"/application/o/{settings.sandbox_application_id}/"
     )
     return SandboxResponse(
+        available=True,
         application_id=settings.sandbox_application_id,
         platform_base_url=settings.public_platform_base_url,
         oidc_issuer=issuer,

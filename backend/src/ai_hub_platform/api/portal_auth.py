@@ -38,6 +38,7 @@ PORTAL_LOGIN_SCOPES = (
 
 class PortalSessionResponse(BaseModel):
     authenticated: bool
+    environment: str
     user_id: str
     subject: str
     display_name: str
@@ -266,6 +267,7 @@ async def logout_redirect(request: Request) -> RedirectResponse:
 
 @session_router.get("/session", response_model=PortalSessionResponse)
 async def session_info(
+    request: Request,
     principal: PortalPrincipalDependency,
 ) -> PortalSessionResponse:
     scopes: dict[str, list[str] | None] = {}
@@ -274,6 +276,7 @@ async def session_info(
         scopes[permission] = sorted(application_scope) if application_scope is not None else None
     return PortalSessionResponse(
         authenticated=True,
+        environment=request.app.state.settings.environment,
         user_id=str(principal.user_id),
         subject=principal.subject,
         display_name=principal.display_name,

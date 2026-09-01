@@ -36,14 +36,6 @@ http:
       middlewares: [common-security, request-limit]
       tls:
         certResolver: letsencrypt
-    standalone-app:
-      entryPoints: [websecure]
-      rule: Host(`{{ env "AI_HUB_APP_HOST" }}`)
-      service: standalone-app
-      middlewares: [common-security, request-limit]
-      tls:
-        certResolver: letsencrypt
-
   services:
     authentik:
       loadBalancer:
@@ -69,11 +61,3 @@ http:
           timeout: 3s
         servers:
           - url: http://portal:8080
-    standalone-app:
-      loadBalancer:
-        healthCheck:
-          path: /health/live
-          interval: 10s
-          timeout: 3s
-        servers:
-          - url: http://standalone-app:8100

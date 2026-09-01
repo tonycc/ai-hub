@@ -1,0 +1,34 @@
+version: 1
+metadata:
+  name: AI Hub production reference identity quarantine
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+
+# Remove identities that older all-in-one blueprints may already have created.
+# Platform audit/conformance history refers to stable subject strings and is
+# retained in platform_db; only the login/provider objects are removed here.
+entries:
+  - model: authentik_core.application
+    state: absent
+    identifiers:
+      slug: standalone-example
+
+  - model: authentik_providers_oauth2.oauth2provider
+    state: absent
+    identifiers:
+      name: standalone-example
+
+  - model: authentik_core.user
+    state: absent
+    identifiers:
+      username: ai-hub-demo-user
+
+  - model: authentik_core.user
+    state: absent
+    identifiers:
+      username: ai-hub-app-developer
+
+  - model: authentik_core.user
+    state: absent
+    identifiers:
+      username: ai-hub-platform-ingest-operator

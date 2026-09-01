@@ -87,7 +87,9 @@ class IngestSourceUpsertRequest(ApiModel):
     export_base_url: str | None = None
     interval_seconds: int = 60
     lookback_versions: int = 100
-    page_limit: int = 200
+    # Omission means "use the current global default" for a new source and
+    # "keep the current value" for an existing source.
+    page_limit: int | None = Field(default=None, ge=1, le=5000)
     enabled: bool = False
     push_protocol_version: str | None = None
     contract_validation_mode: Literal["AUDIT_ONLY", "ENFORCE"] = "AUDIT_ONLY"
@@ -110,8 +112,8 @@ class IngestPolicyUpdateRequest(ApiModel):
     retention_keep_versions: int = Field(ge=1, le=100000)
     retention_keep_days: int | None = Field(default=None, ge=1, le=3650)
     payload_max_bytes: int = Field(ge=1024, le=10485760)
-    page_limit_default: int = Field(ge=1, le=50000)
-    page_limit_max: int = Field(ge=1, le=50000)
+    page_limit_default: int = Field(ge=1, le=5000)
+    page_limit_max: int = Field(ge=1, le=5000)
     scheduled_reconcile_enabled: bool
     reconcile_interval_hours: int = Field(ge=1, le=168)
     push_staging_retention_hours: int | None = Field(default=None, ge=1, le=168)
@@ -120,6 +122,15 @@ class IngestPolicyUpdateRequest(ApiModel):
 class IngestConfigResponse(ApiModel):
     policy: IngestPolicyResponse
     sources: list[IngestSourceResponse]
+
+
+class IngestOperationResponse(ApiModel):
+    run_id: str
+    action: Literal["sync", "reconcile", "rebuild", "prune"]
+    mode: str | None = None
+    status: Literal["SUCCESS", "FAILED"]
+    details: dict[str, Any]
+    at: datetime
 
 
 class SyncActionRequest(ApiModel):
@@ -146,6 +157,7 @@ async def _audit(
     principal: PortalPrincipal,
     *,
     action: str,
+    result: Literal["SUCCESS", "FAILED"] = "SUCCESS",
     target_id: str | None = None,
     detail: dict[str, Any] | None = None,
 ) -> None:
@@ -155,7 +167,7 @@ async def _audit(
             request_id=_request_id(request),
             trace_id=getattr(request.state, "trace_id", None),
             action=action,
-            result="SUCCESS",
+            result=result,
             actor_type="user",
             actor_id=str(principal.user_id),
             application_id=None,
@@ -234,6 +246,61 @@ def _map_source_config_error(error: ValueError) -> ApiError:
 
 def _raw_sessions(request: Request) -> async_sessionmaker[AsyncSession]:
     return request.app.state.raw_sessions
+
+
+_OPERATION_ACTIONS = {
+    "platform.ingest.action.sync": "sync",
+    "platform.ingest.action.reconcile": "reconcile",
+    "platform.ingest.action.rebuild": "rebuild",
+    "platform.ingest.action.prune": "prune",
+}
+
+
+@router.get("/operations", response_model=list[IngestOperationResponse])
+async def list_ingest_operations(
+    session: SessionDependency,
+    _principal: Annotated[
+        PortalPrincipal,
+        Depends(portal_permission_dependency(INGEST_READ, application_parameter=None)),
+    ],
+    limit: int = 50,
+) -> list[IngestOperationResponse]:
+    safe_limit = min(max(limit, 1), 100)
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT audit_id, occurred_at, action, result, metadata
+                FROM platform_core.audit_event
+                WHERE action IN (
+                    'platform.ingest.action.sync',
+                    'platform.ingest.action.reconcile',
+                    'platform.ingest.action.rebuild',
+                    'platform.ingest.action.prune'
+                )
+                  AND result IN ('SUCCESS', 'FAILED')
+                ORDER BY occurred_at DESC, audit_id DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": safe_limit},
+        )
+    ).mappings()
+    return [
+        IngestOperationResponse(
+            run_id=str(row["audit_id"]),
+            action=_OPERATION_ACTIONS[str(row["action"])],  # type: ignore[arg-type]
+            mode=(
+                str(row["metadata"].get("mode"))
+                if row["metadata"] and row["metadata"].get("mode") is not None
+                else None
+            ),
+            status=row["result"],
+            details=dict(row["metadata"] or {}),
+            at=row["occurred_at"],
+        )
+        for row in rows
+    ]
 
 
 async def _reject_if_active_push_generation(
@@ -353,7 +420,33 @@ async def put_ingest_source(
         ),
     ],
 ) -> IngestSourceResponse:
+    store = IngestConfigStore()
     try:
+        await lock_ingest_source(
+            session,
+            body.source_application_id,
+            body.object_type,
+        )
+        existing = await store.get_source(
+            session,
+            source_application_id=body.source_application_id,
+            object_type=body.object_type,
+        )
+        policy = await store.get_policy(session)
+        page_limit = (
+            body.page_limit
+            if body.page_limit is not None
+            else (
+                existing.config.page_limit
+                if existing is not None
+                else policy.page_limit_default
+            )
+        )
+        if page_limit > policy.page_limit_max:
+            raise IngestConfigError(
+                f"page_limit cannot exceed the configured maximum "
+                f"({policy.page_limit_max})"
+            )
         config = IngestSourceConfig(
             source_application_id=body.source_application_id,
             object_type=body.object_type,
@@ -361,25 +454,11 @@ async def put_ingest_source(
             export_base_url=body.export_base_url,
             interval_seconds=body.interval_seconds,
             lookback_versions=body.lookback_versions,
-            page_limit=body.page_limit,
+            page_limit=page_limit,
             enabled=body.enabled,
             push_protocol_version=body.push_protocol_version,
             contract_validation_mode=body.contract_validation_mode,
             allow_empty_full=body.allow_empty_full,
-        )
-    except ValueError as error:
-        raise _map_source_config_error(error) from error
-    store = IngestConfigStore()
-    try:
-        await lock_ingest_source(
-            session,
-            config.source_application_id,
-            config.object_type,
-        )
-        existing = await store.get_source(
-            session,
-            source_application_id=config.source_application_id,
-            object_type=config.object_type,
         )
         if (
             existing is not None
@@ -407,6 +486,10 @@ async def put_ingest_source(
         raise ApiError(409, error.error_code, str(error)) from error
     except IngestTransportBusyError as error:
         raise ApiError(409, error.error_code, str(error)) from error
+    except IngestConfigError as error:
+        raise _map_config_error(error) from error
+    except ValueError as error:
+        raise _map_source_config_error(error) from error
     await session.commit()
     await _audit(
         request,
@@ -473,7 +556,13 @@ async def action_sync(
         request,
         principal,
         action="platform.ingest.action.sync",
-        detail={"mode": body.mode, "succeeded": len(results), "failed": len(errors)},
+        result="FAILED" if errors else "SUCCESS",
+        detail={
+            "mode": body.mode,
+            "succeeded": len(results),
+            "failed": len(errors),
+            "source_count": len(results) + len(errors),
+        },
     )
     if errors:
         raise ApiError(
@@ -502,20 +591,42 @@ async def action_reconcile(
     enabled = await store.list_enabled_source_configs(session)
     sessions = _raw_sessions(request)
     reports: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
     for config in enabled:
-        report = await reconcile_source(
-            sessions,
-            source_application_id=config.source_application_id,
-            object_type=config.object_type,
-        )
-        reports.append(report.as_dict())
+        try:
+            report = await reconcile_source(
+                sessions,
+                source_application_id=config.source_application_id,
+                object_type=config.object_type,
+            )
+            reports.append(report.as_dict())
+        except Exception as error:  # noqa: BLE001 - report per-source failure
+            errors.append(
+                {
+                    "source_application_id": config.source_application_id,
+                    "object_type": config.object_type,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+            )
     drifted = [report for report in reports if report["drifted"]]
     await _audit(
         request,
         principal,
         action="platform.ingest.action.reconcile",
-        detail={"sources": len(reports), "drifted": len(drifted)},
+        result="FAILED" if errors else "SUCCESS",
+        detail={
+            "sources": len(reports),
+            "drifted": len(drifted),
+            "failed": len(errors),
+        },
     )
+    if errors:
+        raise ApiError(
+            502,
+            "ingest_reconcile_failed",
+            f"{len(errors)} of {len(enabled)} source reconciliations failed",
+            {"errors": errors, "reports": reports},
+        )
     return {"sources": len(reports), "drifted": len(drifted), "reports": reports}
 
 
@@ -547,17 +658,46 @@ async def action_rebuild(
             object_type=body.object_type,
         )
     except SourceRebuildNotSupported as error:
+        await _audit(
+            request,
+            principal,
+            action="platform.ingest.action.rebuild",
+            result="FAILED",
+            target_id=f"{body.source_application_id}:{body.object_type}",
+            detail={"mode": body.mode, "error_code": error.error_code},
+        )
         raise ApiError(409, error.error_code, str(error)) from error
     except ValueError as error:
+        await _audit(
+            request,
+            principal,
+            action="platform.ingest.action.rebuild",
+            result="FAILED",
+            target_id=f"{body.source_application_id}:{body.object_type}",
+            detail={"mode": body.mode, "error_code": "ingest_rebuild_rejected"},
+        )
         raise ApiError(400, "ingest_rebuild_rejected", str(error)) from error
     except Exception as error:  # noqa: BLE001
+        await _audit(
+            request,
+            principal,
+            action="platform.ingest.action.rebuild",
+            result="FAILED",
+            target_id=f"{body.source_application_id}:{body.object_type}",
+            detail={"mode": body.mode, "error_code": "ingest_rebuild_failed"},
+        )
         raise ApiError(502, "ingest_rebuild_failed", f"{type(error).__name__}: {error}") from error
     await _audit(
         request,
         principal,
         action="platform.ingest.action.rebuild",
         target_id=f"{body.source_application_id}:{body.object_type}",
-        detail={"mode": body.mode},
+        detail={
+            "mode": body.mode,
+            "source_application_id": body.source_application_id,
+            "object_type": body.object_type,
+            "record_count": result.get("rebuilt_count", result.get("record_count")),
+        },
     )
     return result
 
@@ -587,12 +727,41 @@ async def action_prune(
             dry_run=body.dry_run,
         )
     except ValueError as error:
+        await _audit(
+            request,
+            principal,
+            action="platform.ingest.action.prune",
+            result="FAILED",
+            detail={
+                "mode": "dry-run" if body.dry_run else "apply",
+                "dry_run": body.dry_run,
+                "error_code": "ingest_prune_rejected",
+            },
+        )
         raise ApiError(400, "ingest_prune_rejected", str(error)) from error
+    except Exception as error:  # noqa: BLE001
+        await _audit(
+            request,
+            principal,
+            action="platform.ingest.action.prune",
+            result="FAILED",
+            detail={
+                "mode": "dry-run" if body.dry_run else "apply",
+                "dry_run": body.dry_run,
+                "error_code": "ingest_prune_failed",
+            },
+        )
+        raise ApiError(
+            502,
+            "ingest_prune_failed",
+            f"{type(error).__name__}: {error}",
+        ) from error
     await _audit(
         request,
         principal,
         action="platform.ingest.action.prune",
         detail={
+            "mode": "dry-run" if body.dry_run else "apply",
             "dry_run": body.dry_run,
             "candidates": result["candidates"],
             "deleted": result["deleted"],

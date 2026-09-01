@@ -18,6 +18,10 @@ from ai_hub_platform.modules.ingest.export_client import (
     ExportClient,
     ExportClientError,
 )
+from ai_hub_platform.modules.ingest.reconcile import (
+    IngestReconcileService,
+    ReconcileReport,
+)
 from ai_hub_platform.modules.ingest.scheduler import IngestScheduler
 from ai_hub_platform.modules.ingest.service import IngestRecord, IngestValidationError
 from ai_hub_platform.modules.ingest.sources import (
@@ -28,6 +32,7 @@ from ai_hub_platform.modules.ingest.sources import (
     load_ingest_sources,
 )
 from pydantic import SecretStr, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -689,6 +694,94 @@ async def test_reload_sources_refreshes_payload_max_bytes(
     await scheduler.reload_sources(loader)
     assert scheduler.payload_max_bytes == 2048
     await export_client.close()
+
+
+class _RecordingReconcileService(IngestReconcileService):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def reconcile(
+        self,
+        session: AsyncSession,
+        *,
+        source_application_id: str,
+        object_type: str,
+    ) -> ReconcileReport:
+        del session
+        self.calls.append((source_application_id, object_type))
+        return ReconcileReport(
+            source_application_id=source_application_id,
+            object_type=object_type,
+            expected_count=0,
+            actual_count=0,
+            drifted=False,
+            drifts=(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_reconcile_covers_enabled_pull_and_push_sources() -> None:
+    store = _InMemoryIngestStore()
+    export_client = ExportClient(token_provider=_async_token)
+    reconcile_service = _RecordingReconcileService()
+    pull = _source()
+    push = _source(
+        object_type="event",
+        transport_mode="PUSH_AGENT",
+        export_base_url=None,
+        push_protocol_version="1",
+        contract_validation_mode="ENFORCE",
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[pull, push],
+        sessions=_SessionFactory(store),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+        scheduled_reconcile_enabled=True,
+        reconcile_interval_hours=2,
+        reconcile_service=reconcile_service,
+    )
+
+    await scheduler._run_scheduled_reconcile()  # pyright: ignore[reportPrivateUsage]
+
+    assert reconcile_service.calls == [
+        ("standalone-example", "device"),
+        ("standalone-example", "event"),
+    ]
+    assert scheduler.metrics.reconcile_started == 2
+    assert scheduler.metrics.reconcile_succeeded == 2
+    assert scheduler.metrics.reconcile_failed == 0
+    await export_client.close()
+
+
+def test_ingest_source_request_uses_policy_default_when_page_limit_is_omitted() -> None:
+    from ai_hub_platform.api.ingest import IngestSourceUpsertRequest
+
+    request = IngestSourceUpsertRequest.model_validate(
+        {
+            "source_application_id": "source-app",
+            "object_type": "device",
+            "export_base_url": "https://source.example/export",
+        }
+    )
+    assert request.page_limit is None
+
+
+def test_ingest_policy_api_enforces_documented_page_hard_limit() -> None:
+    from ai_hub_platform.api.ingest import IngestPolicyUpdateRequest
+
+    with pytest.raises(ValidationError, match="less than or equal to 5000"):
+        IngestPolicyUpdateRequest.model_validate(
+            {
+                "retention_keep_versions": 100,
+                "payload_max_bytes": 1048576,
+                "page_limit_default": 200,
+                "page_limit_max": 5001,
+                "scheduled_reconcile_enabled": False,
+                "reconcile_interval_hours": 24,
+            }
+        )
 
 
 @pytest.mark.asyncio

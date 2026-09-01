@@ -9,15 +9,50 @@ name: ai-hub-production
 #     -f deploy/compose.production.yaml \
 #     --profile base-access up -d
 #
-# It only changes the edge (Traefik) and public hostname wiring; all runtime
-# services, migration ordering, and the base-access profile are unchanged.
+# It changes the edge (Traefik), public hostname wiring, and disables the
+# neutral reference application/UAT identities. Historical reference rows are
+# retained but quarantined by platform-api; no production business data is
+# deleted by this overlay.
 # Required env (from /etc/ai-hub/runtime.env or the deploy environment):
 #   AI_HUB_PLATFORM_HOST   public portal/API host, e.g. platform.example.internal
 #   AI_HUB_AUTH_HOST       public identity host,  e.g. auth.example.internal
-#   AI_HUB_APP_HOST        public reference app host, e.g. app.example.internal
 #   AI_HUB_ACME_EMAIL      ACME account email for Let's Encrypt
 
 services:
+  platform-api:
+    environment:
+      AI_HUB_REFERENCE_APPLICATION_ENABLED: "false"
+
+  platform-ingest-scheduler:
+    environment:
+      AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:?Set AI_HUB_OIDC_ISSUER}
+      AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:?Set AI_HUB_OIDC_CLIENT_ID}
+      AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET}
+
+  standalone-migrate:
+    profiles: !override
+      - reference-app
+
+  standalone-app:
+    profiles: !override
+      - reference-app
+
+  authentik-worker:
+    volumes: !override
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
+      - type: bind
+        source: ./authentik/ai-hub-blueprint.yaml
+        target: /blueprints/ai-hub/ai-hub-blueprint.yaml
+        read_only: true
+      - type: bind
+        source: ./authentik/ai-hub-production-blueprint.yaml
+        target: /blueprints/ai-hub/ai-hub-production-blueprint.yaml
+        read_only: true
+
   traefik:
     command: ["--configFile=/etc/traefik/traefik.yaml"]
     ports:
@@ -26,7 +61,13 @@ services:
     environment:
       AI_HUB_PLATFORM_HOST: ${AI_HUB_PLATFORM_HOST:?Set AI_HUB_PLATFORM_HOST}
       AI_HUB_AUTH_HOST: ${AI_HUB_AUTH_HOST:?Set AI_HUB_AUTH_HOST}
-      AI_HUB_APP_HOST: ${AI_HUB_APP_HOST:?Set AI_HUB_APP_HOST}
+    depends_on: !override
+      authentik-server:
+        condition: service_healthy
+      platform-api:
+        condition: service_healthy
+      portal:
+        condition: service_healthy
     volumes:
       - type: bind
         source: ./traefik/traefik.production.yaml
@@ -44,7 +85,6 @@ services:
         aliases: !override
           - ${AI_HUB_PLATFORM_HOST:?Set AI_HUB_PLATFORM_HOST}
           - ${AI_HUB_AUTH_HOST:?Set AI_HUB_AUTH_HOST}
-          - ${AI_HUB_APP_HOST:?Set AI_HUB_APP_HOST}
 
 volumes:
   traefik-acme:

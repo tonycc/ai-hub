@@ -32,6 +32,7 @@ from ai_hub_platform.api.portal_auth import auth_router, session_router
 from ai_hub_platform.config import Settings, get_settings
 from ai_hub_platform.modules.app_management.authentik import AuthentikAdminClient
 from ai_hub_platform.modules.app_management.bootstrap import (
+    disable_reference_application,
     start_bootstrap_reconciliation,
 )
 from ai_hub_platform.modules.governance.version_sync import (
@@ -106,17 +107,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.raw_sessions = async_sessionmaker(
             raw_engine, class_=AsyncSession, expire_on_commit=False
         )
-        reconciliation_state, reconciliation_task = start_bootstrap_reconciliation(
-            database,
-            authentik_admin_client,
-            application_id=resolved_settings.sandbox_application_id,
-            environment=resolved_settings.environment,
-            external_url=resolved_settings.authentik_external_url,
-            standalone_portal_url=resolved_settings.standalone_portal_url,
-            standalone_api_base_url=resolved_settings.standalone_api_base_url,
-            standalone_health_url=resolved_settings.standalone_health_url,
-            standalone_oidc_redirect_uri=resolved_settings.standalone_oidc_redirect_uri,
-        )
+        reconciliation_state = None
+        reconciliation_task = None
+        if resolved_settings.reference_application_enabled:
+            reconciliation_state, reconciliation_task = start_bootstrap_reconciliation(
+                database,
+                authentik_admin_client,
+                application_id=resolved_settings.sandbox_application_id,
+                environment=resolved_settings.environment,
+                external_url=resolved_settings.authentik_external_url,
+                standalone_portal_url=resolved_settings.standalone_portal_url,
+                standalone_api_base_url=resolved_settings.standalone_api_base_url,
+                standalone_health_url=resolved_settings.standalone_health_url,
+                standalone_oidc_redirect_uri=(
+                    resolved_settings.standalone_oidc_redirect_uri
+                ),
+            )
+        else:
+            await disable_reference_application(
+                database,
+                application_id=resolved_settings.sandbox_application_id,
+            )
         app.state.bootstrap_reconciliation = reconciliation_state
         version_sync_task = start_authorization_version_reconciler(
             database, authentik_admin_client
@@ -125,7 +136,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         push_lease_reaper.cancel()
         version_sync_task.cancel()
-        reconciliation_task.cancel()
+        if reconciliation_task is not None:
+            reconciliation_task.cancel()
         await raw_engine.dispose()
         await authentik_admin_client.close()
         await portal_oidc_client.close()

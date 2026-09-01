@@ -15,7 +15,7 @@
 ## 0. 前置条件
 
 - 一台受管 Linux 主机（Debian/RHEL 家族），`x86_64` 或 `aarch64`，≥ 4 GB 内存、≥ 20 GB 磁盘。
-- 三个公网/内网 DNS 名称解析到本机：门户+API（如 `platform.example.internal`）、身份（`auth.example.internal`）、参考应用（`app.example.internal`）。
+- 两个公网/内网 DNS 名称解析到本机：门户+API（如 `platform.example.internal`）和身份（`auth.example.internal`）。生产覆盖层不启动或公开中性参考应用。
 - 443 端口对客户端可达（ACME TLS-ALPN-01 用 443；80 仅用于 HTTP→HTTPS 重定向，可在防火墙关闭）。
 - 一个不同故障域的加密存储挂载点 `/mnt/ai-hub-off-host-backups`（异机备份）。
 - 一个可接收 HMAC webhook 的告警接收端 URL。
@@ -68,8 +68,7 @@ chmod 600 deploy/secrets/age-key.txt
 ```bash
 bash scripts/deploy/generate-runtime-env.sh \
   --platform-host platform.example.internal \
-  --auth-host     auth.example.internal \
-  --app-host      app.example.internal
+  --auth-host     auth.example.internal
 # 产出明文 deploy/secrets/runtime.env（0600），所有密钥已随机生成
 ```
 
@@ -113,14 +112,14 @@ sudo bash scripts/deploy/install-secrets.sh
 AI_HUB_ACME_EMAIL=ops@example.internal
 ```
 
-主机名取自 `AI_HUB_PLATFORM_HOST` / `AI_HUB_AUTH_HOST` / `AI_HUB_APP_HOST`（`generate-runtime-env.sh` 的 issuer/重定向已用 `https://` 与这些主机名；确保三者和它们一致）。生产 static 配置 `deploy/traefik/traefik.production.yaml` 的 `email` 在部署时替换为该邮箱：
+主机名取自 `AI_HUB_PLATFORM_HOST` / `AI_HUB_AUTH_HOST`（`generate-runtime-env.sh` 的 issuer/重定向已用 `https://` 与这些主机名；确保二者和它们一致）。生产 static 配置 `deploy/traefik/traefik.production.yaml` 的 `email` 在部署时替换为该邮箱：
 
 ```bash
 sudo sed -i "s/ACME_EMAIL_PLACEHOLDER/${AI_HUB_ACME_EMAIL}/" \
   /opt/ai-hub/deploy/traefik/traefik.production.yaml
 ```
 
-> 说明：生产配置对门户/身份/API/参考应用按主机名路由并启用 HSTS；`/internal/*` 仍只绑定主机回环，不经 Traefik 暴露。
+> 说明：生产配置对门户、身份和 API 按主机名路由并启用 HSTS；`/internal/*` 仍只绑定主机回环，不经 Traefik 暴露。`standalone-example`、演示用户和 UAT 角色只由本地/CI 参考蓝图创建；生产启动时平台会将历史种子行置为禁用但保留审计记录。
 
 ## 4. 构建与启动
 
@@ -191,7 +190,7 @@ curl -fsS -H "X-AI-Hub-Monitor-Token: $(sudo grep -oP '(?<=AI_HUB_MONITOR_TOKEN=
 端到端验证以下各项并记录结果：
 
 - [ ] 门户 OIDC 登录（授权码 + PKCE）成功，回调走 HTTPS。
-- [ ] 参考应用经 SDK 调用平台 API 成功（`https://app.example.internal/api/v1/platform-status`）。
+- [ ] 使用一个已登记的真实应用凭据经 SDK 调用平台 API 成功；生产环境不使用 `standalone-example` 作为验收替身。
 - [ ] 数据接入：登记的 `DATA_INGEST` 源被调度器拉取，`raw_current_state` 有数据。
 - [ ] 异机加密备份已产生且 `verify` 通过；记录一次隔离恢复的实际 RTO/RPO。
 - [ ] 触发一条测试告警（如停一个应用入口）确认按责任路由送达并可升级。
