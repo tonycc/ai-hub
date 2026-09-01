@@ -58,6 +58,85 @@ class BootstrapReconciliationState:
         self.detail = "reconciliation has not run yet"
 
 
+async def disable_reference_application(
+    database: Database,
+    *,
+    application_id: str,
+) -> None:
+    """Quarantine deployment seed identities without deleting historical data.
+
+    Production uses this when the neutral reference application is disabled.
+    The operation is idempotent and leaves audit, conformance, and ingest
+    history intact while preventing logins, service tokens, scheduling, and
+    portal launch of the seed application.
+    """
+    async with database.session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                sa.text(
+                    """
+                    UPDATE platform_core.application_environment
+                    SET status = 'DISABLED'
+                    WHERE application_id = :application_id
+                    """
+                ),
+                {"application_id": application_id},
+            )
+            await session.execute(
+                sa.text(
+                    """
+                    UPDATE platform_core.application
+                    SET status = 'DISABLED', updated_at = CURRENT_TIMESTAMP
+                    WHERE application_id = :application_id
+                    """
+                ),
+                {"application_id": application_id},
+            )
+            await session.execute(
+                sa.text(
+                    """
+                    UPDATE platform_core.application_credential
+                    SET status = 'REVOKED',
+                        revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
+                    WHERE application_id = :application_id
+                      AND status IN ('ACTIVE', 'DRAINING')
+                    """
+                ),
+                {"application_id": application_id},
+            )
+            await session.execute(
+                sa.text(
+                    """
+                    UPDATE platform_core.ingest_source
+                    SET enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+                    WHERE source_application_id = :application_id
+                      AND enabled = TRUE
+                    """
+                ),
+                {"application_id": application_id},
+            )
+            await session.execute(
+                sa.text(
+                    """
+                    UPDATE platform_core.identity_user
+                    SET status = 'DISABLED',
+                        authorization_version = authorization_version + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE subject IN (
+                        'ai-hub-demo-user',
+                        'ai-hub-app-developer',
+                        'ai-hub-platform-ingest-operator'
+                    )
+                      AND status <> 'DISABLED'
+                    """
+                )
+            )
+    LOGGER.info(
+        "reference application %s is disabled for this deployment",
+        application_id,
+    )
+
+
 async def _reconcile_once(
     database: Database,
     authentik: AuthentikAdminClient,

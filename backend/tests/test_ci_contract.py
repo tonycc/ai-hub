@@ -138,6 +138,9 @@ def test_c1c_cross_repository_combination_is_immutable_and_self_consistent() -> 
         encoding="utf-8"
     )
     runtime = (PROJECT_ROOT / "scripts/ci/m7-runtime.sh").read_text(encoding="utf-8")
+    reference_blueprint = (
+        PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
+    ).read_text(encoding="utf-8")
     for scenario in (
         "stage-initial-full",
         "restart-complete-initial-full",
@@ -152,6 +155,12 @@ def test_c1c_cross_repository_combination_is_immutable_and_self_consistent() -> 
         assert scenario in driver
         assert scenario in runtime
     assert "data2agent adapter drifted" in driver
+    assert '_required_env("C1C_OIDC_AUDIENCE")' in driver
+    assert 'audience="ai-hub-platform"' not in driver
+    assert '--env C1C_OIDC_CLIENT_ID="${M7_SOURCE_APP}"' in runtime
+    assert "C1C_OIDC_CLIENT_SECRET=local-only-standalone-oidc-client-secret" in runtime
+    assert '--env C1C_OIDC_AUDIENCE="${M7_SOURCE_APP}"' in runtime
+    assert "[name, AI Hub ai_hub.ingest.push]" in reference_blueprint
 
 
 def test_m4_rotation_runtime_script_passes_owner_id_uuid() -> None:

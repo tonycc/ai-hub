@@ -187,7 +187,7 @@ def _token_provider() -> Callable[[], str]:
         _required_env("C1C_OIDC_TOKEN_URL"),
         _required_env("C1C_OIDC_CLIENT_ID"),
         _required_env("C1C_OIDC_CLIENT_SECRET"),
-        audience="ai-hub-platform",
+        audience=_required_env("C1C_OIDC_AUDIENCE"),
         scope="ai_hub.identity ai_hub.ingest.push",
         timeout=15,
         allow_insecure_http=True,

@@ -27,6 +27,7 @@ _SOURCE_COLUMNS = """
     transport_mode, push_protocol_version, contract_validation_mode,
     allow_empty_full, updated_at
 """
+PAGE_LIMIT_HARD_MAX = 5000
 
 
 class IngestConfigError(ValueError):
@@ -308,12 +309,14 @@ class IngestConfigStore:
         row = result.one_or_none()
         if row is None:  # pragma: no cover - migration seeds the singleton row
             raise IngestConfigError("ingest policy row is missing")
+        page_limit_max = min(int(row.page_limit_max), PAGE_LIMIT_HARD_MAX)
+        page_limit_default = min(int(row.page_limit_default), page_limit_max)
         return IngestPolicy(
             retention_keep_versions=row.retention_keep_versions,
             retention_keep_days=row.retention_keep_days,
             payload_max_bytes=row.payload_max_bytes,
-            page_limit_default=row.page_limit_default,
-            page_limit_max=row.page_limit_max,
+            page_limit_default=page_limit_default,
+            page_limit_max=page_limit_max,
             scheduled_reconcile_enabled=row.scheduled_reconcile_enabled,
             reconcile_interval_hours=row.reconcile_interval_hours,
             push_staging_retention_hours=row.push_staging_retention_hours,
@@ -321,6 +324,10 @@ class IngestConfigStore:
         )
 
     async def save_policy(self, session: AsyncSession, policy: IngestPolicy) -> IngestPolicy:
+        if policy.page_limit_max > PAGE_LIMIT_HARD_MAX:
+            raise IngestConfigError(
+                f"page_limit_max cannot exceed the hard limit ({PAGE_LIMIT_HARD_MAX})"
+            )
         if policy.page_limit_default > policy.page_limit_max:
             raise IngestConfigError("page_limit_default cannot exceed page_limit_max")
         if not 1 <= policy.push_staging_retention_hours <= 168:

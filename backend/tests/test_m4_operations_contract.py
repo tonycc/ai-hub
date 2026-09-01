@@ -113,45 +113,62 @@ def test_systemd_monitor_runs_each_minute_with_durable_state_and_no_public_bind(
     assert '"127.0.0.1:${AI_HUB_INTERNAL_API_PORT:-18080}:8000"' in compose
 
 
-def test_production_runtime_env_never_serves_localhost_launch_urls() -> None:
-    """The generated production env must not let the blueprint fall back to localhost."""
+def test_production_runtime_disables_and_does_not_publish_reference_application() -> None:
     generator = (
         PROJECT_ROOT / "scripts" / "deploy" / "generate-runtime-env.sh"
     ).read_text(encoding="utf-8")
     compose = (PROJECT_ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
-    blueprint = (PROJECT_ROOT / "deploy" / "authentik" / "ai-hub-blueprint.yaml").read_text(
+    production = (PROJECT_ROOT / "deploy" / "compose.production.yaml").read_text(
         encoding="utf-8"
     )
+    dynamic = (PROJECT_ROOT / "deploy/traefik/dynamic.production.yaml").read_text(
+        encoding="utf-8"
+    )
+    core_blueprint = (
+        PROJECT_ROOT / "deploy/authentik/ai-hub-blueprint.yaml"
+    ).read_text(encoding="utf-8")
+    reference_blueprint = (
+        PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
+    ).read_text(encoding="utf-8")
+    production_blueprint = (
+        PROJECT_ROOT / "deploy/authentik/ai-hub-production-blueprint.yaml"
+    ).read_text(encoding="utf-8")
 
-    # The generator always emits a real HTTPS launch URL for the app host.
-    assert "STANDALONE_PORTAL_URL=https://${APP_HOST}/" in generator
-    # platform-api bootstrap reconciliation needs the standalone entry points
-    # injected with the AI_HUB_ prefix; they must not fall back to localhost.
-    assert "AI_HUB_STANDALONE_PORTAL_URL=https://${APP_HOST}/" in generator
-    assert "AI_HUB_STANDALONE_API_BASE_URL=https://${APP_HOST}/api/v1" in generator
-    assert "AI_HUB_STANDALONE_HEALTH_URL=https://${APP_HOST}/health/live" in generator
-    assert "AI_HUB_STANDALONE_OIDC_REDIRECT_URI=https://${APP_HOST}/auth/callback" in generator
+    assert "AI_HUB_REFERENCE_APPLICATION_ENABLED=false" in generator
+    assert 'AI_HUB_REFERENCE_APPLICATION_ENABLED: "false"' in production
+    assert "platform-ingest-scheduler:" in production
+    assert "AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:?" in production
+    assert "profiles: !override\n      - reference-app" in production
+    assert "ai-hub-reference-blueprint.yaml" not in production
+    assert "ai-hub-production-blueprint.yaml" in production
+    assert "standalone-app:" not in dynamic
+    assert "AI_HUB_APP_HOST" not in dynamic
+    assert "name: standalone-example" not in core_blueprint
+    assert "name: standalone-example" in reference_blueprint
+    assert "state: absent" in production_blueprint
+    assert "username: ai-hub-demo-user" in production_blueprint
+    assert "https://${APP_HOST}" not in generator
+    assert "https://reference.invalid" in generator
     # The admin API must use the cluster-internal Authentik endpoint in
     # production: routing bootstrap reconciliation through the public Traefik
     # address would deadlock a fresh stack (Traefik waits on platform-api
     # readiness, readiness waits on reconciliation).
     assert "AI_HUB_AUTHENTIK_API_URL=http://authentik-server:9000/api/v3" in generator
     assert "AI_HUB_AUTHENTIK_API_URL=https://${AUTH_HOST}" not in generator
-    # The worker passes the value through so the blueprint env lookup resolves.
+    # Base/local compose still mounts the reference fixture and passes its URL.
     assert "STANDALONE_PORTAL_URL: ${STANDALONE_PORTAL_URL" in compose
-    # platform-api maps the four AI_HUB_STANDALONE_* settings.
     assert "AI_HUB_STANDALONE_PORTAL_URL: ${AI_HUB_STANDALONE_PORTAL_URL" in compose
     assert "AI_HUB_STANDALONE_API_BASE_URL: ${AI_HUB_STANDALONE_API_BASE_URL" in compose
     assert "AI_HUB_STANDALONE_HEALTH_URL: ${AI_HUB_STANDALONE_HEALTH_URL" in compose
     assert "AI_HUB_STANDALONE_OIDC_REDIRECT_URI: ${AI_HUB_STANDALONE_OIDC_REDIRECT_URI" in compose
     # The blueprint reads the value instead of hardcoding the callback as the
     # launch URL.
-    assert "STANDALONE_PORTAL_URL" in blueprint
+    assert "STANDALONE_PORTAL_URL" in reference_blueprint
     # The brand logo/favicon must resolve to the portal in production so the
     # login page never serves authentik's default branding assets.
     assert "AI_HUB_BRAND_ICON_URL=https://${PLATFORM_HOST}/ai-hub-icon.svg" in generator
     assert "AI_HUB_BRAND_ICON_URL: ${AI_HUB_BRAND_ICON_URL" in compose
-    assert "branding_logo: !Env [AI_HUB_BRAND_ICON_URL" in blueprint
+    assert "branding_logo: !Env [AI_HUB_BRAND_ICON_URL" in core_blueprint
 
 
 def test_sandbox_configuration_uses_dedicated_provider_identity() -> None:

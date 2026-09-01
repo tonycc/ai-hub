@@ -217,8 +217,9 @@ m7_c1c() {
     --env C1C_STATE_DIR=/opt/c1c/state \
     --env C1C_PLATFORM_BASE=http://platform.localhost:8088 \
     --env C1C_OIDC_TOKEN_URL=http://auth.localhost:8088/application/o/token/ \
-    --env C1C_OIDC_CLIENT_ID=ai-hub-platform \
-    --env C1C_OIDC_CLIENT_SECRET=local-only-oidc-client-secret \
+    --env C1C_OIDC_CLIENT_ID="${M7_SOURCE_APP}" \
+    --env C1C_OIDC_CLIENT_SECRET=local-only-standalone-oidc-client-secret \
+    --env C1C_OIDC_AUDIENCE="${M7_SOURCE_APP}" \
     platform-ingest-scheduler \
     python /opt/c1c/driver.py "${m7_phase}" \
     2>"${M7_WORK_DIR}/c1c-${m7_phase}.stderr" || m7_c1c_status=$?

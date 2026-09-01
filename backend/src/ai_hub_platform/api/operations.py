@@ -105,10 +105,39 @@ class ApplicationEntryDiagnostic(ApiModel):
     reason: str
 
 
+class DataSourceDiagnostic(ApiModel):
+    source_application_id: str
+    application_name: str
+    object_type: str
+    transport_mode: str
+    enabled: bool
+    interval_seconds: int
+    last_cursor: int | None
+    last_sync_at: datetime | None
+    last_success_at: datetime | None
+    last_status: str | None
+    status: DiagnosticStatus
+    reason: str
+
+
+class SyncFreshnessDiagnostic(ApiModel):
+    source_application_id: str
+    application_name: str
+    object_type: str
+    expected_interval_seconds: int
+    last_success_at: datetime | None
+    next_expected_at: datetime | None
+    age_seconds: int | None
+    status: DiagnosticStatus
+    reason: str
+
+
 class OperationsSummaryResponse(ApiModel):
     observed_at: datetime
     overall_status: Literal["HEALTHY", "DEGRADED"]
     application_entries: list[ApplicationEntryDiagnostic]
+    data_source_entries: list[DataSourceDiagnostic]
+    sync_freshness_entries: list[SyncFreshnessDiagnostic]
     runbook_path: str
 
 
@@ -208,10 +237,14 @@ async def operations_summary(
         ),
     ],
 ) -> OperationsSummaryResponse:
-    summary = await OperationsService().summary(
-        session,
-        visible_application_ids=principal.application_scope("platform.application.read"),
-    )
+    async with request.app.state.raw_sessions() as raw_session:
+        summary = await OperationsService().summary(
+            session,
+            raw_session=raw_session,
+            visible_application_ids=principal.application_scope(
+                "platform.application.read"
+            ),
+        )
     return OperationsSummaryResponse.model_validate(summary)
 
 
@@ -242,8 +275,10 @@ async def internal_operations_summary(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid monitor credential",
         )
-    summary = await OperationsService().summary(
-        session,
-        visible_application_ids=None,
-    )
+    async with request.app.state.raw_sessions() as raw_session:
+        summary = await OperationsService().summary(
+            session,
+            raw_session=raw_session,
+            visible_application_ids=None,
+        )
     return OperationsSummaryResponse.model_validate(summary)

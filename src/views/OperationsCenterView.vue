@@ -9,13 +9,31 @@ import { apiRequest } from '../services/platformApi'
 const loading = ref(false)
 const error = ref(null)
 const summary = ref(null)
-const warningCount = computed(() => summary.value
-  ? summary.value.application_entries.filter((item) => ['WARNING', 'CRITICAL'].includes(item.status)).length
-  : 0)
+const activeTab = ref('applications')
+const tabs = [
+  ['applications', '应用入口'],
+  ['sources', '数据来源'],
+  ['freshness', '同步新鲜度'],
+]
+const warningCount = computed(() => {
+  if (!summary.value) return 0
+  return [
+    ...summary.value.application_entries,
+    ...summary.value.data_source_entries,
+    ...summary.value.sync_freshness_entries,
+  ].filter((item) => ['WARNING', 'CRITICAL'].includes(item.status)).length
+})
 function formatTime(value) {
   return value
     ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(value))
     : '—'
+}
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined) return '—'
+  if (seconds < 60) return `${seconds} 秒`
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)} 小时`
+  return `${(seconds / 86400).toFixed(1)} 天`
 }
 async function load() {
   loading.value = true
@@ -35,8 +53,21 @@ onMounted(load)
   <div class="page-shell">
     <PageHeader
       title="运维中心"
-      description="用只读指标查看应用入口健康；此页面不提供应用配置写操作。"
+      description="用只读指标查看应用入口、数据来源状态与同步新鲜度；此页面不提供配置写操作。"
     >
+      <template #tabs>
+        <div class="management-tabs">
+          <button
+            v-for="tab in tabs"
+            :key="tab[0]"
+            type="button"
+            :class="{ active: activeTab === tab[0] }"
+            @click="activeTab = tab[0]"
+          >
+            {{ tab[1] }}
+          </button>
+        </div>
+      </template>
       <template #actions>
         <el-button @click="$router.push('/platform/developer')">
           <el-icon><Document /></el-icon>运行手册
@@ -65,10 +96,10 @@ onMounted(load)
             :tone="warningCount ? 'amber' : 'green'"
           />
           <MetricCard
-            label="应用入口"
-            :value="summary.application_entries.length"
+            label="数据来源"
+            :value="summary.data_source_entries.length"
             unit="个"
-            hint="已登记环境"
+            hint="已登记对象来源"
             icon="Connection"
             tone="blue"
           />
@@ -80,8 +111,8 @@ onMounted(load)
             tone="blue"
           />
         </div>
-        <section class="surface-panel page-section list-panel">
-          <el-table :data="summary.application_entries" style="width: 100%">
+        <section v-if="activeTab === 'applications'" class="surface-panel page-section list-panel">
+          <el-table v-if="summary.application_entries.length" :data="summary.application_entries" style="width: 100%">
             <el-table-column prop="application_name" label="应用" min-width="190">
               <template #default="scope">
                 <strong>{{ scope.row.application_name }}</strong>
@@ -90,7 +121,7 @@ onMounted(load)
             </el-table-column>
             <el-table-column prop="portal_url" label="入口" min-width="250">
               <template #default="scope">
-                <a :href="scope.row.portal_url" target="_blank">{{ scope.row.portal_url }}</a>
+                <a :href="scope.row.portal_url" target="_blank" rel="noopener noreferrer">{{ scope.row.portal_url }}</a>
               </template>
             </el-table-column>
             <el-table-column prop="last_health_checked_at" label="最近检查" width="185">
@@ -101,6 +132,53 @@ onMounted(load)
               <template #default="scope"><StatusTag :status="scope.row.status" /></template>
             </el-table-column>
           </el-table>
+          <el-empty v-else description="没有可见的应用入口" />
+        </section>
+        <section v-else-if="activeTab === 'sources'" class="surface-panel page-section list-panel">
+          <el-table v-if="summary.data_source_entries.length" :data="summary.data_source_entries" style="width: 100%">
+            <el-table-column prop="application_name" label="来源应用" min-width="190">
+              <template #default="scope">
+                <strong>{{ scope.row.application_name }}</strong>
+                <small class="subline mono">{{ scope.row.source_application_id }} · {{ scope.row.object_type }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column prop="transport_mode" label="传输方式" width="135" />
+            <el-table-column label="位点" width="120">
+              <template #default="scope"><span class="mono">{{ scope.row.last_cursor ?? '—' }}</span></template>
+            </el-table-column>
+            <el-table-column label="最近执行" width="185">
+              <template #default="scope">{{ formatTime(scope.row.last_sync_at) }}</template>
+            </el-table-column>
+            <el-table-column prop="reason" label="诊断" min-width="300" />
+            <el-table-column label="状态" width="115">
+              <template #default="scope"><StatusTag :status="scope.row.status" /></template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="没有可见的数据来源" />
+        </section>
+        <section v-else class="surface-panel page-section list-panel">
+          <el-table v-if="summary.sync_freshness_entries.length" :data="summary.sync_freshness_entries" style="width: 100%">
+            <el-table-column prop="application_name" label="来源应用" min-width="190">
+              <template #default="scope">
+                <strong>{{ scope.row.application_name }}</strong>
+                <small class="subline mono">{{ scope.row.source_application_id }} · {{ scope.row.object_type }}</small>
+              </template>
+            </el-table-column>
+            <el-table-column label="期望周期" width="125">
+              <template #default="scope">{{ formatDuration(scope.row.expected_interval_seconds) }}</template>
+            </el-table-column>
+            <el-table-column label="最近成功" width="185">
+              <template #default="scope">{{ formatTime(scope.row.last_success_at) }}</template>
+            </el-table-column>
+            <el-table-column label="当前数据年龄" width="145">
+              <template #default="scope">{{ formatDuration(scope.row.age_seconds) }}</template>
+            </el-table-column>
+            <el-table-column prop="reason" label="诊断" min-width="300" />
+            <el-table-column label="状态" width="115">
+              <template #default="scope"><StatusTag :status="scope.row.status" /></template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="没有可见的同步新鲜度数据" />
         </section>
       </template>
     </ApiState>

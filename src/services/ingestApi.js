@@ -5,6 +5,10 @@ export async function ingestGetConfig() {
   return apiRequest('ingest/config')
 }
 
+export async function ingestListOperations(limit = 50) {
+  return apiRequest(`ingest/operations?limit=${limit}`)
+}
+
 export async function ingestSavePolicy(policy) {
   return apiRequest('ingest/policy', { method: 'PUT', body: policy })
 }

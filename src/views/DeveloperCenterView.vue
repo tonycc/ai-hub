@@ -50,7 +50,7 @@ const resources = computed(() => {
 })
 
 const envSnippet = computed(() => {
-  if (!sandbox.value) return ''
+  if (!sandbox.value?.available) return ''
   const s = sandbox.value
   return [
     `PLATFORM_BASE_URL=${s.platform_base_url}`,
@@ -136,7 +136,7 @@ onMounted(load)
           </el-table>
         </section>
 
-        <section v-if="sandbox" class="surface-panel page-section sandbox-panel">
+        <section v-if="sandbox?.available" class="surface-panel page-section sandbox-panel">
           <div class="section-heading">
             <h2>本地沙箱</h2>
             <p>非敏感参数可直接写入 <code>.env</code>；客户端密钥请到应用中心创建环境凭据后一次性保存。</p>
@@ -150,6 +150,15 @@ onMounted(load)
           </div>
           <pre class="env-snippet">{{ envSnippet }}</pre>
         </section>
+        <el-alert
+          v-else-if="sandbox"
+          class="page-section"
+          type="info"
+          :closable="false"
+          show-icon
+          title="当前部署未启用参考沙箱"
+          :description="sandbox.message"
+        />
 
         <section class="page-section">
           <el-collapse class="meta-collapse">

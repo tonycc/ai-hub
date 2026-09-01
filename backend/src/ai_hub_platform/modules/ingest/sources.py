@@ -193,8 +193,36 @@ async def load_sync_cursors(session: AsyncSession) -> dict[tuple[str, str], dict
         cursors[(str(row.source_application_id), str(row.object_type))] = {
             "last_cursor": int(row.last_version),
             "last_sync_at": row.last_synced_at,
-            "last_status": str(row.last_status),
+            "last_status": (
+                None if row.last_status is None else str(row.last_status)
+            ),
         }
+    success_result = await session.execute(
+        text(
+            """
+            SELECT DISTINCT ON (source_application_id, object_type)
+                source_application_id, object_type,
+                COALESCE(finished_at, started_at) AS last_success_at
+            FROM platform_raw.raw_ingest_batch
+            WHERE transport_mode = 'PULL_EXPORT'
+              AND status = 'loaded'
+              AND COALESCE(purpose, 'production') = 'production'
+            ORDER BY source_application_id, object_type,
+                     COALESCE(finished_at, started_at) DESC
+            """
+        )
+    )
+    for row in success_result.all():
+        key = (str(row.source_application_id), str(row.object_type))
+        entry = cursors.setdefault(
+            key,
+            {
+                "last_cursor": None,
+                "last_sync_at": row.last_success_at,
+                "last_status": "ok",
+            },
+        )
+        entry["last_success_at"] = row.last_success_at
     return cursors
 
 
@@ -273,6 +301,7 @@ async def load_push_progress(
         entry["last_sync_at"] = row.last_at
         if entry.get("last_status") is None:
             entry["last_status"] = "ok"
+        entry["last_success_at"] = row.last_at
     return progress
 
 

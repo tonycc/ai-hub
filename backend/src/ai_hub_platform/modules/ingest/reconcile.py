@@ -265,6 +265,7 @@ class IngestReconcileService:
         source_application_id: str,
         object_type: str,
     ) -> ReconcileReport:
+        await lock_ingest_source(session, source_application_id, object_type)
         entries = await self.load_change_log(
             session,
             source_application_id=source_application_id,
