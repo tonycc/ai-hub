@@ -43,6 +43,7 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.export]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.push]]
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
 
   - model: authentik_core.application
