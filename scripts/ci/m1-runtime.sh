@@ -106,6 +106,12 @@ m1_psql() {
     psql -v ON_ERROR_STOP=1 -U postgres -d platform_db "$@"
 }
 
+m1_dump_startup_diagnostics() {
+  m1_compose ps -a >&2 || true
+  m1_compose logs --no-color --tail 200 \
+    platform-api authentik-server authentik-worker >&2 || true
+}
+
 m1_assert_audit() {
   m1_audit_request_id=$1
   m1_audit_condition=$2
@@ -226,9 +232,15 @@ done
 cd "${M1_PROJECT_ROOT}"
 m1_note "starting a fresh isolated base-access deployment"
 if [[ "${M1_SKIP_BUILD:-0}" == "1" ]]; then
-  m1_compose up -d --no-build
+  if ! m1_compose up -d --no-build; then
+    m1_dump_startup_diagnostics
+    m1_fail "base-access deployment failed to become healthy"
+  fi
 else
-  m1_compose up -d --build
+  if ! m1_compose up -d --build; then
+    m1_dump_startup_diagnostics
+    m1_fail "base-access deployment failed to become healthy"
+  fi
 fi
 m1_wait_url "${M1_PLATFORM_BASE}/health/ready"
 m1_wait_url "${M1_APP_BASE}/health/live"

@@ -125,6 +125,19 @@ def test_ingest_operator_uses_independent_password_secret() -> None:
     assert uat != operator
 
 
+def test_reference_blueprint_applies_core_blueprint_before_shared_lookups() -> None:
+    blueprint = (
+        PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
+    ).read_text(encoding="utf-8")
+
+    dependency = "model: authentik_blueprints.metaapplyblueprint"
+    first_shared_lookup = "model: authentik_providers_oauth2.oauth2provider"
+    assert dependency in blueprint
+    assert "name: AI Hub identity and M3 portal baseline" in blueprint
+    assert "required: true" in blueprint
+    assert blueprint.index(dependency) < blueprint.index(first_shared_lookup)
+
+
 def test_standalone_image_build_does_not_copy_platform_source() -> None:
     dockerfile = (PROJECT_ROOT / "examples/standalone-app/Dockerfile").read_text(encoding="utf-8")
 

@@ -8,6 +8,15 @@ metadata:
 # production overlay removes the mount so reference providers and UAT users
 # cannot be created in a production identity tenant.
 entries:
+  # File-backed blueprint discovery order is intentionally unspecified by
+  # Authentik. Apply the core blueprint in this transaction before resolving
+  # the shared flows and scope mappings referenced below.
+  - model: authentik_blueprints.metaapplyblueprint
+    attrs:
+      identifiers:
+        name: AI Hub identity and M3 portal baseline
+      required: true
+
   - model: authentik_providers_oauth2.oauth2provider
     id: standalone-example-oauth-provider
     identifiers:
