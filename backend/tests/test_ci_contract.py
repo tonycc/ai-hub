@@ -9,6 +9,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = PROJECT_ROOT / ".github/workflows/ci.yml"
+PUBLISH_WORKFLOW_PATH = PROJECT_ROOT / ".github/workflows/publish-images.yml"
 COMPONENT_LOCK_PATH = PROJECT_ROOT / "deploy/component-lock.json"
 INTEGRATION_LOCK_PATH = PROJECT_ROOT / "deploy/integration-lock.json"
 FULL_COMMIT_ACTION = re.compile(r"^[^@]+@[0-9a-f]{40}$")
@@ -25,8 +26,14 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
     jobs = workflow["jobs"]
 
     assert workflow["permissions"] == {"contents": "read"}
-    assert set(workflow["on"]) == {"pull_request", "push", "workflow_dispatch"}
+    assert set(workflow["on"]) == {
+        "pull_request",
+        "push",
+        "workflow_dispatch",
+        "workflow_call",
+    }
     assert workflow["on"]["push"] == {"branches": ["main"]}
+    assert workflow["on"]["workflow_call"] is None
     assert set(jobs) == {
         "python",
         "frontend",
@@ -45,6 +52,15 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
     assert jobs["required-gate"]["if"] == "${{ always() }}"
     assert jobs["required-gate"]["name"] == "Required gate"
     assert "m2-runtime" not in jobs
+
+
+def test_image_publish_reuses_required_ci_before_building() -> None:
+    workflow = yaml.safe_load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+
+    assert jobs["required-ci"]["uses"] == "./.github/workflows/ci.yml"
+    assert jobs["required-ci"]["permissions"] == {"contents": "read"}
+    assert jobs["publish-arm64"]["needs"] == "required-ci"
 
 
 def test_ci_external_actions_are_pinned_to_full_commit_shas() -> None:

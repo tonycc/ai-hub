@@ -24,3 +24,13 @@ htmlcov/
 # Age private key must never be committed; only the encrypted SOPS files are.
 deploy/secrets/age-key.txt
 
+# IP-only production TLS material and generated runtime files must stay local.
+**/root-ca.key
+**/server.key
+**/server.crt
+**/root-ca.crt
+**/ca-bundle.crt
+**/runtime.env
+**/backup.env
+**/runtime.env.before-images-*
+**/runtime.env.deployment-state

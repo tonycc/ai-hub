@@ -460,6 +460,10 @@ entries:
       name: AI Hub authentik automation
       type: service_account
       permissions:
+        # The Mac mini deployment gate reapplies these read-only mounted
+        # blueprints after runtime IP changes. Authentik's apply action is
+        # guarded by the BlueprintInstance view permission.
+        - authentik_blueprints.view_blueprintinstance
         - authentik_providers_oauth2.view_oauth2provider
         - authentik_providers_oauth2.add_oauth2provider
         - authentik_providers_oauth2.change_oauth2provider
@@ -483,7 +487,7 @@ entries:
       key: !Env AI_HUB_AUTHENTIK_API_TOKEN
       user: !KeyOf ai-hub-authentik-automation-user
       intent: api
-      description: Least-privilege token for AI Hub application credential lifecycle.
+      description: Least-privilege token for AI Hub credentials and mounted blueprint convergence.
       expiring: false
 
   - model: authentik_core.user
