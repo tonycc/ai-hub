@@ -31,7 +31,7 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     contract = load_yaml_mapping(OPENAPI_PATH)
 
     assert contract["openapi"] == "3.1.0"
-    assert contract["info"]["version"] == "0.3.4"
+    assert contract["info"]["version"] == "0.4.0"
     assert contract["paths"]
 
     operation_ids: list[str] = []
@@ -54,6 +54,11 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     assert len(operation_ids) == len(set(operation_ids))
     push_record = contract["components"]["schemas"]["PushRecord"]["properties"]["version"]
     assert push_record["minimum"] == 1
+    bootstrap = contract["components"]["schemas"]["AdminBootstrapClaim"]
+    assert "initial_admin_user_id" in bootstrap["required"]
+    assert "owner_user_id" not in bootstrap["properties"]
+    assert "business_user" in contract["components"]["schemas"]["CurrentUser"]["required"]
+    assert "business_user" in contract["components"]["schemas"]["DirectoryUser"]["required"]
 
 
 def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
@@ -65,7 +70,9 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
         "/platform-api/v1/me/permissions",
         "/platform-api/v1/authorization/decisions",
         "/platform-api/v1/applications/{application_id}",
+        "/platform-api/v1/applications/{application_id}/environments/{environment}/admin-bootstrap",
         "/platform-api/v1/applications/{application_id}/environments/{environment}/health-check",
+        "/platform-api/v1/directory/users",
         "/platform-api/v1/notifications",
         "/platform-api/v1/notifications/{notification_id}",
         "/platform-api/v1/data/objects",
@@ -100,9 +107,20 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
             "ai_hub.identity",
             "platform.application.read",
         ],
+        (
+            "/platform-api/v1/applications/{application_id}"
+            "/environments/{environment}/admin-bootstrap"
+        ): [
+            "ai_hub.identity",
+            "platform.application.bootstrap",
+        ],
         "/platform-api/v1/applications/{application_id}/environments/{environment}/health-check": [
             "ai_hub.identity",
             "platform.application.health.write",
+        ],
+        "/platform-api/v1/directory/users": [
+            "ai_hub.identity",
+            "platform.directory.read",
         ],
         "/platform-api/v1/notifications": [
             "ai_hub.identity",

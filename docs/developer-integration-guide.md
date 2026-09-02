@@ -4,16 +4,20 @@
 
 本指南面向独立部署的企业 B 端应用。应用通过版本化 API 与**数据汇聚导出接口**接入平台，不共享平台源码、数据库账号、Cookie 或 Session 表。
 
-## 1. 从 API-only 开始
+## 1. 从身份型接入开始
 
 默认只登记 `API_CLIENT`，无需消息队列或事件基础设施：
 
-1. 在应用中心登记应用和每个环境的入口、严格回调 URI 与版本。
-2. 仅选择实际需要的 OAuth scope。
+1. 在应用中心登记应用并从员工目录选择**应用负责人**；再登记每个环境的入口、严格回调 URI、版本和该环境的**初始管理员**。登记操作员、负责人、初始管理员是三个独立角色。
+2. 仅选择实际需要的 OAuth scope。应用自己管理业务授权时，用户流只需 `ai_hub.identity`、`platform.me.read`、`platform.application.bootstrap`；后台同步员工另需 `platform.directory.read`。
 3. 创建环境凭据，立即保存只展示一次的 `client_secret`；平台数据库不会保存明文。
 4. 用户请求使用授权码 + PKCE；后台任务使用 Client Credentials。两类令牌不可互换。
-5. 应用本地验证用户 JWT 的 issuer、audience、签名、有效期和 scope，再调用 `/me` 与权限 API。
-6. 对象归属、业务状态和并发规则始终由应用自己最终校验。
+5. 应用本地验证用户 JWT 的 issuer、audience、签名、有效期和 scope，再调用 `/me` 获取基本身份。OIDC 登录成功本身不授予任何业务权限。
+6. 环境中指定的初始管理员首次登录时调用 `admin-bootstrap`；应用在本地幂等创建首个管理员。负责人变化不修改待领取或已领取的初始管理员，也不改写本地管理员。
+7. 后台任务按 cursor 调用 `/directory/users` 同步员工资料和状态。新员工默认无本地角色；`business_user=false` 的平台账号不得进入业务员工列表，且与停用员工一样会返回 `tombstone=true`。应用应禁止其登录并撤销会话，但不要覆盖或删除本地角色历史。
+8. 角色、功能权限、数据范围、对象归属、业务状态和并发规则始终由应用自己存储并最终校验。
+
+上述模式等价于企业内部的 “Sign in with Google”：AI Hub 负责认证和基本资料，业务应用负责全部功能授权。详细边界见 [ADR-034](adr/ADR-034-identity-provider-application-owned-authorization.md)。只有明确选择平台托管授权的应用才使用 `/me/permissions` 与 `/authorization/decisions`；身份型应用不得在 AI Hub 登记业务权限码。
 
 Python 最小示例见开发者中心的 `api-only-python` 资产（`examples/sdk/api_only.py`）。服务通知请求必须携带唯一幂等键；失败需按公开错误码处理，不得静默丢弃。
 
@@ -60,6 +64,6 @@ Python 辅助见 SDK：`ExportPage` / `ExportRecord` / `paginate_export_records`
 
 ## 4. 一致性认证
 
-提交上线前在「接入治理」页面分别运行已启用能力的认证配置：`API_ONLY`、`DATA_INGEST`。未启用能力应显示为「不适用」，不能为了通过认证而安装无用基础设施。
+提交上线前在「接入治理」页面运行与架构一致的认证配置：只借用登录和员工目录的应用运行 `OIDC_ONLY`；确实使用平台权限快照、通知等公共 API 的应用再运行 `API_ONLY`；启用数据汇聚时运行 `DATA_INGEST`。未启用能力应显示为「不适用」，不能为了通过认证而安装无用基础设施。
 
 `DATA_INGEST` 运行时证据须证明：导出接口可达且校验 `ai_hub.ingest.export`、version 全序单调、回看窗口下无漏拉、删除可捕获、幂等正确、payload 符合已登记契约。本地门禁通过后，可参考开发者中心资产 `data-ingest-evidence`（`examples/sdk/data_ingest_evidence.py`）生成并导入证据摘要。

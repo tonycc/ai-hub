@@ -76,6 +76,10 @@ class EnvironmentResponse(ApiModel):
     last_health_status: str | None
     last_health_checked_at: datetime | None
     updated_at: datetime
+    admin_bootstrap_status: Literal["PENDING", "CONSUMED"] | None = None
+    admin_bootstrap_initial_admin_user_id: UUID | None = None
+    admin_bootstrap_consumed_by_user_id: UUID | None = None
+    admin_bootstrap_consumed_at: datetime | None = None
     credential: CredentialMetadataResponse | None = None
     credentials: list[CredentialMetadataResponse] = Field(
         default_factory=lambda: list[CredentialMetadataResponse]()
@@ -122,6 +126,8 @@ class ApplicationDetailResponse(ApiModel):
     description: str
     owner: str
     owner_id: UUID | None = None
+    created_by: str | None = None
+    created_by_user_id: UUID | None = None
     status: ApplicationStatus
     capabilities: list[Capability]
     environments: list[EnvironmentResponse]
@@ -136,6 +142,19 @@ class ApplicationListResponse(ApiModel):
     total: int
 
 
+class ApplicationUserCandidateResponse(ApiModel):
+    user_id: UUID
+    display_name: str
+    email: str | None
+    organization_id: str
+    organization_name: str
+
+
+class ApplicationUserCandidateListResponse(ApiModel):
+    items: list[ApplicationUserCandidateResponse]
+    total: int
+
+
 class ApplicationCreate(ApiModel):
     application_id: str = Field(
         min_length=3,
@@ -144,7 +163,7 @@ class ApplicationCreate(ApiModel):
     )
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=4000)
-    owner_id: UUID = Field(description="平台用户 user_id，负责人从用户目录中选择")
+    owner_id: UUID = Field(description="员工目录 user_id，作为应用业务负责人")
     capabilities: list[Capability] = Field(default_factory=lambda: ["API_CLIENT"])
 
     @field_validator("capabilities")
@@ -160,7 +179,7 @@ class ApplicationUpdate(ApiModel):
     description: str = Field(min_length=1, max_length=4000)
     owner_id: UUID | None = Field(
         default=None,
-        description="平台用户 user_id，负责人从用户目录中选择；不传则保留原负责人",
+        description="员工目录 user_id，作为应用业务负责人；不传则保留原负责人",
     )
     status: ApplicationStatus
     capabilities: list[Capability]
@@ -174,6 +193,9 @@ class ApplicationUpdate(ApiModel):
 
 
 class EnvironmentWrite(ApiModel):
+    initial_admin_user_id: UUID = Field(
+        description="员工目录 user_id，仅用于本环境的一次性初始管理员领取"
+    )
     portal_url: str = Field(min_length=1, max_length=2000)
     api_base_url: str = Field(min_length=1, max_length=2000)
     health_url: str = Field(min_length=1, max_length=2000)
@@ -303,6 +325,14 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
                 last_health_status=item["last_health_status"],
                 last_health_checked_at=item["last_health_checked_at"],
                 updated_at=item["updated_at"],
+                admin_bootstrap_status=item.get("admin_bootstrap_status"),
+                admin_bootstrap_initial_admin_user_id=item.get(
+                    "admin_bootstrap_initial_admin_user_id"
+                ),
+                admin_bootstrap_consumed_by_user_id=item.get(
+                    "admin_bootstrap_consumed_by_user_id"
+                ),
+                admin_bootstrap_consumed_at=item.get("admin_bootstrap_consumed_at"),
                 credential=credential,
                 credentials=[
                     credential_metadata_response(row)
@@ -316,6 +346,12 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
         description=value["description"],
         owner=value["owner"],
         owner_id=UUID(value["owner_id"]) if value.get("owner_id") else None,
+        created_by=value.get("created_by"),
+        created_by_user_id=(
+            UUID(value["created_by_user_id"])
+            if value.get("created_by_user_id")
+            else None
+        ),
         status=value["status"],
         capabilities=list(value["capabilities"]),
         environments=environments,
@@ -381,6 +417,31 @@ async def _audit_credential_action(
     )
 
 
+@router.get(
+    "/application-user-candidates",
+    response_model=ApplicationUserCandidateListResponse,
+)
+async def list_application_user_candidates(
+    session: SessionDependency,
+    _principal: Annotated[
+        PortalPrincipal,
+        Depends(
+            portal_permission_dependency(
+                "platform.application.write",
+                application_parameter=None,
+            )
+        ),
+    ],
+    query: Annotated[str | None, Query(max_length=200)] = None,
+) -> ApplicationUserCandidateListResponse:
+    rows = await ApplicationManagementService().list_application_user_candidates(
+        session,
+        query=query.strip() if query and query.strip() else None,
+    )
+    items = [ApplicationUserCandidateResponse.model_validate(row) for row in rows]
+    return ApplicationUserCandidateListResponse(items=items, total=len(items))
+
+
 @router.get("/applications", response_model=ApplicationListResponse)
 async def list_applications(
     session: SessionDependency,
@@ -406,7 +467,7 @@ async def list_applications(
 async def create_application(
     payload: ApplicationCreate,
     session: SessionDependency,
-    _principal: Annotated[
+    principal: Annotated[
         PortalPrincipal,
         Depends(
             portal_permission_dependency(
@@ -425,6 +486,7 @@ async def create_application(
             name=payload.name,
             description=payload.description,
             owner_id=payload.owner_id,
+            created_by_user_id=principal.user_id,
             capabilities=list(payload.capabilities),
         )
     except (
@@ -505,7 +567,7 @@ async def upsert_environment(
     payload: EnvironmentWrite,
     request: Request,
     session: SessionDependency,
-    _principal: Annotated[
+    principal: Annotated[
         PortalPrincipal,
         Depends(
             portal_permission_dependency(
@@ -527,6 +589,7 @@ async def upsert_environment(
             redirect_uris=payload.oidc_redirect_uris,
             version=payload.version,
             status=payload.status,
+            initial_admin_user_id=payload.initial_admin_user_id,
         )
     except (
         ApplicationManagementNotFoundError,
@@ -535,6 +598,32 @@ async def upsert_environment(
         AuthentikManagementError,
     ) as error:
         _raise_management_error(error)
+    environment_record = next(
+        item
+        for item in cast(list[dict[str, Any]], record["environments"])
+        if item["environment"] == environment
+    )
+    await AuditService().append(
+        session,
+        AuditRecord(
+            request_id=str(request.state.request_id),
+            trace_id=getattr(request.state, "trace_id", None),
+            action="platform.application.environment.write",
+            result="SUCCESS",
+            actor_type="user",
+            actor_id=principal.subject,
+            application_id=application_id,
+            target_type="application_environment",
+            target_id=f"{application_id}:{environment}",
+            authorization_version=principal.authorization_version,
+            metadata={
+                "initial_admin_user_id": str(payload.initial_admin_user_id),
+                "admin_bootstrap_status": environment_record.get(
+                    "admin_bootstrap_status"
+                ),
+            },
+        ),
+    )
     return _detail_response(record)
 
 

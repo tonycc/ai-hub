@@ -5,8 +5,9 @@ Read this file first when integrating an independent application with the AI Hub
 ## Start here
 
 1. docs/agent-integration.md — reading order, decision tree, env vars, checklists
-2. docs/developer-integration-guide.md — human-oriented integration guide (API-only, DATA_INGEST, certification)
-3. contracts/api/platform-api.openapi.yaml — platform public API (v0.3.0+)
+2. docs/developer-integration-guide.md — human-oriented integration guide (OIDC-only, API-only, DATA_INGEST, certification)
+3. docs/adr/ADR-034-identity-provider-application-owned-authorization.md — identity/authorization ownership boundary
+4. contracts/api/platform-api.openapi.yaml — platform public API (v0.4.0+)
 
 ## Developer assets (also via API)
 
@@ -16,6 +17,7 @@ Base URL: {PLATFORM}/portal-api/v1/developer/assets/{asset_id}
 | --- | --- |
 | agent-integration | docs/agent-integration.md |
 | integration-guide | docs/developer-integration-guide.md |
+| identity-authorization-boundary | docs/adr/ADR-034-identity-provider-application-owned-authorization.md |
 | platform-openapi | contracts/api/platform-api.openapi.yaml |
 | api-only-python | examples/sdk/api_only.py |
 | data-read-python | examples/sdk/data_read.py |

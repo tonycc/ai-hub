@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: AI Hub Platform API
-  version: 0.3.4
+  version: 0.4.0
   description: |
-    Versioned public identity, authorization, application, notification, aggregated data, DATA_INGEST Push, and health API.
+    Versioned public identity, employee directory, application bootstrap, authorization, notification, aggregated data, DATA_INGEST Push, and health API.
 
     **Authentication:** Bearer access token from authentik OIDC. Every protected operation requires scope `ai_hub.identity` plus the operation-specific scopes listed on each path. Push ingest additionally requires `ai_hub.ingest.push` on a DATA_INGEST service token.
 
@@ -130,6 +130,38 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /platform-api/v1/applications/{application_id}/environments/{environment}/admin-bootstrap:
+    post:
+      operationId: claimApplicationAdminBootstrap
+      summary: Claim the initial application administrator
+      description: |
+        Allows the employee configured as this environment's initial administrator to
+        consume its one-time bootstrap claim after OIDC login. The application owner
+        and the platform operator who registered the application do not receive this
+        privilege implicitly. Repeating the request as the same user is idempotent.
+        The claim is only an initialization signal; applications must keep roles,
+        feature permissions, and data scopes in their own authorization store.
+      tags: [identity]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.application.bootstrap]
+      parameters:
+        - {$ref: "#/components/parameters/RequiredApplicationId"}
+        - {$ref: "#/components/parameters/ApplicationPathId"}
+        - name: environment
+          in: path
+          required: true
+          description: Registered environment whose initial administrator is being claimed.
+          schema: {type: string}
+      responses:
+        "200":
+          description: Consumed bootstrap claim. A retry by the same user returns the same claim.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AdminBootstrapClaim"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /platform-api/v1/applications/{application_id}/environments/{environment}/health-check:
     post:
       operationId: checkApplicationEnvironmentHealth
@@ -164,6 +196,41 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /platform-api/v1/directory/users:
+    get:
+      operationId: listDirectoryUsers
+      summary: Incremental employee directory
+      description: |
+        Returns employee identity/profile changes using an opaque, commit-ordered directory revision.
+        Only a service identity bound to the calling application may use this endpoint.
+        `business_user=false` identifies an AI Hub platform account rather than a business
+        employee. `tombstone=true` means the identity is inactive or is not a business user;
+        consumers must disable local login and sessions but must not overwrite locally managed
+        role history.
+      tags: [identity]
+      security:
+        - oidcAuth: [ai_hub.identity, platform.directory.read]
+      parameters:
+        - {$ref: "#/components/parameters/RequiredApplicationId"}
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor returned by the previous page.
+          schema: {type: string, maxLength: 2048}
+        - name: limit
+          in: query
+          required: false
+          description: Maximum users returned per page.
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+      responses:
+        "200":
+          description: One incremental directory page with a cursor for the next synchronization.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DirectoryPage"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /platform-api/v1/notifications:
     post:
       operationId: createNotification
@@ -594,7 +661,7 @@ components:
     CurrentUser:
       type: object
       additionalProperties: false
-      required: [user_id, subject, display_name, status, organization_id, organization_name, authorization_version]
+      required: [user_id, subject, display_name, status, organization_id, organization_name, business_user, authorization_version]
       properties:
         user_id: {type: string, format: uuid, description: Stable platform user uuid.}
         subject: {type: string, description: OIDC subject (`sub`) claim.}
@@ -603,6 +670,7 @@ components:
         status: {type: string, description: Platform account status (for example ACTIVE).}
         organization_id: {type: string, description: Organization slug or id.}
         organization_name: {type: string, description: Organization display name.}
+        business_user: {type: boolean, description: True only when the identity has no AI Hub platform-role assignment and may enter business applications.}
         authorization_version: {type: integer, minimum: 1, description: Monotonic version; invalidate cached permissions when it increases.}
     DataScope:
       type: object
@@ -667,12 +735,13 @@ components:
     ApplicationRegistration:
       type: object
       additionalProperties: false
-      required: [application_id, name, description, owner, status, capabilities, environments]
+      required: [application_id, name, description, owner, owner_user_id, status, capabilities, environments]
       properties:
         application_id: {type: string, description: Stable application slug.}
         name: {type: string, description: Display name.}
         description: {type: string, description: Short purpose summary.}
-        owner: {type: string, description: Owning team or contact.}
+        owner: {type: string, description: Owning user display text.}
+        owner_user_id: {type: [string, "null"], format: uuid, description: Stable AI Hub user id for the registered owner.}
         status: {type: string, description: Global registration status.}
         capabilities:
           type: array
@@ -682,6 +751,43 @@ components:
           type: array
           description: Per-environment URLs and health metadata.
           items: {$ref: "#/components/schemas/ApplicationEnvironment"}
+    AdminBootstrapClaim:
+      type: object
+      additionalProperties: false
+      required: [application_id, environment, initial_admin_user_id, claimed_user_id, status, consumed_at]
+      properties:
+        application_id: {type: string, description: Application that owns the bootstrap claim.}
+        environment: {type: string, description: Environment whose claim was consumed.}
+        initial_admin_user_id: {type: string, format: uuid, description: Employee explicitly configured as this environment's initial administrator.}
+        claimed_user_id: {type: string, format: uuid, description: AI Hub user that consumed the claim.}
+        status: {type: string, const: CONSUMED, description: A successful response is always consumed.}
+        consumed_at: {type: string, format: date-time, description: First successful consumption time.}
+    DirectoryUser:
+      type: object
+      additionalProperties: false
+      required: [user_id, subject, display_name, status, organization_id, organization_name, business_user, updated_at, tombstone]
+      properties:
+        user_id: {type: string, format: uuid, description: Stable AI Hub user id used as the external identity key.}
+        subject: {type: string, description: OIDC subject currently mapped to the user.}
+        display_name: {type: string, description: Employee display name.}
+        email: {type: [string, "null"], format: email, description: Employee email when known.}
+        status: {type: string, description: Current AI Hub identity status.}
+        organization_id: {type: string, description: Current primary organization id.}
+        organization_name: {type: string, description: Current primary organization name.}
+        business_user: {type: boolean, description: True only for identities eligible for business-application employee directories.}
+        updated_at: {type: string, format: date-time, description: Last identity/profile update timestamp.}
+        tombstone: {type: boolean, description: True when the identity is inactive or not a business user and local access must be disabled.}
+    DirectoryPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, has_more, synchronized_at]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/DirectoryUser"}
+        next_cursor: {type: [string, "null"], description: Persist this opaque cursor for the next incremental synchronization.}
+        has_more: {type: boolean, description: Whether another page is immediately available.}
+        synchronized_at: {type: string, format: date-time, description: AI Hub response time.}
     NotificationRequest:
       type: object
       additionalProperties: false

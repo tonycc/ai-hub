@@ -66,6 +66,13 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "20260830_core_0022" in sql
     assert "20260830_core_0023" in sql
     assert "20260830_core_0024" in sql
+    assert "20260901_core_0025" in sql
+    assert "20260902_core_0026" in sql
+    assert "20260902_core_0027" in sql
+    assert "CREATE TABLE platform_core.application_admin_bootstrap" in sql
+    assert "platform.application.bootstrap" in sql
+    assert "platform.directory.read" in sql
+    assert "profile IN ('OIDC_ONLY', 'API_ONLY', 'DATA_INGEST')" in sql
     assert "PLATFORM_INGEST_OPERATOR" in sql
     assert "platform.ingest.certify.data_owner" in sql
     assert "platform.ingest.certify.operator" in sql
@@ -100,6 +107,25 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "ck_ingest_contract_certification_transport_mode" in core_0024
     assert 'rollback_compatible_with = {"20260830_core_0023"}' in core_0024
     assert "FROM platform_core.ingest_source" not in core_0024
+    core_0025 = (
+        BACKEND_ROOT / "migrations/versions/core/20260901_core_0025.py"
+    ).read_text()
+    assert 'rollback_compatible_with = {"20260830_core_0024"}' in core_0025
+    assert "application_admin_bootstrap" in core_0025
+    assert "ON CONFLICT (application_id, environment) DO NOTHING" in core_0025
+    assert "organization_touch_directory_users" in core_0025
+    core_0026 = (
+        BACKEND_ROOT / "migrations/versions/core/20260902_core_0026.py"
+    ).read_text()
+    assert 'down_revision: str | None = "20260901_core_0025"' in core_0026
+    assert "initial_admin_user_id" in core_0026
+    assert "created_by_user_id" in core_0026
+    core_0027 = (
+        BACKEND_ROOT / "migrations/versions/core/20260902_core_0027.py"
+    ).read_text()
+    assert 'down_revision: str | None = "20260902_core_0026"' in core_0027
+    assert "identity_directory_revision_state" in core_0027
+    assert "assign_identity_directory_revision" in core_0027
 
 
 def test_platform_raw_migration_establishes_ingest_tables_without_core_objects() -> None:

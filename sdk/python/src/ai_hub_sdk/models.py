@@ -24,6 +24,7 @@ class CurrentUser(BaseModel):
     status: str
     organization_id: str
     organization_name: str
+    business_user: bool
     authorization_version: int = Field(ge=1)
 
 
@@ -69,9 +70,39 @@ class ApplicationRegistration(BaseModel):
     name: str
     description: str
     owner: str
+    owner_user_id: UUID | None = None
     status: str
     capabilities: list[str]
     environments: list[ApplicationEnvironment]
+
+
+class AdminBootstrapClaim(BaseModel):
+    application_id: str
+    environment: str
+    initial_admin_user_id: UUID
+    claimed_user_id: UUID
+    status: Literal["CONSUMED"]
+    consumed_at: datetime
+
+
+class DirectoryUser(BaseModel):
+    user_id: UUID
+    subject: str
+    display_name: str
+    email: str | None = None
+    status: str
+    organization_id: str
+    organization_name: str
+    business_user: bool
+    updated_at: datetime
+    tombstone: bool
+
+
+class DirectoryPage(BaseModel):
+    items: list[DirectoryUser]
+    next_cursor: str | None = None
+    has_more: bool
+    synchronized_at: datetime
 
 
 class NotificationRequest(BaseModel):

@@ -289,6 +289,24 @@ entries:
       expression: "return {}"
 
   - model: authentik_providers_oauth2.scopemapping
+    id: platform-application-bootstrap-scope
+    identifiers:
+      name: AI Hub platform.application.bootstrap
+    attrs:
+      scope_name: platform.application.bootstrap
+      description: Allow the registered owner to claim an environment's initial administrator.
+      expression: "return {}"
+
+  - model: authentik_providers_oauth2.scopemapping
+    id: platform-directory-read-scope
+    identifiers:
+      name: AI Hub platform.directory.read
+    attrs:
+      scope_name: platform.directory.read
+      description: Read the incremental employee identity directory as a bound application.
+      expression: "return {}"
+
+  - model: authentik_providers_oauth2.scopemapping
     id: platform-authorization-decide-scope
     identifiers:
       name: AI Hub platform.authorization.decide
@@ -373,6 +391,8 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub identity claims]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.me.read]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.read]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.bootstrap]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.directory.read]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.authorization.decide]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]

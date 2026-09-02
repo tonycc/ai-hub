@@ -48,6 +48,8 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub identity claims]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.me.read]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.read]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.bootstrap]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.directory.read]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.authorization.decide]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]

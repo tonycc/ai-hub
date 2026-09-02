@@ -31,6 +31,7 @@ def test_m3_management_openapi_exposes_required_server_authorized_resources() ->
         "/portal-api/v1/users": {"get", "post"},
         "/portal-api/v1/platform-roles": {"get"},
         "/portal-api/v1/platform-role-assignments": {"get", "post"},
+        "/portal-api/v1/application-user-candidates": {"get"},
         "/portal-api/v1/applications": {"get", "post"},
         "/portal-api/v1/applications/{application_id}": {"get", "put"},
         "/portal-api/v1/applications/{application_id}/scopes": {"put"},

@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 ConformanceProfile = Literal[
+    "OIDC_ONLY",
     "API_ONLY",
     "DATA_INGEST",
 ]
@@ -21,8 +22,17 @@ ConformanceStatus = Literal["PASSED", "FAILED", "NOT_APPLICABLE"]
 CONTRACT_VERSION = "m7-conformance-0.1.0"
 RUNTIME_EVIDENCE_TTL = timedelta(days=30)
 ALL_PROFILES: tuple[ConformanceProfile, ...] = (
+    "OIDC_ONLY",
     "API_ONLY",
     "DATA_INGEST",
+)
+OIDC_REQUIRED_SCOPES = frozenset(
+    {
+        "ai_hub.identity",
+        "platform.application.bootstrap",
+        "platform.directory.read",
+        "platform.me.read",
+    }
 )
 API_REQUIRED_SCOPES = frozenset(
     {
@@ -410,9 +420,10 @@ class ConformanceService:
                     FROM platform_core.conformance_check
                     WHERE run_id = :run_id
                     ORDER BY CASE profile
-                        WHEN 'API_ONLY' THEN 1
-                        WHEN 'DATA_INGEST' THEN 2
-                        ELSE 3
+                        WHEN 'OIDC_ONLY' THEN 1
+                        WHEN 'API_ONLY' THEN 2
+                        WHEN 'DATA_INGEST' THEN 3
+                        ELSE 4
                     END
                     """
                     ),
@@ -444,7 +455,9 @@ class ConformanceService:
         )
         checks: list[ConformanceCheckResult] = []
         for profile in profiles:
-            if profile == "API_ONLY":
+            if profile == "OIDC_ONLY":
+                checks.append(self._oidc_only_check(application))
+            elif profile == "API_ONLY":
                 checks.append(self._api_only_check(application))
             else:
                 checks.append(await self._runtime_profile_check(session, application, profile))
@@ -538,6 +551,7 @@ class ConformanceService:
                     sa.text(
                         """
                     SELECT a.application_id, a.status AS application_status,
+                           a.owner_id,
                            a.capabilities, e.environment,
                            e.status AS environment_status, e.portal_url,
                            e.api_base_url, e.health_url, e.oidc_redirect_uris,
@@ -555,7 +569,8 @@ class ConformanceService:
                                AS permission_count,
                            BOOL_OR(
                                nc.channel = 'IN_APP' AND nc.enabled
-                           ) AS notification_enabled
+                           ) AS notification_enabled,
+                           MAX(b.status) AS bootstrap_status
                     FROM platform_core.application AS a
                     JOIN platform_core.application_environment AS e
                       ON e.application_id = a.application_id
@@ -570,8 +585,11 @@ class ConformanceService:
                      AND p.status = 'ACTIVE'
                     LEFT JOIN platform_core.notification_configuration AS nc
                       ON nc.application_id = a.application_id
+                    LEFT JOIN platform_core.application_admin_bootstrap AS b
+                      ON b.application_id = e.application_id
+                     AND b.environment = e.environment
                     WHERE a.application_id = :application_id
-                    GROUP BY a.application_id, a.status, a.capabilities,
+                    GROUP BY a.application_id, a.status, a.owner_id, a.capabilities,
                              e.environment, e.status, e.portal_url, e.api_base_url,
                              e.health_url, e.oidc_redirect_uris, e.version
                     """
@@ -588,6 +606,46 @@ class ConformanceService:
         result["capabilities"] = frozenset(row["capabilities"])
         result["scopes"] = frozenset(row["scopes"])
         return result
+
+    @staticmethod
+    def _oidc_only_check(application: dict[str, Any]) -> ConformanceCheckResult:
+        missing_scopes = sorted(OIDC_REQUIRED_SCOPES - application["scopes"])
+        failures: list[str] = []
+        if "API_CLIENT" not in application["capabilities"]:
+            failures.append("API_CLIENT capability is not enabled")
+        if application["application_status"] != "ACTIVE":
+            failures.append("application is not active")
+        if application["environment_status"] != "ACTIVE":
+            failures.append("environment is not active")
+        if application["credential_active"] is not True:
+            failures.append("environment credential is not active")
+        if not application["oidc_redirect_uris"]:
+            failures.append("OIDC redirect URI is not registered")
+        if application["owner_id"] is None:
+            failures.append("application owner is not registered")
+        if application["bootstrap_status"] not in {"PENDING", "CONSUMED"}:
+            failures.append("initial administrator bootstrap is not configured")
+        if missing_scopes:
+            failures.append("required identity scopes are missing")
+        return ConformanceCheckResult(
+            profile="OIDC_ONLY",
+            status="FAILED" if failures else "PASSED",
+            message=(
+                "; ".join(failures)
+                if failures
+                else "OIDC identity and initial-administrator prerequisites pass"
+            ),
+            evidence={
+                "application_status": application["application_status"],
+                "environment_status": application["environment_status"],
+                "credential_active": application["credential_active"] is True,
+                "redirect_uri_count": len(application["oidc_redirect_uris"]),
+                "owner_registered": application["owner_id"] is not None,
+                "bootstrap_status": application["bootstrap_status"],
+                "missing_scopes": missing_scopes,
+            },
+        )
+
     @staticmethod
     def _api_only_check(application: dict[str, Any]) -> ConformanceCheckResult:
         missing_scopes = sorted(API_REQUIRED_SCOPES - application["scopes"])

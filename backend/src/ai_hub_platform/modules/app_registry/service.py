@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
+from uuid import UUID
 
 import httpx
 import sqlalchemy as sa
@@ -28,6 +29,7 @@ class ApplicationRecord:
     name: str
     description: str
     owner: str
+    owner_user_id: UUID | None
     status: str
     capabilities: tuple[str, ...]
     environments: tuple[ApplicationEnvironmentRecord, ...]
@@ -48,7 +50,7 @@ class AppRegistryService:
                 await session.execute(
                     sa.text(
                         """
-                    SELECT a.application_id, a.name, a.description,
+                    SELECT a.application_id, a.name, a.description, a.owner_id,
                            COALESCE(
                                u.display_name || COALESCE(' <' || u.email || '>', ''),
                                a.owner
@@ -102,6 +104,7 @@ class AppRegistryService:
             name=application["name"],
             description=application["description"],
             owner=application["owner"],
+            owner_user_id=cast(UUID | None, application["owner_id"]),
             status=application["status"],
             capabilities=tuple(application["capabilities"]),
             environments=environments,

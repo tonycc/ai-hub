@@ -17,6 +17,7 @@ class IdentityUser:
     status: str
     organization_id: str
     organization_name: str
+    business_user: bool
     authorization_version: int
 
 
@@ -34,6 +35,11 @@ class IdentityService:
             """
             SELECT u.user_id, u.subject, u.display_name, u.email, u.status,
                    u.primary_organization_id, o.name AS organization_name,
+                   NOT EXISTS (
+                       SELECT 1
+                       FROM platform_core.platform_role_assignment AS pra
+                       WHERE pra.user_id = u.user_id
+                   ) AS business_user,
                    u.authorization_version
             FROM platform_core.identity_user AS u
             JOIN platform_core.organization AS o
@@ -55,5 +61,6 @@ class IdentityService:
             status=row["status"],
             organization_id=row["primary_organization_id"],
             organization_name=row["organization_name"],
+            business_user=bool(row["business_user"]),
             authorization_version=row["authorization_version"],
         )

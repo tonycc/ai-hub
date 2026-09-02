@@ -8,20 +8,22 @@
 
 1. 在**应用中心**登记应用、环境 URL、OAuth 回调 URI、所需 scope。
 2. 创建环境凭据并**一次性保存** `client_secret`（平台不存明文）。
-3. 上线前在**接入治理**运行 `API_ONLY` / `DATA_INGEST` 认证（若已启用对应能力）。
+3. 上线前在**接入治理**运行 `OIDC_ONLY` / `API_ONLY` / `DATA_INGEST` 中与应用架构一致的认证。
 
 Agent 应生成应用侧代码与配置模板，并明确列出需人工填写的密钥与登记项。
 
 ## 2. 场景决策树
 
 ```
-需要把业务对象同步到平台供治理/AI 消费？
-├─ 否 → 能力 API_CLIENT
-│        读：integration-guide §1 + platform-openapi + api-only-python
-│        实现：OIDC（用户 PKCE / 服务 Client Credentials）→ 验证 JWT → 调 Platform API
-└─ 是 → 能力 API_CLIENT + DATA_INGEST
-         读：integration-guide §2 + data-ingest-evidence + SDK export 模块
-         实现：应用侧 GET /ai-hub/export（见 §4）+ 可选 platform.data.read 消费示例
+只需要统一登录和员工基本资料？
+├─ 是 → 能力 API_CLIENT；认证 OIDC_ONLY
+│        读：integration-guide §1 + ADR-034 + platform-openapi
+│        实现：用户 PKCE → /me → 本地授权；服务身份 → 增量目录同步
+└─ 否 → 是否需要把业务对象同步到平台供治理/AI 消费？
+         ├─ 否 → 能力 API_CLIENT；按实际公共 API 运行 API_ONLY
+         └─ 是 → 能力 API_CLIENT + DATA_INGEST
+                  读：integration-guide §2 + data-ingest-evidence + SDK export 模块
+                  实现：应用侧 GET /ai-hub/export（见 §6）+ 可选 platform.data.read 消费示例
 ```
 
 ## 3. 推荐阅读顺序
@@ -74,6 +76,8 @@ GET {PLATFORM_BASE_URL}/portal-api/v1/developer/catalog
 | Scope | 用途 |
 | --- | --- |
 | `platform.me.read` | `/me`、`/me/permissions` |
+| `platform.application.bootstrap` | 环境中明确指定的员工领取一次性初始管理员 |
+| `platform.directory.read` | 应用绑定的服务身份增量读取员工基本资料和状态 |
 | `platform.authorization.decide` | 在线授权决策 |
 | `platform.application.read` | 读取应用登记 |
 | `platform.application.health.write` | 上报环境健康 |
@@ -120,8 +124,11 @@ Authorization: Bearer <platform service token>
 ## 7. API-only 最小检查清单
 
 - [ ] 应用已在应用中心登记，回调 URI 与环境匹配。
+- [ ] 应用负责人已从员工目录指定；每个环境另有明确的初始管理员，并存在 `PENDING` 或 `CONSUMED` Bootstrap。
 - [ ] 凭据与 scope 已配置；`client_secret` 已安全存储。
 - [ ] 用户流：PKCE 换 token → 本地 JWT 验证 → `GET /platform-api/v1/me`。
+- [ ] 身份型应用：环境初始管理员领取 Bootstrap；业务角色/权限/数据范围全部保存在应用本地。
+- [ ] 目录同步：持久化 `next_cursor`；仅展示 `business_user=true` 的业务员工；新员工默认无角色；tombstone 只停用访问，不覆盖本地角色历史。
 - [ ] 服务流：Client Credentials → `GET /health/live` → 业务 API（如通知带 `idempotency_key`）。
 - [ ] 错误处理：解析 `ErrorResponse.error_code`，记录 `request_id`，不记录 token/secret。
 - [ ] 请求头：按需传 `X-Application-ID`；传播 `X-Request-ID` / `X-Trace-ID`。

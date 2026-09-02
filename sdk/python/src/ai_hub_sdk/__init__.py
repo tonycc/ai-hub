@@ -30,12 +30,15 @@ from ai_hub_sdk.identity import (
 )
 from ai_hub_sdk.logging import json_log_config
 from ai_hub_sdk.models import (
+    AdminBootstrapClaim,
     ApplicationEnvironment,
     ApplicationRegistration,
     AuthorizationDecision,
     AuthorizationDecisionRequest,
     CurrentUser,
     DataScope,
+    DirectoryPage,
+    DirectoryUser,
     ErrorResponse,
     HealthResponse,
     NotificationRequest,
@@ -44,6 +47,7 @@ from ai_hub_sdk.models import (
 )
 
 __all__ = [
+    "AdminBootstrapClaim",
     "AiHubClient",
     "ApplicationEnvironment",
     "ApplicationRegistration",
@@ -55,6 +59,8 @@ __all__ = [
     "AuthorizationVersionMismatchError",
     "CurrentUser",
     "DataScope",
+    "DirectoryPage",
+    "DirectoryUser",
     "EXPORT_SCOPE",
     "ErrorResponse",
     "ExportContractError",

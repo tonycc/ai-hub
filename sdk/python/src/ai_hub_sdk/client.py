@@ -4,10 +4,12 @@ from types import TracebackType
 import httpx
 
 from ai_hub_sdk.models import (
+    AdminBootstrapClaim,
     ApplicationRegistration,
     AuthorizationDecision,
     AuthorizationDecisionRequest,
     CurrentUser,
+    DirectoryPage,
     HealthResponse,
     NotificationRequest,
     NotificationResult,
@@ -146,6 +148,49 @@ class AiHubClient:
         )
         response.raise_for_status()
         return ApplicationRegistration.model_validate(response.json())
+
+    async def claim_admin_bootstrap(
+        self,
+        application_id: str,
+        environment: str,
+        *,
+        access_token: str | None = None,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AdminBootstrapClaim:
+        response = await self._client.post(
+            "/platform-api/v1/applications/"
+            f"{application_id}/environments/{environment}/admin-bootstrap",
+            headers=await self._request_headers(
+                access_token=access_token,
+                application_id=application_id,
+                request_id=request_id,
+                trace_id=trace_id,
+            ),
+        )
+        response.raise_for_status()
+        return AdminBootstrapClaim.model_validate(response.json())
+
+    async def directory_users(
+        self,
+        application_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> DirectoryPage:
+        response = await self._client.get(
+            "/platform-api/v1/directory/users",
+            params={"limit": limit, **({"cursor": cursor} if cursor else {})},
+            headers=await self._request_headers(
+                application_id=application_id,
+                request_id=request_id,
+                trace_id=trace_id,
+            ),
+        )
+        response.raise_for_status()
+        return DirectoryPage.model_validate(response.json())
 
     async def create_notification(
         self,

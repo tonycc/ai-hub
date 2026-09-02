@@ -84,6 +84,8 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
     for scope in (
         "platform.me.read",
         "platform.application.read",
+        "platform.application.bootstrap",
+        "platform.directory.read",
         "platform.authorization.decide",
         "platform.notification.request",
         "platform.application.health.write",
@@ -147,10 +149,14 @@ def test_standalone_image_build_does_not_copy_platform_source() -> None:
 
 def test_platform_api_readiness_probe_allows_bootstrap_reconciliation_window() -> None:
     compose = load_yaml("deploy/compose.yaml")
-    healthcheck = compose["services"]["platform-api"]["healthcheck"]
+    platform_api = compose["services"]["platform-api"]
+    healthcheck = platform_api["healthcheck"]
     test_command = " ".join(healthcheck["test"])
 
     assert "/health/ready" in test_command
+    assert platform_api["environment"]["AI_HUB_REFERENCE_APPLICATION_ENABLED"] == (
+        "${AI_HUB_REFERENCE_APPLICATION_ENABLED:-true}"
+    )
     assert "/health/live" not in test_command
     # Bootstrap retries sleep 5/10/20/30s before the dedicated provider may
     # appear; a short start_period fails compose --wait in M1 before reconcile.

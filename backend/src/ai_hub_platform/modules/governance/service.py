@@ -529,18 +529,24 @@ class GovernanceService:
         role_code: str,
         application_id: str | None,
     ) -> dict[str, Any]:
-        user_exists = await session.scalar(
-            sa.text(
-                """
-                    SELECT EXISTS (
-                    SELECT 1 FROM platform_core.identity_user
+        user = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT user_id
+                    FROM platform_core.identity_user
                     WHERE user_id = :user_id AND status = 'ACTIVE'
+                    FOR UPDATE
+                        """
+                    ),
+                    {"user_id": user_id},
                 )
-                """
-            ),
-            {"user_id": user_id},
+            )
+            .mappings()
+            .one_or_none()
         )
-        if not user_exists:
+        if user is None:
             raise GovernanceNotFoundError("Platform user was not found")
         role = (
             (

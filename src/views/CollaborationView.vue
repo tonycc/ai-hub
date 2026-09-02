@@ -17,8 +17,9 @@ const detailVisible = ref(false)
 const selected = ref(null)
 const runVisible = ref(false)
 const saving = ref(false)
-const runForm = reactive({ environment: 'local', profiles: ['API_ONLY'] })
+const runForm = reactive({ environment: 'local', profiles: ['OIDC_ONLY'] })
 const profileOptions = [
+  ['OIDC_ONLY', 'OIDC 身份接入', '登录、基本资料、回调地址与初始管理员前置条件'],
   ['API_ONLY', 'API-only', 'OIDC、权限快照、通知和入口前置条件'],
   ['DATA_INGEST', '增量数据接入', '导出契约、版本单调、删除捕获与幂等回放证据'],
 ]
@@ -56,7 +57,7 @@ async function showDetail(row) {
 function openRun() {
   const capabilities = selectedApplication.value?.capabilities || []
   runForm.environment = 'local'
-  runForm.profiles = ['API_ONLY']
+  runForm.profiles = ['OIDC_ONLY']
   if (capabilities.includes('DATA_INGEST')) runForm.profiles.push('DATA_INGEST')
   runVisible.value = true
 }
@@ -83,7 +84,7 @@ onMounted(load)
 
 <template>
   <div class="page-shell">
-    <PageHeader title="接入治理" description="按 API-only 与 DATA_INGEST 独立配置运行一致性认证。">
+    <PageHeader title="接入治理" description="按 OIDC 身份、API-only 与 DATA_INGEST 独立配置运行一致性认证。">
       <el-select
         v-model="applicationId"
         clearable

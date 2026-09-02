@@ -23,6 +23,7 @@ const map = {
   DENIED: ['danger', '拒绝'],
   SUCCESS: ['success', '成功'],
   DELIVERED: ['success', '已送达'],
+  CONSUMED: ['success', '已领取'],
   PENDING: ['warning', '待处理'],
   NOT_APPLICABLE: ['info', '不适用'],
   HEALTHY: ['success', '健康'],

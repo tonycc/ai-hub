@@ -33,6 +33,87 @@ def _format_owner_display(display_name: str, email: str | None) -> str:
 
 
 class ApplicationManagementService:
+    async def _active_business_user(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str | UUID,
+    ) -> tuple[str, str | None] | None:
+        """Return an active user only when they hold no AI Hub platform role."""
+        row = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                        SELECT u.display_name, u.email
+                        FROM platform_core.identity_user AS u
+                        WHERE u.user_id = :user_id
+                          AND u.status = 'ACTIVE'
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM platform_core.platform_role_assignment AS pra
+                              WHERE pra.user_id = u.user_id
+                          )
+                        """
+                    ),
+                    {"user_id": user_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        email = row["email"]
+        return str(row["display_name"]), str(email) if email is not None else None
+
+    async def list_application_user_candidates(
+        self,
+        session: AsyncSession,
+        *,
+        query: str | None,
+    ) -> list[dict[str, Any]]:
+        """Return active employees eligible for business application roles.
+
+        Business users must have an active directory identity and no AI Hub
+        platform-role assignment. Platform accounts remain available for
+        platform administration but cannot own or bootstrap business apps.
+        """
+        rows = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT u.user_id, u.display_name, u.email,
+                           u.primary_organization_id AS organization_id,
+                           o.name AS organization_name
+                    FROM platform_core.identity_user AS u
+                    JOIN platform_core.organization AS o
+                      ON o.organization_id = u.primary_organization_id
+                    WHERE u.status = 'ACTIVE'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM platform_core.platform_role_assignment AS pra
+                          WHERE pra.user_id = u.user_id
+                      )
+                      AND (
+                          CAST(:query AS varchar) IS NULL
+                          OR u.subject ILIKE '%' || :query || '%'
+                          OR u.display_name ILIKE '%' || :query || '%'
+                          OR u.email ILIKE '%' || :query || '%'
+                          OR o.name ILIKE '%' || :query || '%'
+                      )
+                    ORDER BY u.display_name, u.subject
+                    """
+                    ),
+                    {"query": query},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows]
+
     async def list_applications(
         self,
         session: AsyncSession,
@@ -115,11 +196,19 @@ class ApplicationManagementService:
                                u.display_name || COALESCE(' <' || u.email || '>', ''),
                                a.owner
                            ) AS owner,
+                           a.created_by_user_id::text AS created_by_user_id,
+                           CASE
+                               WHEN a.created_by_user_id IS NULL THEN NULL
+                               ELSE cu.display_name
+                                    || COALESCE(' <' || cu.email || '>', '')
+                           END AS created_by,
                            a.status,
                            a.capabilities, a.created_at, a.updated_at
                     FROM platform_core.application AS a
                     LEFT JOIN platform_core.identity_user AS u
                       ON u.user_id = a.owner_id
+                    LEFT JOIN platform_core.identity_user AS cu
+                      ON cu.user_id = a.created_by_user_id
                     WHERE a.application_id = :application_id
                     """
                     ),
@@ -140,6 +229,11 @@ class ApplicationManagementService:
                            e.api_base_url, e.health_url, e.oidc_redirect_uris,
                            e.version, e.status, e.last_health_status,
                            e.last_health_checked_at, e.updated_at,
+                           b.status AS admin_bootstrap_status,
+                           b.initial_admin_user_id
+                               AS admin_bootstrap_initial_admin_user_id,
+                           b.consumed_by_user_id AS admin_bootstrap_consumed_by_user_id,
+                           b.consumed_at AS admin_bootstrap_consumed_at,
                            c.credential_id, c.client_id, c.issuer,
                            c.provider_external_id, c.status AS credential_status,
                            c.version AS credential_version, c.secret_hint,
@@ -150,6 +244,9 @@ class ApplicationManagementService:
                       ON c.application_id = e.application_id
                      AND c.environment = e.environment
                      AND c.status = 'ACTIVE'
+                    LEFT JOIN platform_core.application_admin_bootstrap AS b
+                      ON b.application_id = e.application_id
+                     AND b.environment = e.environment
                     WHERE e.application_id = :application_id
                     ORDER BY e.environment
                     """
@@ -240,6 +337,7 @@ class ApplicationManagementService:
         name: str,
         description: str,
         owner_id: str | UUID,
+        created_by_user_id: str | UUID,
         capabilities: list[str],
     ) -> dict[str, Any]:
         if await session.scalar(
@@ -255,32 +353,22 @@ class ApplicationManagementService:
         ):
             raise ApplicationManagementConflictError("Application identifier already exists")
 
-        owner_row = (
-            await session.execute(
-                sa.text(
-                    """
-                    SELECT display_name, email
-                    FROM platform_core.identity_user
-                    WHERE user_id = :owner_id AND status = 'ACTIVE'
-                    """
-                ),
-                {"owner_id": owner_id},
-            )
-        ).first()
-        if owner_row is None:
+        owner = await self._active_business_user(session, user_id=owner_id)
+        if owner is None:
             raise ApplicationManagementValidationError(
-                "Selected owner is not an active platform user"
+                "Selected owner is not an active business user"
             )
+        owner_display_name, owner_email = owner
 
         await session.execute(
             sa.text(
                 """
                 INSERT INTO platform_core.application
-                    (application_id, name, description, owner, owner_id, status,
-                     capabilities, service_subject)
+                    (application_id, name, description, owner, owner_id,
+                     created_by_user_id, status, capabilities, service_subject)
                 VALUES
                     (:application_id, :name, :description, :owner, :owner_id,
-                     'DRAFT', :capabilities, NULL)
+                     :created_by_user_id, 'DRAFT', :capabilities, NULL)
                 """
             ),
             {
@@ -290,8 +378,9 @@ class ApplicationManagementService:
                 # The legacy display string is kept populated so old images
                 # keep working during the expand window; the service layer now
                 # renders the owner from the owner_id join.
-                "owner": _format_owner_display(owner_row.display_name, owner_row.email),
+                "owner": _format_owner_display(owner_display_name, owner_email),
                 "owner_id": owner_id,
+                "created_by_user_id": created_by_user_id,
                 "capabilities": sorted(set(capabilities)),
             },
         )
@@ -309,23 +398,12 @@ class ApplicationManagementService:
         capabilities: list[str],
     ) -> dict[str, Any]:
         if owner_id is not None:
-            owner_row = (
-                await session.execute(
-                    sa.text(
-                        """
-                        SELECT display_name, email
-                        FROM platform_core.identity_user
-                        WHERE user_id = :owner_id AND status = 'ACTIVE'
-                        """
-                    ),
-                    {"owner_id": owner_id},
-                )
-            ).first()
-            if owner_row is None:
+            selected_owner = await self._active_business_user(session, user_id=owner_id)
+            if selected_owner is None:
                 raise ApplicationManagementValidationError(
-                    "Selected owner is not an active platform user"
+                    "Selected owner is not an active business user"
                 )
-            owner = _format_owner_display(owner_row.display_name, owner_row.email)
+            owner = _format_owner_display(*selected_owner)
         else:
             # 保留原负责人
             owner = None
@@ -370,8 +448,49 @@ class ApplicationManagementService:
         redirect_uris: list[str],
         version: str,
         status: str,
+        initial_admin_user_id: str | UUID,
     ) -> dict[str, Any]:
         await self._lock_application(session, application_id)
+        initial_admin_user_id = UUID(str(initial_admin_user_id))
+        existing_bootstrap = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                        SELECT initial_admin_user_id, status
+                        FROM platform_core.application_admin_bootstrap
+                        WHERE application_id = :application_id
+                          AND environment = :environment
+                        FOR UPDATE
+                        """
+                    ),
+                    {
+                        "application_id": application_id,
+                        "environment": environment,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            existing_bootstrap is not None
+            and existing_bootstrap["status"] == "CONSUMED"
+        ):
+            if existing_bootstrap["initial_admin_user_id"] != initial_admin_user_id:
+                raise ApplicationManagementValidationError(
+                    "A consumed initial administrator assignment cannot be changed"
+                )
+        else:
+            initial_admin = await self._active_business_user(
+                session,
+                user_id=initial_admin_user_id,
+            )
+            if initial_admin is None:
+                raise ApplicationManagementValidationError(
+                    "Selected initial administrator is not an active business user"
+                )
+
         credential_client_ids = (
             (
                 await session.execute(
@@ -423,6 +542,25 @@ class ApplicationManagementService:
                 "redirect_uris": redirect_uris,
                 "version": version,
                 "status": status,
+            },
+        )
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO platform_core.application_admin_bootstrap
+                    (application_id, environment, initial_admin_user_id)
+                VALUES
+                    (:application_id, :environment, :initial_admin_user_id)
+                ON CONFLICT (application_id, environment) DO UPDATE
+                SET initial_admin_user_id = EXCLUDED.initial_admin_user_id,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE application_admin_bootstrap.status = 'PENDING'
+                """
+            ),
+            {
+                "application_id": application_id,
+                "environment": environment,
+                "initial_admin_user_id": initial_admin_user_id,
             },
         )
         return await self.get_application(session, application_id=application_id)
