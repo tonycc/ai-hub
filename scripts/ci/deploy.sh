@@ -11,6 +11,15 @@ assert_equal() {
   [[ "$1" == "$2" ]] || fail "$3 (expected: $1, actual: $2)"
 }
 
+file_mode() {
+  local mode
+  if mode="$(stat -c '%a' "$1" 2>/dev/null)"; then
+    printf '%s\n' "${mode}"
+    return
+  fi
+  stat -f '%Lp' "$1"
+}
+
 cd "${PROJECT_ROOT}"
 
 docker compose version
@@ -71,8 +80,8 @@ bash scripts/deploy/generate-macmini-runtime-env.sh \
   --portal-image "${PORTAL_REF}" \
   --config-dir "${CONFIG_DIR}" \
   --output "${RUNTIME_ENV}" >/dev/null
-RUNTIME_MODE="$(stat -f '%Lp' "${RUNTIME_ENV}" 2>/dev/null || stat -c '%a' "${RUNTIME_ENV}")"
-BACKUP_MODE="$(stat -f '%Lp' "${BACKUP_ENV}" 2>/dev/null || stat -c '%a' "${BACKUP_ENV}")"
+RUNTIME_MODE="$(file_mode "${RUNTIME_ENV}")"
+BACKUP_MODE="$(file_mode "${BACKUP_ENV}")"
 assert_equal 600 "${RUNTIME_MODE}" "runtime env mode"
 assert_equal 600 "${BACKUP_MODE}" "backup env mode"
 if grep -q '^AI_HUB_BACKUP_KEY_BASE64=' "${RUNTIME_ENV}"; then
