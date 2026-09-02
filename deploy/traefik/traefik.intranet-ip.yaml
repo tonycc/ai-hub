@@ -1,0 +1,37 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  platform:
+    address: ":443"
+    forwardedHeaders:
+      insecure: false
+    http:
+      tls: {}
+  identity:
+    address: ":8443"
+    forwardedHeaders:
+      insecure: false
+    http:
+      tls: {}
+  ping:
+    address: ":8082"
+
+ping:
+  entryPoint: ping
+
+api:
+  dashboard: false
+
+log:
+  format: json
+  level: INFO
+
+accessLog:
+  format: json
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yaml
+    watch: true

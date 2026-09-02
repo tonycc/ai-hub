@@ -1,5 +1,7 @@
 # Local deployment profile
 
+Mac mini 作为局域网生产服务器、采用纯 IP HTTPS 和不可变镜像部署时，不使用本文的本地入口，也不使用域名/ACME 生产覆盖层；请按[Mac mini 局域网纯 IP 镜像部署](../docs/macmini-image-deployment.md)执行。
+
 Compose 使用单一显式 profile：`base-access`。直接运行不带 `--profile` 的 `docker compose up` 不会选择任何服务。
 
 | 服务 | `base-access` | 当前职责 |

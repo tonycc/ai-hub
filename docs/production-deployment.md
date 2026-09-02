@@ -1,5 +1,7 @@
 # AI Hub 生产部署指南（M8：生产部署实例化）
 
+> 本文是 Linux + 域名 + Let's Encrypt + systemd 路径。Apple Silicon Mac mini 在局域网使用纯 IP 和镜像部署时，请改用 [Mac mini 局域网纯 IP 镜像部署](macmini-image-deployment.md)，不要混用两套 Traefik/TLS 覆盖层。
+
 把 `STANDARD_SINGLE_NODE` 的 `base-access` 档位实例化到一台受管 Linux 主机：密钥注入、HTTPS 终端、异机加密备份、责任路由告警与主机门禁。运行时能力（备份、监控、恢复、韧性）已在 M4 演练通过；本指南只覆盖"从仓库到生产主机"的最后一公里。
 
 | 项目 | 基线 |

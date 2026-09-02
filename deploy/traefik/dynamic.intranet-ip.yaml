@@ -1,0 +1,73 @@
+http:
+  middlewares:
+    common-security:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer
+        stsSeconds: 31536000
+    request-limit:
+      buffering:
+        maxRequestBodyBytes: 10485760
+
+  routers:
+    authentik:
+      entryPoints: [identity]
+      rule: PathPrefix(`/`)
+      service: authentik
+      middlewares: [common-security, request-limit]
+      tls: {}
+    platform-api:
+      entryPoints: [platform]
+      rule: PathPrefix(`/platform-api/`) || PathPrefix(`/portal-api/`) || PathPrefix(`/auth/`) || PathPrefix(`/health/`)
+      priority: 100
+      service: platform-api
+      middlewares: [common-security, request-limit]
+      tls: {}
+    platform-portal:
+      entryPoints: [platform]
+      rule: PathPrefix(`/`)
+      priority: 10
+      service: platform-portal
+      middlewares: [common-security, request-limit]
+      tls: {}
+
+  services:
+    authentik:
+      loadBalancer:
+        healthCheck:
+          path: /-/health/ready/
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://authentik-server:9000
+    platform-api:
+      loadBalancer:
+        healthCheck:
+          path: /health/ready
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://platform-api:8000
+    platform-portal:
+      loadBalancer:
+        healthCheck:
+          path: /healthz
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://portal:8080
+
+tls:
+  certificates:
+    - certFile: /etc/traefik/tls/server.crt
+      keyFile: /etc/traefik/tls/server.key
+      stores: [default]
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/tls/server.crt
+        keyFile: /etc/traefik/tls/server.key
+  options:
+    default:
+      minVersion: VersionTLS12

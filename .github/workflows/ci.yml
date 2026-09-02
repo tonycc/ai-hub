@@ -6,6 +6,7 @@ name: CI
     branches:
       - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

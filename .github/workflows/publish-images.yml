@@ -1,0 +1,209 @@
+name: Publish production images
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  required-ci:
+    name: Required CI before publishing
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish-arm64:
+    name: Build and publish linux/arm64 images
+    needs: required-ci
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a commit from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "${source_sha}" refs/remotes/origin/main \
+            || { printf 'release commit %s is not on main\n' "${source_sha}" >&2; exit 1; }
+          printf 'SOURCE_SHA=%s\n' "${source_sha}" >>"${GITHUB_ENV}"
+
+      - name: Resolve immutable image tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          platform_image="ghcr.io/${owner}/ai-hub-platform"
+          portal_image="ghcr.io/${owner}/ai-hub-portal"
+          sha_tag="sha-${SOURCE_SHA}"
+          release_tag=""
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            [[ "${GITHUB_REF_NAME}" =~ ^v[0-9A-Za-z._-]+$ ]] \
+              || { printf 'unsupported release tag: %s\n' "${GITHUB_REF_NAME}" >&2; exit 1; }
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+          {
+            printf 'PLATFORM_IMAGE=%s\n' "${platform_image}"
+            printf 'PORTAL_IMAGE=%s\n' "${portal_image}"
+            printf 'SHA_TAG=%s\n' "${sha_tag}"
+            printf 'RELEASE_TAG=%s\n' "${release_tag}"
+          } >>"${GITHUB_ENV}"
+
+      - name: Validate deployment bundle contract
+        run: bash scripts/ci/deploy.sh
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" \
+            | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Create native ARM64 builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx create --name ai-hub-publisher --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Build and push platform image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=(--tag "${PLATFORM_IMAGE}:${SHA_TAG}")
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            tags+=(--tag "${PLATFORM_IMAGE}:${RELEASE_TAG}")
+          fi
+          docker buildx build \
+            --platform linux/arm64 \
+            --file backend/Dockerfile \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file "${RUNNER_TEMP}/platform-metadata.json" \
+            --push \
+            "${tags[@]}" \
+            .
+
+      - name: Build and push portal image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=(--tag "${PORTAL_IMAGE}:${SHA_TAG}")
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            tags+=(--tag "${PORTAL_IMAGE}:${RELEASE_TAG}")
+          fi
+          docker buildx build \
+            --platform linux/arm64 \
+            --file deploy/docker/portal.Dockerfile \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file "${RUNNER_TEMP}/portal-metadata.json" \
+            --push \
+            "${tags[@]}" \
+            .
+
+      - name: Record immutable image references
+        shell: bash
+        run: |
+          set -euo pipefail
+          platform_digest="$(jq -er '."containerimage.digest"' "${RUNNER_TEMP}/platform-metadata.json")"
+          portal_digest="$(jq -er '."containerimage.digest"' "${RUNNER_TEMP}/portal-metadata.json")"
+          images_file="${RUNNER_TEMP}/images.env"
+          {
+            printf 'AI_HUB_PLATFORM_IMAGE_REF=%s:%s@%s\n' "${PLATFORM_IMAGE}" "${SHA_TAG}" "${platform_digest}"
+            printf 'AI_HUB_PORTAL_IMAGE_REF=%s:%s@%s\n' "${PORTAL_IMAGE}" "${SHA_TAG}" "${portal_digest}"
+          } >"${images_file}"
+          {
+            printf '### Immutable production image references\n\n'
+            printf '```dotenv\n'
+            cat "${images_file}"
+            printf '```\n'
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Record release migration inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          images_file="${RUNNER_TEMP}/images.env"
+          platform_ref="$(sed -n 's/^AI_HUB_PLATFORM_IMAGE_REF=//p' "${images_file}")"
+          portal_ref="$(sed -n 's/^AI_HUB_PORTAL_IMAGE_REF=//p' "${images_file}")"
+          heads="$(docker run --rm --entrypoint python "${platform_ref}" -c '
+          from pathlib import Path
+          from ai_hub_platform.operations.release import migration_heads
+
+          for component, revision in sorted(migration_heads(Path("/workspace")).items()):
+              print(f"{component}={revision}")
+          ')"
+          core_head="$(sed -n 's/^core=//p' <<<"${heads}")"
+          raw_head="$(sed -n 's/^raw=//p' <<<"${heads}")"
+          [[ "${core_head}" =~ ^[0-9A-Za-z_.-]+$ ]] \
+            || { printf 'invalid core migration head: %s\n' "${core_head}" >&2; exit 1; }
+          [[ "${raw_head}" =~ ^[0-9A-Za-z_.-]+$ ]] \
+            || { printf 'invalid raw migration head: %s\n' "${raw_head}" >&2; exit 1; }
+          release_file="${RUNNER_TEMP}/release.env"
+          {
+            printf 'AI_HUB_RELEASE_SCHEMA_VERSION=1\n'
+            printf 'AI_HUB_RELEASE_COMMIT_SHA=%s\n' "${SOURCE_SHA}"
+            printf 'AI_HUB_RELEASE_REQUIRED_CI=passed\n'
+            printf 'AI_HUB_RELEASE_CI_RUN_ID=%s\n' "${GITHUB_RUN_ID}"
+            printf 'AI_HUB_PLATFORM_IMAGE_REF=%s\n' "${platform_ref}"
+            printf 'AI_HUB_PORTAL_IMAGE_REF=%s\n' "${portal_ref}"
+            printf 'AI_HUB_RELEASE_CORE_HEAD=%s\n' "${core_head}"
+            printf 'AI_HUB_RELEASE_RAW_HEAD=%s\n' "${raw_head}"
+          } >"${release_file}"
+          {
+            printf '\n### Release migration inventory\n\n'
+            printf 'Core head: `%s`  \n' "${core_head}"
+            printf 'Raw head: `%s`\n' "${raw_head}"
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Package Mac mini deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_root="${RUNNER_TEMP}/ai-hub-macmini-deploy"
+          mkdir -p "${bundle_root}/scripts" "${bundle_root}/docs"
+          cp -R deploy "${bundle_root}/deploy"
+          cp -R scripts/deploy "${bundle_root}/scripts/deploy"
+          cp docs/macmini-image-deployment.md "${bundle_root}/docs/"
+          cp "${RUNNER_TEMP}/images.env" "${bundle_root}/images.env"
+          cp "${RUNNER_TEMP}/release.env" "${bundle_root}/release.env"
+          tar -C "${RUNNER_TEMP}" -czf "${RUNNER_TEMP}/ai-hub-macmini-deploy.tar.gz" \
+            ai-hub-macmini-deploy
+          bundle_sha="$(sha256sum "${RUNNER_TEMP}/ai-hub-macmini-deploy.tar.gz" | awk '{print $1}')"
+          printf '%s  %s\n' "${bundle_sha}" ai-hub-macmini-deploy.tar.gz \
+            >"${RUNNER_TEMP}/ai-hub-macmini-deploy.tar.gz.sha256"
+
+      - name: Upload deployment bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ai-hub-macmini-deploy-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ai-hub-macmini-deploy.tar.gz
+            ${{ runner.temp }}/ai-hub-macmini-deploy.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Log out from GHCR
+        if: ${{ always() }}
+        run: docker logout ghcr.io

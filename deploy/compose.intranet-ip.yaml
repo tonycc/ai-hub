@@ -1,0 +1,114 @@
+name: ai-hub-production
+
+# Production overlay for a single Mac mini that is reachable only by private
+# IPv4 address. The platform and authentik cannot share host-based routing when
+# clients use one IP address, so they use separate TLS entrypoints:
+#   platform/API: https://<ip>:443
+#   authentik:    https://<ip>:8443
+#
+# This overlay is intentionally image-only. Every selected first-party service
+# clears the base Compose build definition and requires an immutable registry
+# reference from the runtime env file.
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:${AI_HUB_POSTGRES_PORT:-5433}:5432"
+
+  platform-core-migrate:
+    image: ${AI_HUB_PLATFORM_IMAGE_REF:?Set immutable AI_HUB_PLATFORM_IMAGE_REF}
+    build: !reset null
+
+  platform-raw-migrate:
+    image: ${AI_HUB_PLATFORM_IMAGE_REF:?Set immutable AI_HUB_PLATFORM_IMAGE_REF}
+    build: !reset null
+
+  platform-api:
+    image: ${AI_HUB_PLATFORM_IMAGE_REF:?Set immutable AI_HUB_PLATFORM_IMAGE_REF}
+    build: !reset null
+    environment:
+      AI_HUB_REFERENCE_APPLICATION_ENABLED: "false"
+      SSL_CERT_FILE: /etc/ai-hub/ca/ca-bundle.crt
+    volumes:
+      - type: bind
+        source: ${AI_HUB_CA_BUNDLE_FILE:?Set AI_HUB_CA_BUNDLE_FILE}
+        target: /etc/ai-hub/ca/ca-bundle.crt
+        read_only: true
+
+  portal:
+    image: ${AI_HUB_PORTAL_IMAGE_REF:?Set immutable AI_HUB_PORTAL_IMAGE_REF}
+    build: !reset null
+
+  standalone-migrate:
+    profiles: !override
+      - reference-app
+    build: !reset null
+
+  standalone-app:
+    profiles: !override
+      - reference-app
+    build: !reset null
+
+  authentik-worker:
+    volumes: !override
+      - type: volume
+        source: authentik-data
+        target: /data
+        volume:
+          nocopy: true
+      - type: bind
+        source: ./authentik/ai-hub-blueprint.yaml
+        target: /blueprints/ai-hub/ai-hub-blueprint.yaml
+        read_only: true
+      - type: bind
+        source: ./authentik/ai-hub-production-blueprint.yaml
+        target: /blueprints/ai-hub/ai-hub-production-blueprint.yaml
+        read_only: true
+
+  traefik:
+    command: ["--configFile=/etc/traefik/traefik.yaml"]
+    ports: !override
+      - "${AI_HUB_SERVER_IP:?Set AI_HUB_SERVER_IP}:${AI_HUB_PLATFORM_HTTPS_PORT:-443}:443"
+      - "${AI_HUB_SERVER_IP:?Set AI_HUB_SERVER_IP}:${AI_HUB_AUTH_HTTPS_PORT:-8443}:8443"
+    depends_on: !override
+      authentik-server:
+        condition: service_healthy
+      platform-api:
+        condition: service_healthy
+      portal:
+        condition: service_healthy
+    volumes: !override
+      - type: bind
+        source: ./traefik/traefik.intranet-ip.yaml
+        target: /etc/traefik/traefik.yaml
+        read_only: true
+      - type: bind
+        source: ./traefik/dynamic.intranet-ip.yaml
+        target: /etc/traefik/dynamic.yaml
+        read_only: true
+      - type: bind
+        source: ${AI_HUB_TLS_CERT_FILE:?Set AI_HUB_TLS_CERT_FILE}
+        target: /etc/traefik/tls/server.crt
+        read_only: true
+      - type: bind
+        source: ${AI_HUB_TLS_KEY_FILE:?Set AI_HUB_TLS_KEY_FILE}
+        target: /etc/traefik/tls/server.key
+        read_only: true
+    networks:
+      default:
+        aliases: !override
+          - ai-hub-edge
+
+  platform-ingest-scheduler:
+    image: ${AI_HUB_PLATFORM_IMAGE_REF:?Set immutable AI_HUB_PLATFORM_IMAGE_REF}
+    build: !reset null
+    environment:
+      AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:?Set AI_HUB_OIDC_ISSUER}
+      AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:?Set AI_HUB_OIDC_CLIENT_ID}
+      AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET}
+      SSL_CERT_FILE: /etc/ai-hub/ca/ca-bundle.crt
+    volumes:
+      - type: bind
+        source: ${AI_HUB_CA_BUNDLE_FILE:?Set AI_HUB_CA_BUNDLE_FILE}
+        target: /etc/ai-hub/ca/ca-bundle.crt
+        read_only: true
