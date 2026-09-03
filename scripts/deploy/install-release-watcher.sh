@@ -15,9 +15,18 @@ fail() {
   exit 1
 }
 
+file_mode() {
+  local mode
+  if mode="$(stat -c '%a' "$1" 2>/dev/null)"; then
+    printf '%s\n' "${mode}"
+    return
+  fi
+  stat -f '%Lp' "$1"
+}
+
 [[ -f "${runtime_env}" && ! -L "${runtime_env}" ]] \
   || fail "runtime env is missing or is a symlink: ${runtime_env}"
-runtime_mode="$(stat -f '%Lp' "${runtime_env}" 2>/dev/null || stat -c '%a' "${runtime_env}" 2>/dev/null || true)"
+runtime_mode="$(file_mode "${runtime_env}")"
 [[ "${runtime_mode}" == 600 ]] || fail "${runtime_env} must have mode 600"
 set -a
 # shellcheck disable=SC1090

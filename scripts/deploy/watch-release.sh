@@ -8,9 +8,18 @@ deploy_root=${1:?Usage: watch-release.sh DEPLOY_ROOT}
 runtime_env="${deploy_root}/runtime.env"
 umask 077
 
+file_mode() {
+  local mode
+  if mode="$(stat -c '%a' "$1" 2>/dev/null)"; then
+    printf '%s\n' "${mode}"
+    return
+  fi
+  stat -f '%Lp' "$1"
+}
+
 [[ -f "${runtime_env}" && ! -L "${runtime_env}" ]] \
   || { printf 'release watcher: runtime env is missing or is a symlink: %s\n' "${runtime_env}" >&2; exit 1; }
-runtime_mode="$(stat -f '%Lp' "${runtime_env}" 2>/dev/null || stat -c '%a' "${runtime_env}" 2>/dev/null || true)"
+runtime_mode="$(file_mode "${runtime_env}")"
 [[ "${runtime_mode}" == 600 ]] \
   || { printf 'release watcher: %s must have mode 600\n' "${runtime_env}" >&2; exit 1; }
 set -a
