@@ -115,6 +115,47 @@ def test_discovery_wait_is_bounded_and_rejects_ambiguous_instances(
         wait(duplicate)
 
 
+@pytest.mark.parametrize("initial_import", ["not-started", "running"])
+def test_background_imports_finish_before_explicit_convergence(
+    monkeypatch: pytest.MonkeyPatch, initial_import: str
+) -> None:
+    helper = load_helper()
+    wait = helper["wait_for_background_imports"]
+    instances = [blueprint(path) for path in helper["BLUEPRINT_PATHS"]]
+    if initial_import == "not-started":
+        instances[0].status = "unknown"
+    pending = initial_import == "running"
+    sleeps: list[int] = []
+
+    def finish_import(seconds: int) -> None:
+        nonlocal pending
+        sleeps.append(seconds)
+        instances[0].status = "successful"
+        pending = False
+
+    monkeypatch.setitem(
+        wait.__globals__, "time", SimpleNamespace(monotonic=lambda: 0, sleep=finish_import)
+    )
+    wait(instances, SimpleNamespace(exists=lambda: pending))
+    assert sleeps == [2]
+
+
+def test_background_import_wait_has_a_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    helper = load_helper()
+    wait = helper["wait_for_background_imports"]
+    instances = [blueprint(path) for path in helper["BLUEPRINT_PATHS"]]
+    ticks = iter((0, 0, 2))
+    sleeps: list[int] = []
+    monkeypatch.setitem(
+        wait.__globals__,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(ticks), sleep=sleeps.append),
+    )
+    with pytest.raises(helper["ConvergenceError"], match="background blueprint imports"):
+        wait(instances, SimpleNamespace(exists=lambda: True), timeout=2)
+    assert sleeps == [2]
+
+
 def test_automation_token_keeps_only_read_only_blueprint_permissions() -> None:
     document = yaml.load(
         (PROJECT_ROOT / "deploy/authentik/ai-hub-blueprint.yaml").read_text(encoding="utf-8"),
