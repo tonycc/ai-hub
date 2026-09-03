@@ -42,13 +42,21 @@ command -v jq >/dev/null 2>&1
 for deploy_script in \
   scripts/deploy/generate-macmini-runtime-env.sh \
   scripts/deploy/init-intranet-ca.sh \
+  scripts/deploy/install-release-watcher.sh \
   scripts/deploy/issue-intranet-ip-certificate.sh \
   scripts/deploy/macmini-image-deploy.sh \
   scripts/deploy/prepare-intranet-ca-bundle.sh \
+  scripts/deploy/promote-release.sh \
+  scripts/deploy/rollback-release.sh \
   scripts/deploy/set-macmini-images.sh \
-  scripts/deploy/set-macmini-ip.sh; do
+  scripts/deploy/set-macmini-ip.sh \
+  scripts/deploy/stage-release.sh \
+  scripts/deploy/watch-release.sh; do
   bash -n "${deploy_script}"
 done
+bash -n scripts/ci/macmini-release-watcher.test.sh
+bash -n scripts/ci/macmini-promotion.test.sh
+python3 -c "import plistlib; plistlib.load(open('deploy/launchd/com.company.ai-hub.release-watcher.plist.template', 'rb'))"
 
 DEPLOY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ai-hub-deploy-ci.XXXXXX")"
 cleanup() {
@@ -78,6 +86,7 @@ bash scripts/deploy/generate-macmini-runtime-env.sh \
   --ip "${TEST_IP}" \
   --platform-image "${PLATFORM_REF}" \
   --portal-image "${PORTAL_REF}" \
+  --repository tonycc/ai-hub \
   --config-dir "${CONFIG_DIR}" \
   --output "${RUNTIME_ENV}" >/dev/null
 RUNTIME_MODE="$(file_mode "${RUNTIME_ENV}")"
@@ -184,11 +193,23 @@ jq -e '
   and (all(.services.traefik.ports[]?; .host_ip == "192.168.50.21"))
 ' "${DEPLOY_TMP}/compose-new-ip.json" >/dev/null
 
-# A publish job may produce artifacts only after every Required CI job passes,
-# and the bundle records independently verifiable image/migration metadata.
+# A manual publish job may create an immutable, attested Release only after
+# every Required CI job passes. The bundle records image/migration metadata.
 grep -q '^  workflow_call:' .github/workflows/ci.yml
 grep -q '^  required-ci:' .github/workflows/publish-images.yml
 grep -q '^    needs: required-ci$' .github/workflows/publish-images.yml
+grep -q 'workflow_dispatch:' .github/workflows/publish-images.yml
+if grep -q '^[[:space:]]*push:' .github/workflows/publish-images.yml; then
+  fail "production publishing must be manually approved"
+fi
+grep -Eq 'actions/attest@[0-9a-f]{40}[[:space:]]+# v4\.' .github/workflows/publish-images.yml
+grep -q 'gh release create "${RELEASE_TAG}"' .github/workflows/publish-images.yml
+grep -q 'gh release edit "${RELEASE_TAG}" --draft=false --latest' .github/workflows/publish-images.yml
+grep -q 'git ls-remote --tags --refs origin' .github/workflows/publish-images.yml
+grep -q 'gh release verify "${RELEASE_TAG}"' .github/workflows/publish-images.yml
+grep -q -- '--json isImmutable' .github/workflows/publish-images.yml
+grep -q 'AI_HUB_RELEASE_TAG=' .github/workflows/publish-images.yml
+grep -q 'AI_HUB_RELEASE_SCHEMA_VERSION=2' .github/workflows/publish-images.yml
 grep -q 'AI_HUB_RELEASE_REQUIRED_CI=passed' .github/workflows/publish-images.yml
 grep -q 'AI_HUB_RELEASE_CORE_HEAD=' .github/workflows/publish-images.yml
 grep -q 'AI_HUB_RELEASE_RAW_HEAD=' .github/workflows/publish-images.yml
@@ -200,3 +221,10 @@ grep -q 'managed/blueprints/' scripts/deploy/macmini-image-deploy.sh
 grep -q 'maximum_age_minutes=60, require_off_host=True' scripts/deploy/macmini-image-deploy.sh
 grep -q 'validate_migration_transition' scripts/deploy/macmini-image-deploy.sh
 grep -q 'run_platform_canary' scripts/deploy/macmini-image-deploy.sh
+grep -q -- '--deny-self-hosted-runners' scripts/deploy/stage-release.sh
+grep -q 'promotion still requires an explicit fresh off-host backup receipt' scripts/deploy/stage-release.sh
+grep -q 'an existing deployment promotion requires --backup-receipt' scripts/deploy/promote-release.sh
+grep -q 'check_args+=(--backup-receipt' scripts/deploy/promote-release.sh
+grep -q 'if \[\[ -n "${BACKUP_RECEIPT}" \]\]; then' scripts/deploy/macmini-image-deploy.sh
+bash scripts/ci/macmini-release-watcher.test.sh
+bash scripts/ci/macmini-promotion.test.sh
