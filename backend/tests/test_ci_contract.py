@@ -42,6 +42,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "macos-deployment",
+        "authentik-blueprints-runtime",
         "m1-runtime",
         "m7-runtime",
         "required-gate",
@@ -51,6 +52,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "frontend",
         "deployment",
         "macos-deployment",
+        "authentik-blueprints-runtime",
         "m1-runtime",
         "m7-runtime",
     }
@@ -81,6 +83,21 @@ def test_macos_deployment_gate_uses_native_tools_and_blocks_release_on_failure()
     assert 'test "${MACOS_DEPLOYMENT_RESULT}" = "success"' in required_step["run"]
 
 
+def test_authentik_blueprint_runtime_is_required_before_release() -> None:
+    jobs = load_workflow()["jobs"]
+    job = jobs["authentik-blueprints-runtime"]
+    required = jobs["required-gate"]["steps"][-1]
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert job["timeout-minutes"] == 15
+    assert not job.get("continue-on-error", False)
+    assert job["steps"][-1]["run"] == "bash scripts/ci/macmini-authentik-runtime.sh"
+    assert not job["steps"][-1].get("continue-on-error", False)
+    assert required["env"]["AUTHENTIK_BLUEPRINTS_RESULT"] == (
+        "${{ needs.authentik-blueprints-runtime.result }}"
+    )
+    assert 'test "${AUTHENTIK_BLUEPRINTS_RESULT}" = "success"' in required["run"]
+
+
 def test_image_publish_reuses_required_ci_before_building() -> None:
     workflow = yaml.safe_load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
@@ -88,6 +105,15 @@ def test_image_publish_reuses_required_ci_before_building() -> None:
     assert jobs["required-ci"]["uses"] == "./.github/workflows/ci.yml"
     assert jobs["required-ci"]["permissions"] == {"contents": "read"}
     assert jobs["publish-arm64"]["needs"] == "required-ci"
+
+
+def test_authentik_runtime_pulls_identity_images_before_offline_deployment() -> None:
+    script = (PROJECT_ROOT / "scripts/ci/macmini-authentik-runtime.sh").read_text(
+        encoding="utf-8"
+    )
+    pull = '"${COMPOSE[@]}" pull postgres authentik-storage-init authentik-server authentik-worker'
+    assert pull in script
+    assert script.index(pull) < script.index("\nstart_identity_services\n")
 
 
 def release_verification_step() -> dict[str, Any]:
