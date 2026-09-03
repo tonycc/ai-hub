@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +64,121 @@ def test_image_publish_reuses_required_ci_before_building() -> None:
     assert jobs["required-ci"]["uses"] == "./.github/workflows/ci.yml"
     assert jobs["required-ci"]["permissions"] == {"contents": "read"}
     assert jobs["publish-arm64"]["needs"] == "required-ci"
+
+
+def release_verification_step() -> dict[str, Any]:
+    workflow = yaml.safe_load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    steps = cast(list[dict[str, Any]], workflow["jobs"]["publish-arm64"]["steps"])
+    return next(step for step in steps if step["name"] == "Verify immutable GitHub Release")
+
+
+def test_release_verification_is_bounded_and_runs_after_publication() -> None:
+    workflow = yaml.safe_load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    steps = cast(list[dict[str, Any]], workflow["jobs"]["publish-arm64"]["steps"])
+    verification = release_verification_step()
+    publication = next(step for step in steps if step["name"] == "Publish immutable GitHub Release")
+
+    assert steps.index(verification) == steps.index(publication) + 1
+    assert verification["timeout-minutes"] == 6
+    assert verification["shell"] == "bash"
+    assert verification["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert not verification.get("continue-on-error", False)
+    assert '--json isImmutable --jq .isImmutable)" == true' in publication["run"]
+
+
+@pytest.mark.parametrize(
+    ("pending_attempts", "terminal_error", "expected_status", "expected_attempts"),
+    [
+        pytest.param(0, "", 0, 1, id="ready-immediately"),
+        pytest.param(2, "", 0, 3, id="ready-after-propagation"),
+        pytest.param(29, "", 0, 30, id="ready-on-last-attempt"),
+        pytest.param(30, "", 1, 30, id="retry-budget-exhausted"),
+        pytest.param(0, "signature verification failed", 65, 1, id="invalid-signature"),
+        pytest.param(0, "HTTP 403: Forbidden", 65, 1, id="permission-error"),
+        pytest.param(
+            0,
+            "no attestations for tag v2026.09.04-1 (sha1:other)",
+            65,
+            1,
+            id="different-tag-error",
+        ),
+        pytest.param(2, "signature verification failed", 65, 3, id="invalid-after-propagation"),
+    ],
+)
+def test_release_verification_retries_only_pending_attestations(
+    tmp_path: Path,
+    pending_attempts: int,
+    terminal_error: str,
+    expected_status: int,
+    expected_attempts: int,
+) -> None:
+    verification = release_verification_step()
+    bin_path = tmp_path / "bin"
+    bin_path.mkdir()
+    gh_log = tmp_path / "gh.log"
+    sleep_log = tmp_path / "sleep.log"
+    gh_log.touch()
+    sleep_log.touch()
+    gh = bin_path / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"${AI_HUB_VERIFY_TEST_GH_LOG}"
+[[ "$#" -eq 3 && "$1" == release && "$2" == verify && "$3" == "${RELEASE_TAG}" ]] \
+  || exit 97
+attempt="$(wc -l <"${AI_HUB_VERIFY_TEST_GH_LOG}")"
+if (( attempt <= AI_HUB_VERIFY_TEST_PENDING )); then
+  printf 'no attestations for tag %s (sha1:43f0e26786dc58728c34041351e2c078767174d2)\\n' \
+    "${RELEASE_TAG}" >&2
+  exit 1
+fi
+if [[ -n "${AI_HUB_VERIFY_TEST_ERROR}" ]]; then
+  printf '%s\\n' "${AI_HUB_VERIFY_TEST_ERROR}" >&2
+  exit 65
+fi
+printf 'Release %s verified!\\n' "${RELEASE_TAG}"
+""",
+        encoding="utf-8",
+    )
+    sleep = bin_path / "sleep"
+    sleep.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"${AI_HUB_VERIFY_TEST_SLEEP_LOG}"
+""",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    sleep.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", verification["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_path}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+            "RELEASE_TAG": "v2026.09.03-1",
+            "AI_HUB_VERIFY_TEST_GH_LOG": str(gh_log),
+            "AI_HUB_VERIFY_TEST_SLEEP_LOG": str(sleep_log),
+            "AI_HUB_VERIFY_TEST_PENDING": str(pending_attempts),
+            "AI_HUB_VERIFY_TEST_ERROR": terminal_error,
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == expected_status, result.stdout + result.stderr
+    assert gh_log.read_text(encoding="utf-8").splitlines() == [
+        "release verify v2026.09.03-1"
+    ] * expected_attempts
+    assert sleep_log.read_text(encoding="utf-8").splitlines() == ["10"] * (expected_attempts - 1)
+    if expected_status == 0:
+        assert "Release v2026.09.03-1 verified!" in result.stdout
+    elif terminal_error:
+        assert terminal_error in result.stderr
+    else:
+        assert "still unavailable after 30 attempts" in result.stderr
 
 
 def test_ci_external_actions_are_pinned_to_full_commit_shas() -> None:
