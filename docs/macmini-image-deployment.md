@@ -26,7 +26,7 @@
 - `ghcr.io/<owner>/ai-hub-platform`
 - `ghcr.io/<owner>/ai-hub-portal`
 
-发布任务首先复用 `.github/workflows/ci.yml` 的完整 Required gate（Python/契约、前端、部署、M1 和 M7 运行门禁）；任一门禁失败都不会构建或推送生产镜像。随后生成 `ai-hub-macmini-deploy.tar.gz` 和 SHA-256 校验文件，为压缩包生成 GitHub Sigstore 构建来源证明，并发布不可变 GitHub Release。压缩包内有：
+发布任务首先复用 `.github/workflows/ci.yml` 的完整 Required gate（Python/契约、前端、部署配置、macOS 原生部署冒烟、M1 和 M7 运行门禁）；任一门禁失败都不会构建或推送生产镜像。随后生成 `ai-hub-macmini-deploy.tar.gz` 和 SHA-256 校验文件，为压缩包生成 GitHub Sigstore 构建来源证明，并发布不可变 GitHub Release。压缩包内有：
 
 ```text
 ai-hub-macmini-deploy/
@@ -38,6 +38,20 @@ ai-hub-macmini-deploy/
 ```
 
 `release.env` 记录通过 Required CI 的运行 ID、源码提交、两个不可变镜像引用以及镜像内 core/raw 迁移头。部署脚本会将它与 `runtime.env`、两个镜像的 OCI 源码提交标签和目标平台镜像内的实际迁移清单交叉核对；不要手工修改该文件。
+
+发布前可在运维端 macOS 源码工作树的仓库根目录执行同一组原生冒烟测试：
+
+```bash
+(
+  set -e
+  export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+  /bin/bash scripts/ci/macmini-image-deploy.test.sh
+  /bin/bash scripts/ci/macmini-release-watcher.test.sh
+  /bin/bash scripts/ci/macmini-promotion.test.sh
+)
+```
+
+测试使用系统自带的 Bash 和 BSD 工具，实际执行数据库标量解析、迁移状态判定、权限与状态文件写入，以及 watcher/promotion 流程。Docker、数据库和 GitHub 调用使用测试替身，不连接生产服务；生产 Mac mini 仍只接收部署包。这是主机脚本冒烟，不代替真实 Docker Desktop 部署验收。修复已发布脚本时必须创建新版本，不要直接修改已签名的 Release 包。
 
 发布步骤：
 

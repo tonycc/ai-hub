@@ -41,6 +41,7 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "python",
         "frontend",
         "deployment",
+        "macos-deployment",
         "m1-runtime",
         "m7-runtime",
         "required-gate",
@@ -49,12 +50,35 @@ def test_ci_workflow_has_least_privilege_and_stable_required_gate() -> None:
         "python",
         "frontend",
         "deployment",
+        "macos-deployment",
         "m1-runtime",
         "m7-runtime",
     }
     assert jobs["required-gate"]["if"] == "${{ always() }}"
     assert jobs["required-gate"]["name"] == "Required gate"
     assert "m2-runtime" not in jobs
+
+
+def test_macos_deployment_gate_uses_native_tools_and_blocks_release_on_failure() -> None:
+    jobs = load_workflow()["jobs"]
+    macos_job = jobs["macos-deployment"]
+    smoke_step = macos_job["steps"][-1]
+    required_step = jobs["required-gate"]["steps"][-1]
+
+    assert macos_job["runs-on"] == "macos-15"
+    assert macos_job["timeout-minutes"] == 5
+    assert not macos_job.get("continue-on-error", False)
+    assert not smoke_step.get("continue-on-error", False)
+    assert smoke_step["shell"] == "/bin/bash --noprofile --norc -e -o pipefail {0}"
+    assert "export PATH=/usr/bin:/bin:/usr/sbin:/sbin" in smoke_step["run"]
+    assert 'test "$(uname -s)" = Darwin' in smoke_step["run"]
+    assert 'test "$(command -v sed)" = /usr/bin/sed' in smoke_step["run"]
+    for name in ("macmini-image-deploy", "macmini-release-watcher", "macmini-promotion"):
+        assert f"/bin/bash scripts/ci/{name}.test.sh" in smoke_step["run"]
+    assert required_step["env"]["MACOS_DEPLOYMENT_RESULT"] == (
+        "${{ needs.macos-deployment.result }}"
+    )
+    assert 'test "${MACOS_DEPLOYMENT_RESULT}" = "success"' in required_step["run"]
 
 
 def test_image_publish_reuses_required_ci_before_building() -> None:

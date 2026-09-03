@@ -54,6 +54,7 @@ for deploy_script in \
   scripts/deploy/watch-release.sh; do
   bash -n "${deploy_script}"
 done
+bash -n scripts/ci/macmini-image-deploy.test.sh
 bash -n scripts/ci/macmini-release-watcher.test.sh
 bash -n scripts/ci/macmini-promotion.test.sh
 python3 -c "import plistlib; plistlib.load(open('deploy/launchd/com.company.ai-hub.release-watcher.plist.template', 'rb'))"
@@ -226,5 +227,6 @@ grep -q 'promotion still requires an explicit fresh off-host backup receipt' scr
 grep -q 'an existing deployment promotion requires --backup-receipt' scripts/deploy/promote-release.sh
 grep -q 'check_args+=(--backup-receipt' scripts/deploy/promote-release.sh
 grep -q 'if \[\[ -n "${BACKUP_RECEIPT}" \]\]; then' scripts/deploy/macmini-image-deploy.sh
+bash scripts/ci/macmini-image-deploy.test.sh
 bash scripts/ci/macmini-release-watcher.test.sh
 bash scripts/ci/macmini-promotion.test.sh

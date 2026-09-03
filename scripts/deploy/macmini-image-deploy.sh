@@ -39,7 +39,6 @@ cleanup_canary() {
     docker rm -f "${CANARY_CONTAINER}" >/dev/null 2>&1 || true
   fi
 }
-trap cleanup_canary EXIT
 
 read_file_value() {
   local key="$1" file="$2"
@@ -80,7 +79,12 @@ validate_revision() {
 }
 
 file_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || true
+  local mode
+  if mode="$(stat -c '%a' "$1" 2>/dev/null)"; then
+    printf '%s\n' "${mode}"
+    return
+  fi
+  stat -f '%Lp' "$1"
 }
 
 check_compose_version() {
@@ -343,7 +347,7 @@ psql_scalar() {
   "${COMPOSE[@]}" exec -T postgres \
     psql --username=postgres --dbname=platform_db --tuples-only --no-align \
     --set=ON_ERROR_STOP=1 --command "${sql}" \
-    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$/'
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
 read_live_migration_heads() {
@@ -695,6 +699,12 @@ write_deployment_state() {
   chmod 600 "${temporary}"
   mv "${temporary}" "${STATE_FILE}"
 }
+
+# Tests can load the real helpers without running deployment or replacing traps.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+trap cleanup_canary EXIT
 
 while (($# > 0)); do
   case "$1" in
