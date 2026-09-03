@@ -135,6 +135,9 @@ print("Verified blueprint GET 200 / POST 403, desired URLs, and production ident
 }
 
 printf 'Authentik gate: first install with fresh, isolated volumes\n'
+# The production helper deliberately forbids implicit pulls. A clean CI runner
+# must fetch only the pinned identity images before using that same helper.
+"${COMPOSE[@]}" pull postgres authentik-storage-init authentik-server authentik-worker
 start_identity_services
 reconcile_authentik_blueprints
 auth_test_assert_identity

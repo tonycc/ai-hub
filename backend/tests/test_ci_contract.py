@@ -107,6 +107,15 @@ def test_image_publish_reuses_required_ci_before_building() -> None:
     assert jobs["publish-arm64"]["needs"] == "required-ci"
 
 
+def test_authentik_runtime_pulls_identity_images_before_offline_deployment() -> None:
+    script = (PROJECT_ROOT / "scripts/ci/macmini-authentik-runtime.sh").read_text(
+        encoding="utf-8"
+    )
+    pull = '"${COMPOSE[@]}" pull postgres authentik-storage-init authentik-server authentik-worker'
+    assert pull in script
+    assert script.index(pull) < script.index("\nstart_identity_services\n")
+
+
 def release_verification_step() -> dict[str, Any]:
     workflow = yaml.safe_load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"))
     steps = cast(list[dict[str, Any]], workflow["jobs"]["publish-arm64"]["steps"])
