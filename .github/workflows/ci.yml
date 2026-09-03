@@ -68,6 +68,25 @@ jobs:
       - name: Run deployment gate
         run: bash scripts/ci/deploy.sh
 
+  macos-deployment:
+    name: Native macOS deployment smoke
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Run deployment smoke with macOS system tools
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+        run: |
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          test "$(uname -s)" = Darwin
+          test "$(command -v sed)" = /usr/bin/sed
+          /bin/bash scripts/ci/macmini-image-deploy.test.sh
+          /bin/bash scripts/ci/macmini-release-watcher.test.sh
+          /bin/bash scripts/ci/macmini-promotion.test.sh
+
   m1-runtime:
     name: M1 identity and API runtime
     runs-on: ubuntu-24.04
@@ -108,6 +127,7 @@ jobs:
       - python
       - frontend
       - deployment
+      - macos-deployment
       - m1-runtime
       - m7-runtime
     runs-on: ubuntu-24.04
@@ -118,11 +138,13 @@ jobs:
           PYTHON_RESULT: ${{ needs.python.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DEPLOYMENT_RESULT: ${{ needs.deployment.result }}
+          MACOS_DEPLOYMENT_RESULT: ${{ needs.macos-deployment.result }}
           M1_RUNTIME_RESULT: ${{ needs.m1-runtime.result }}
           M7_RUNTIME_RESULT: ${{ needs.m7-runtime.result }}
         run: |
           test "${PYTHON_RESULT}" = "success"
           test "${FRONTEND_RESULT}" = "success"
           test "${DEPLOYMENT_RESULT}" = "success"
+          test "${MACOS_DEPLOYMENT_RESULT}" = "success"
           test "${M1_RUNTIME_RESULT}" = "success"
           test "${M7_RUNTIME_RESULT}" = "success"
