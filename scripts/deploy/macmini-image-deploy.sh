@@ -12,6 +12,7 @@ ACTION="deploy"
 
 TARGET_PLATFORM_IMAGE=""
 TARGET_PORTAL_IMAGE=""
+TARGET_RELEASE_TAG=""
 TARGET_COMMIT_SHA=""
 TARGET_CORE_HEAD=""
 TARGET_RAW_HEAD=""
@@ -130,12 +131,13 @@ validate_release_manifest() {
       || fail "release manifest contains an invalid line"
     key="${line%%=*}"
     case "${key}" in
-      AI_HUB_RELEASE_SCHEMA_VERSION | AI_HUB_RELEASE_COMMIT_SHA | AI_HUB_RELEASE_REQUIRED_CI | AI_HUB_RELEASE_CI_RUN_ID | AI_HUB_PLATFORM_IMAGE_REF | AI_HUB_PORTAL_IMAGE_REF | AI_HUB_RELEASE_CORE_HEAD | AI_HUB_RELEASE_RAW_HEAD) ;;
+      AI_HUB_RELEASE_SCHEMA_VERSION | AI_HUB_RELEASE_TAG | AI_HUB_RELEASE_COMMIT_SHA | AI_HUB_RELEASE_REQUIRED_CI | AI_HUB_RELEASE_CI_RUN_ID | AI_HUB_PLATFORM_IMAGE_REF | AI_HUB_PORTAL_IMAGE_REF | AI_HUB_RELEASE_CORE_HEAD | AI_HUB_RELEASE_RAW_HEAD) ;;
       *) fail "release manifest contains an unsupported field: ${key}" ;;
     esac
   done <"${RELEASE_MANIFEST}"
 
   schema="$(require_single_value AI_HUB_RELEASE_SCHEMA_VERSION "${RELEASE_MANIFEST}")"
+  TARGET_RELEASE_TAG="$(require_single_value AI_HUB_RELEASE_TAG "${RELEASE_MANIFEST}")"
   TARGET_COMMIT_SHA="$(require_single_value AI_HUB_RELEASE_COMMIT_SHA "${RELEASE_MANIFEST}")"
   ci_result="$(require_single_value AI_HUB_RELEASE_REQUIRED_CI "${RELEASE_MANIFEST}")"
   run_id="$(require_single_value AI_HUB_RELEASE_CI_RUN_ID "${RELEASE_MANIFEST}")"
@@ -144,7 +146,9 @@ validate_release_manifest() {
   TARGET_CORE_HEAD="$(require_single_value AI_HUB_RELEASE_CORE_HEAD "${RELEASE_MANIFEST}")"
   TARGET_RAW_HEAD="$(require_single_value AI_HUB_RELEASE_RAW_HEAD "${RELEASE_MANIFEST}")"
 
-  [[ "${schema}" == "1" ]] || fail "unsupported release manifest schema: ${schema}"
+  [[ "${schema}" == "2" ]] || fail "unsupported release manifest schema: ${schema}"
+  [[ "${TARGET_RELEASE_TAG}" =~ ^v20[0-9]{2}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])-[1-9][0-9]*$ ]] \
+    || fail "release manifest tag is not a stable calendar version"
   [[ "${TARGET_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]] || fail "release manifest commit must be a full Git SHA"
   [[ "${ci_result}" == "passed" ]] || fail "release manifest does not record a passed Required CI gate"
   [[ "${run_id}" =~ ^[1-9][0-9]*$ ]] || fail "release manifest CI run id is invalid"
@@ -762,6 +766,9 @@ COMPOSE=(
 case "${ACTION}" in
   check)
     deployment_preflight
+    if [[ -n "${BACKUP_RECEIPT}" ]]; then
+      validate_backup_receipt
+    fi
     bash "${SCRIPT_DIR}/prepare-intranet-ca-bundle.sh" --env-file "${ENV_FILE}"
     "${COMPOSE[@]}" config --quiet
     printf 'Mac mini image deployment configuration and release manifest are valid.\n'

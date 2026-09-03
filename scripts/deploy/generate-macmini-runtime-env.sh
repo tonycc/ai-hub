@@ -12,6 +12,7 @@ PLATFORM_PORT=443
 AUTH_PORT=8443
 PLATFORM_IMAGE=""
 PORTAL_IMAGE=""
+GITHUB_REPOSITORY=""
 CONFIG_DIR="${HOME}/.config/ai-hub"
 OUTPUT=""
 BACKUP_OUTPUT=""
@@ -20,7 +21,7 @@ usage() {
   printf '%s\n' \
     'Generate the first IP-only Mac mini production runtime env.' \
     '' \
-    'Usage: bash scripts/deploy/generate-macmini-runtime-env.sh --ip PRIVATE_IPV4 --platform-image TAG@sha256:DIGEST --portal-image TAG@sha256:DIGEST [--platform-port PORT] [--auth-port PORT] [--config-dir ABSOLUTE_PATH] [--output ABSOLUTE_PATH] [--backup-output ABSOLUTE_PATH]'
+    'Usage: bash scripts/deploy/generate-macmini-runtime-env.sh --ip PRIVATE_IPV4 --platform-image TAG@sha256:DIGEST --portal-image TAG@sha256:DIGEST --repository OWNER/REPO [--platform-port PORT] [--auth-port PORT] [--config-dir ABSOLUTE_PATH] [--output ABSOLUTE_PATH] [--backup-output ABSOLUTE_PATH]'
 }
 
 fail() { printf 'generate-macmini-runtime-env: %s\n' "$1" >&2; exit 1; }
@@ -58,6 +59,7 @@ while (($# > 0)); do
     --auth-port) AUTH_PORT="${2:?}"; shift 2 ;;
     --platform-image) PLATFORM_IMAGE="${2:?}"; shift 2 ;;
     --portal-image) PORTAL_IMAGE="${2:?}"; shift 2 ;;
+    --repository) GITHUB_REPOSITORY="${2:?}"; shift 2 ;;
     --config-dir) CONFIG_DIR="${2:?}"; shift 2 ;;
     --output) OUTPUT="${2:?}"; shift 2 ;;
     --backup-output) BACKUP_OUTPUT="${2:?}"; shift 2 ;;
@@ -72,6 +74,8 @@ validate_port "${AUTH_PORT}" || fail "--auth-port must be between 1 and 65535"
 [[ "${PLATFORM_PORT}" -ne "${AUTH_PORT}" ]] || fail "platform and authentik ports must differ"
 validate_image "${PLATFORM_IMAGE}" || fail "--platform-image must contain a tag and sha256 digest"
 validate_image "${PORTAL_IMAGE}" || fail "--portal-image must contain a tag and sha256 digest"
+[[ "${GITHUB_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+  || fail "--repository must be OWNER/REPO"
 [[ "${CONFIG_DIR}" == /* ]] || fail "--config-dir must be an absolute path"
 [[ "${CONFIG_DIR}" != "/" ]] || fail "--config-dir cannot be the filesystem root"
 command -v openssl >/dev/null 2>&1 || fail "openssl is required"
@@ -108,6 +112,12 @@ STANDALONE_OIDC_CLIENT_SECRET="$(gen_secret 32)"
 cat >"${TEMP_OUTPUT}" <<EOF
 # AI Hub IP-only Mac mini production runtime.
 # Changing AI_HUB_SERVER_IP updates every derived URL when Compose reads this file.
+AI_HUB_DEPLOY_ROOT=${CONFIG_DIR}
+AI_HUB_GITHUB_REPOSITORY=${GITHUB_REPOSITORY}
+AI_HUB_AUTO_STAGE_ENABLED=true
+AI_HUB_RELEASE_POLL_INTERVAL_SECONDS=300
+PATH=/opt/homebrew/bin:/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
 AI_HUB_ENVIRONMENT=production
 AI_HUB_APPLICATION_ID=ai-hub-platform
 AI_HUB_REFERENCE_APPLICATION_ENABLED=false
@@ -200,4 +210,4 @@ trap - EXIT
 printf 'Wrote %s (mode 600).\n' "${OUTPUT}"
 printf 'Wrote %s (mode 600, backup-only secret).\n' "${BACKUP_OUTPUT}"
 printf 'Escrow the backup key in an off-host secret manager before storing production data.\n'
-printf 'Next: issue the IP certificate, copy server.crt/server.key/root-ca.crt into %s, then run macmini-image-deploy.sh.\n' "${TLS_DIR}"
+printf 'Next: issue the IP certificate, copy server.crt/server.key/root-ca.crt into %s, then install the Release watcher.\n' "${TLS_DIR}"
