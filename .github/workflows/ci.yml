@@ -87,6 +87,18 @@ jobs:
           /bin/bash scripts/ci/macmini-release-watcher.test.sh
           /bin/bash scripts/ci/macmini-promotion.test.sh
 
+  authentik-blueprints-runtime:
+    name: Authentik first-install and blueprint convergence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Run isolated Authentik blueprint gate
+        run: bash scripts/ci/macmini-authentik-runtime.sh
+
   m1-runtime:
     name: M1 identity and API runtime
     runs-on: ubuntu-24.04
@@ -128,6 +140,7 @@ jobs:
       - frontend
       - deployment
       - macos-deployment
+      - authentik-blueprints-runtime
       - m1-runtime
       - m7-runtime
     runs-on: ubuntu-24.04
@@ -139,6 +152,7 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DEPLOYMENT_RESULT: ${{ needs.deployment.result }}
           MACOS_DEPLOYMENT_RESULT: ${{ needs.macos-deployment.result }}
+          AUTHENTIK_BLUEPRINTS_RESULT: ${{ needs.authentik-blueprints-runtime.result }}
           M1_RUNTIME_RESULT: ${{ needs.m1-runtime.result }}
           M7_RUNTIME_RESULT: ${{ needs.m7-runtime.result }}
         run: |
@@ -146,5 +160,6 @@ jobs:
           test "${FRONTEND_RESULT}" = "success"
           test "${DEPLOYMENT_RESULT}" = "success"
           test "${MACOS_DEPLOYMENT_RESULT}" = "success"
+          test "${AUTHENTIK_BLUEPRINTS_RESULT}" = "success"
           test "${M1_RUNTIME_RESULT}" = "success"
           test "${M7_RUNTIME_RESULT}" = "success"

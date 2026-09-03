@@ -55,6 +55,7 @@ for deploy_script in \
   bash -n "${deploy_script}"
 done
 bash -n scripts/ci/macmini-image-deploy.test.sh
+bash -n scripts/ci/macmini-authentik-runtime.sh
 bash -n scripts/ci/macmini-release-watcher.test.sh
 bash -n scripts/ci/macmini-promotion.test.sh
 python3 -c "import plistlib; plistlib.load(open('deploy/launchd/com.company.ai-hub.release-watcher.plist.template', 'rb'))"
@@ -218,7 +219,8 @@ grep -q 'AI_HUB_RELEASE_RAW_HEAD=' .github/workflows/publish-images.yml
 # IP-only changes require an explicit Authentik apply, while image changes are
 # gated on live heads, fresh off-host backups, rollback data, and a canary.
 grep -q 'authentik_blueprints.view_blueprintinstance' deploy/authentik/ai-hub-blueprint.yaml
-grep -q 'managed/blueprints/' scripts/deploy/macmini-image-deploy.sh
+grep -q 'exec -T authentik-worker ak shell' scripts/deploy/macmini-image-deploy.sh
+python3 -c "import ast; from pathlib import Path; ast.parse(Path('scripts/deploy/reconcile-authentik-blueprints.py').read_text())"
 grep -q 'maximum_age_minutes=60, require_off_host=True' scripts/deploy/macmini-image-deploy.sh
 grep -q 'validate_migration_transition' scripts/deploy/macmini-image-deploy.sh
 grep -q 'run_platform_canary' scripts/deploy/macmini-image-deploy.sh

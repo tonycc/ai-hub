@@ -26,7 +26,7 @@
 - `ghcr.io/<owner>/ai-hub-platform`
 - `ghcr.io/<owner>/ai-hub-portal`
 
-发布任务首先复用 `.github/workflows/ci.yml` 的完整 Required gate（Python/契约、前端、部署配置、macOS 原生部署冒烟、M1 和 M7 运行门禁）；任一门禁失败都不会构建或推送生产镜像。随后生成 `ai-hub-macmini-deploy.tar.gz` 和 SHA-256 校验文件，为压缩包生成 GitHub Sigstore 构建来源证明，并发布不可变 GitHub Release。压缩包内有：
+发布任务首先复用 `.github/workflows/ci.yml` 的完整 Required gate（Python/契约、前端、部署配置、macOS 原生部署冒烟、Authentik 首装与蓝图收敛、M1 和 M7 运行门禁）；任一门禁失败都不会构建或推送生产镜像。随后生成 `ai-hub-macmini-deploy.tar.gz` 和 SHA-256 校验文件，为压缩包生成 GitHub Sigstore 构建来源证明，并发布不可变 GitHub Release。压缩包内有：
 
 ```text
 ai-hub-macmini-deploy/
@@ -52,6 +52,14 @@ ai-hub-macmini-deploy/
 ```
 
 测试使用系统自带的 Bash 和 BSD 工具，实际执行数据库标量解析、迁移状态判定、权限与状态文件写入，以及 watcher/promotion 流程。Docker、数据库和 GitHub 调用使用测试替身，不连接生产服务；生产 Mac mini 仍只接收部署包。这是主机脚本冒烟，不代替真实 Docker Desktop 部署验收。修复已发布脚本时必须创建新版本，不要直接修改已签名的 Release 包。
+
+运维端有 Docker 时，还应在同一源码工作树运行真实身份服务集成门禁：
+
+```bash
+bash scripts/ci/macmini-authentik-runtime.sh
+```
+
+该门禁创建独立 Compose 项目和全新数据卷，不开放宿主机端口；验证首次蓝图收敛、业务 token 的 GET 200 / POST apply 403 权限边界、重复执行、蓝图内容不变时的 IP 更新，以及错误蓝图阻断。结束后只清理该测试项目及其临时数据，不连接生产实例。
 
 发布步骤：
 
@@ -259,7 +267,9 @@ bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/macmini-image-deplo
   --release-manifest /Users/dshdeploy/services/ai-hub/current/release.env
 ```
 
-只要继续使用原根 CA，客户端不需要重新安装根证书。旧 IP 的证书不能用于新 IP；只改 `runtime.env` 而不重签证书会被预检拒绝。脚本会同步改变 issuer、回调地址、门户地址和品牌地址。由于 authentik 只比较 blueprint 文件原始摘要、不会因 `!Env` 值变化自动重应用，部署脚本会重建 worker 后调用 blueprint API，按 baseline、production 的固定顺序显式应用并等待成功；任一步失败都不会记录为成功部署。
+只要继续使用原根 CA，客户端不需要重新安装根证书。旧 IP 的证书不能用于新 IP；只改 `runtime.env` 而不重签证书会被预检拒绝。脚本会同步改变 issuer、回调地址、门户地址和品牌地址。由于 authentik 只比较 blueprint 文件原始摘要、不会因 `!Env` 值变化自动重应用，部署脚本会重建 worker 后通过容器内受信 `ak shell`，按 baseline、production 的固定顺序调度并等待每一次蓝图任务完成，同时核对成功状态和新的应用时间；任一步失败都不会记录为成功部署。
+
+蓝图写入是运维权限，不复用 `platform-api` 的 `AI_HUB_AUTHENTIK_API_TOKEN`，也不向该容器注入超管 token。原 automation 账号保留业务凭据管理所需的最小权限，蓝图权限仅用于只读查询。`view_blueprintinstance` 不保证 POST apply 被授权，不能通过给业务账号增加 flows/stages/rbac 管理权限来解决部署问题。
 
 ## 8. 镜像升级与回滚
 

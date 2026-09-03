@@ -136,5 +136,24 @@ fi
 grep -F '2.24.4 or newer is required' "${fixture}/compose.stderr" >/dev/null \
   || test_fail "minimum Compose version failure was not reported"
 
+mock_identity_compose() {
+  [[ "$#" -eq 7 && "$1" == exec && "$2" == -T && "$3" == authentik-worker \
+    && "$4" == ak && "$5" == shell && "$6" == -c \
+    && "$7" == *'sys.stdin.read()'* && "$7" == *'"__name__": "__main__"'* ]] \
+    || test_fail "blueprint convergence must use the trusted worker CLI"
+  cmp - "${project_root}/scripts/deploy/reconcile-authentik-blueprints.py" \
+    || test_fail "worker CLI did not receive the packaged convergence helper"
+  return "${mock_identity_status}"
+}
+COMPOSE=(mock_identity_compose)
+mock_identity_status=0
+reconcile_authentik_blueprints
+mock_identity_status=42
+if (reconcile_authentik_blueprints) 2>"${fixture}/identity.stderr"; then
+  test_fail "failed worker CLI was treated as successful convergence"
+fi
+grep -F 'explicit Authentik blueprint convergence failed' "${fixture}/identity.stderr" >/dev/null \
+  || test_fail "worker CLI failure was not reported"
+
 printf 'AI Hub Mac mini image deployment smoke tests passed (%s, Bash %s)\n' \
   "$(uname -s)" "${BASH_VERSION}"

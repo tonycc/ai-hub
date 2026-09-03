@@ -498,89 +498,12 @@ start_identity_services() {
 }
 
 reconcile_authentik_blueprints() {
-  "${COMPOSE[@]}" run --rm --no-deps --pull never --entrypoint python platform-api -c '
-import json
-import os
-import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-
-base = os.environ["AI_HUB_AUTHENTIK_API_URL"].rstrip("/")
-token = os.environ["AI_HUB_AUTHENTIK_API_TOKEN"]
-endpoint = f"{base}/managed/blueprints/"
-paths = (
-    "ai-hub/ai-hub-blueprint.yaml",
-    "ai-hub/ai-hub-production-blueprint.yaml",
-)
-
-
-def request_json(url: str, *, method: str = "GET"):
-    data = b"{}" if method == "POST" else None
-    request = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        payload = response.read()
-    return json.loads(payload) if payload else None
-
-
-def find_instance(path: str):
-    payload = request_json(endpoint + "?path=" + urllib.parse.quote(path, safe=""))
-    results = payload.get("results", []) if isinstance(payload, dict) else payload
-    if not isinstance(results, list):
-        raise RuntimeError("Authentik returned an invalid blueprint list")
-    exact = [item for item in results if item.get("path") == path]
-    if len(exact) != 1:
-        raise RuntimeError(f"Expected one Authentik blueprint instance for {path}")
-    return exact[0]
-
-
-deadline = time.monotonic() + 300
-while True:
-    try:
-        find_instance(paths[0])
-        break
-    except (urllib.error.HTTPError, urllib.error.URLError, RuntimeError) as error:
-        if time.monotonic() >= deadline:
-            print(f"Authentik blueprint API did not become ready: {error}", file=sys.stderr)
-            raise SystemExit(1) from error
-        time.sleep(5)
-
-for path in paths:
-    try:
-        before = find_instance(path)
-        pk = before.get("pk")
-        if not pk:
-            raise RuntimeError(f"Authentik blueprint instance {path} has no primary key")
-        previous_applied = before.get("last_applied")
-        apply_url = endpoint + urllib.parse.quote(str(pk), safe="") + "/apply/"
-        request_json(apply_url, method="POST")
-        apply_deadline = time.monotonic() + 300
-        while True:
-            current = find_instance(path)
-            status = str(current.get("status", "")).lower()
-            applied = current.get("last_applied") != previous_applied
-            if applied and status in {"error", "failed", "invalid", "warning"}:
-                raise RuntimeError(f"Authentik blueprint {path} entered status {status}")
-            if applied and status == "successful":
-                print(f"Applied Authentik blueprint: {path}")
-                break
-            if time.monotonic() >= apply_deadline:
-                raise RuntimeError(f"Timed out applying Authentik blueprint {path}")
-            time.sleep(3)
-    except (urllib.error.HTTPError, urllib.error.URLError, RuntimeError) as error:
-        print(str(error), file=sys.stderr)
-        raise SystemExit(1) from error
-' || fail "explicit Authentik blueprint convergence failed"
+  # The deployment operator already controls Docker. Keep privileged blueprint
+  # execution in Authentik; never give platform-api a superuser bearer token.
+  "${COMPOSE[@]}" exec -T authentik-worker ak shell -c \
+    'import sys; exec(compile(sys.stdin.read(), "reconcile-authentik-blueprints.py", "exec"), {"__name__": "__main__"})' \
+    <"${SCRIPT_DIR}/reconcile-authentik-blueprints.py" \
+    || fail "explicit Authentik blueprint convergence failed"
 }
 
 apply_forward_migrations() {
