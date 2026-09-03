@@ -246,7 +246,40 @@ jobs:
           gh release edit "${RELEASE_TAG}" --draft=false --latest
           [[ "$(gh release view "${RELEASE_TAG}" --json isImmutable --jq .isImmutable)" == true ]] \
             || { printf 'Release immutability is not enabled for %s\n' "${RELEASE_TAG}" >&2; exit 1; }
-          gh release verify "${RELEASE_TAG}"
+
+      - name: Verify immutable GitHub Release
+        timeout-minutes: 6
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # GitHub may not expose the Release attestation immediately after
+          # publication. Retry only that readiness error, never publication or
+          # a failed signature/authentication check.
+          max_attempts=30
+          retry_delay=10
+          for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+            if verify_output="$(gh release verify "${RELEASE_TAG}" 2>&1)"; then
+              printf '%s\n' "${verify_output}"
+              exit 0
+            else
+              verify_status=$?
+            fi
+            printf '%s\n' "${verify_output}" >&2
+            if [[ "${verify_output}" != *"no attestations for tag ${RELEASE_TAG} ("* ]]; then
+              exit "${verify_status}"
+            fi
+            if ((attempt < max_attempts)); then
+              printf 'Release attestation not ready (attempt %s/%s); retrying in %s seconds.\n' \
+                "${attempt}" "${max_attempts}" "${retry_delay}" >&2
+              sleep "${retry_delay}"
+            fi
+          done
+          printf 'Release attestation for %s is still unavailable after %s attempts; verification failed.\n' \
+            "${RELEASE_TAG}" "${max_attempts}" >&2
+          printf 'The Release is already published; do not recreate or overwrite it.\n' >&2
+          exit "${verify_status}"
 
       - name: Log out from GHCR
         if: ${{ always() }}
