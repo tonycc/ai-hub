@@ -13,6 +13,7 @@
 - [M3 平台公共能力基线](docs/m3-platform-management-design.md)
 - [M3 UAT 报告](docs/m3-uat-report.md)
 - [Mac mini 局域网纯 IP 镜像部署](docs/macmini-image-deployment.md)
+- [Mac mini Agent 部署执行手册](docs/macmini-agent-deployment-runbook.md)
 
 总体文档定义产品范围、平台与应用边界、模块和数据库设计、接口与事件规范、安全要求，以及从接入骨架到生产治理的版本路线；独立实施计划按 M0 至 M6 给出任务、依赖、产物、验证和回滚要求。当前只建设平台本身，不把任何真实业务应用作为交付物；优先保证稳定、可靠、可审计和简单部署，不以互联网用户规模驱动微服务或高可用设计。
 

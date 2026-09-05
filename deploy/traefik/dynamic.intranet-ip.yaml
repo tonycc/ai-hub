@@ -13,20 +13,20 @@ http:
   routers:
     authentik:
       entryPoints: [identity]
-      rule: PathPrefix(`/`)
+      rule: '{{ env "AI_HUB_IDENTITY_HOST_RULE" }} && PathPrefix(`/`)'
       service: authentik
       middlewares: [common-security, request-limit]
       tls: {}
     platform-api:
       entryPoints: [platform]
-      rule: PathPrefix(`/platform-api/`) || PathPrefix(`/portal-api/`) || PathPrefix(`/auth/`) || PathPrefix(`/health/`)
+      rule: '{{ env "AI_HUB_PLATFORM_HOST_RULE" }} && (PathPrefix(`/platform-api/`) || PathPrefix(`/portal-api/`) || PathPrefix(`/auth/`) || PathPrefix(`/health/`))'
       priority: 100
       service: platform-api
       middlewares: [common-security, request-limit]
       tls: {}
     platform-portal:
       entryPoints: [platform]
-      rule: PathPrefix(`/`)
+      rule: '{{ env "AI_HUB_PLATFORM_HOST_RULE" }} && PathPrefix(`/`)'
       priority: 10
       service: platform-portal
       middlewares: [common-security, request-limit]

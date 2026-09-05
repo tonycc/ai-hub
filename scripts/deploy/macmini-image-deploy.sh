@@ -31,6 +31,7 @@ PORTAL_CHANGED="false"
 CLASSIFIED_ROLLBACK="false"
 STATE_FILE=""
 CANARY_CONTAINER=""
+ENDPOINT_COMPOSE_FILE=""
 
 fail() { printf 'macmini-image-deploy: %s\n' "$1" >&2; exit 1; }
 
@@ -38,6 +39,25 @@ cleanup_canary() {
   if [[ -n "${CANARY_CONTAINER}" ]]; then
     docker rm -f "${CANARY_CONTAINER}" >/dev/null 2>&1 || true
   fi
+}
+
+cleanup_deployment() {
+  cleanup_canary
+  if [[ "${ACTION}" == check && -n "${ENDPOINT_COMPOSE_FILE}" ]]; then
+    rm -f "${ENDPOINT_COMPOSE_FILE}"
+  fi
+}
+
+render_endpoint_compose() {
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required"
+  if [[ "${ACTION}" == check ]]; then
+    ENDPOINT_COMPOSE_FILE=$(mktemp "$(dirname "${ENV_FILE}")/.compose.endpoints.check.XXXXXX")
+  else
+    ENDPOINT_COMPOSE_FILE="$(dirname "${ENV_FILE}")/generated/compose.endpoints.yaml"
+  fi
+  python3 "${SCRIPT_DIR}/render-endpoint-compose.py" \
+    --env-file "${ENV_FILE}" --output "${ENDPOINT_COMPOSE_FILE}" >/dev/null \
+    || fail "could not render endpoint Compose override"
 }
 
 read_file_value() {
@@ -109,6 +129,21 @@ check_certificate_ip() {
     openssl x509 -in "${certificate}" -noout -text \
       | grep -F "IP Address:${ip}" >/dev/null
   fi
+}
+
+check_certificate_dns() {
+  local certificate="$1" hostname="$2"
+  if openssl x509 -help 2>&1 | grep -q -- '-checkhost'; then
+    openssl x509 -in "${certificate}" -noout -checkhost "${hostname}" >/dev/null
+  else
+    openssl x509 -in "${certificate}" -noout -text \
+      | grep -F "DNS:${hostname}" >/dev/null
+  fi
+}
+
+endpoint_values() {
+  python3 "${SCRIPT_DIR}/render-endpoint-compose.py" \
+    --env-file "${ENV_FILE}" --print "$1"
 }
 
 check_resolved_images() {
@@ -188,6 +223,8 @@ common_preflight() {
 
 deployment_preflight() {
   local docker_arch server_ip platform_port auth_port root_cert server_cert server_key key_mode
+  local bind_addresses dns_names address dns_name
+  local -a addresses configured_dns_names
   local cert_public key_public
   common_preflight
   command -v openssl >/dev/null 2>&1 || fail "openssl is required"
@@ -212,10 +249,15 @@ deployment_preflight() {
   server_key="$(require_single_value AI_HUB_TLS_KEY_FILE "${ENV_FILE}")"
 
   check_private_ipv4 "${server_ip}" || fail "AI_HUB_SERVER_IP must be an RFC1918 private IPv4 address"
-  ifconfig | awk -v ip="${server_ip}" '
-    $1 == "inet" && $2 == ip { found = 1 }
-    END { exit(found ? 0 : 1) }
-  ' || fail "AI_HUB_SERVER_IP ${server_ip} is not assigned to a Mac network interface"
+  bind_addresses="$(endpoint_values bind-addresses)" \
+    || fail "endpoint address configuration is invalid"
+  IFS=',' read -r -a addresses <<<"${bind_addresses}"
+  for address in "${addresses[@]}"; do
+    ifconfig | awk -v ip="${address}" '
+      $1 == "inet" && $2 == ip { found = 1 }
+      END { exit(found ? 0 : 1) }
+    ' || fail "bind address ${address} is not assigned to a Mac network interface"
+  done
   [[ "${platform_port}" =~ ^[1-9][0-9]*$ && "${auth_port}" =~ ^[1-9][0-9]*$ ]] \
     || fail "HTTPS ports must be numeric"
   ((platform_port >= 1 && platform_port <= 65535)) \
@@ -235,8 +277,19 @@ deployment_preflight() {
 
   openssl verify -CAfile "${root_cert}" "${server_cert}" >/dev/null \
     || fail "server certificate is not signed by the configured root CA"
-  check_certificate_ip "${server_cert}" "${server_ip}" \
-    || fail "server certificate SAN does not contain ${server_ip}"
+  for address in "${addresses[@]}"; do
+    check_certificate_ip "${server_cert}" "${address}" \
+      || fail "server certificate SAN does not contain ${address}"
+  done
+  dns_names="$(endpoint_values certificate-dns-names)" \
+    || fail "endpoint DNS configuration is invalid"
+  if [[ -n "${dns_names}" ]]; then
+    IFS=',' read -r -a configured_dns_names <<<"${dns_names}"
+    for dns_name in "${configured_dns_names[@]}"; do
+      check_certificate_dns "${server_cert}" "${dns_name}" \
+        || fail "server certificate SAN does not contain ${dns_name}"
+    done
+  fi
   openssl x509 -in "${server_cert}" -noout -checkend 2592000 >/dev/null \
     || fail "server certificate expires within 30 days"
 
@@ -579,17 +632,22 @@ promote_release() {
 }
 
 verify_public_endpoints() {
-  local server_ip platform_port auth_port root_cert
-  server_ip="$(read_file_value AI_HUB_SERVER_IP "${ENV_FILE}")"
-  platform_port="$(read_file_value AI_HUB_PLATFORM_HTTPS_PORT "${ENV_FILE}")"
-  auth_port="$(read_file_value AI_HUB_AUTH_HTTPS_PORT "${ENV_FILE}")"
+  local root_cert platform_origins identity_origins origin
   root_cert="$(read_file_value AI_HUB_CA_CERT_FILE "${ENV_FILE}")"
-  curl --fail --silent --show-error --cacert "${root_cert}" \
-    "https://${server_ip}:${platform_port}/health/ready" >/dev/null \
-    || fail "public platform readiness probe failed"
-  curl --fail --silent --show-error --cacert "${root_cert}" \
-    "https://${server_ip}:${auth_port}/-/health/ready/" >/dev/null \
-    || fail "public Authentik readiness probe failed"
+  platform_origins="$(endpoint_values platform-origins)"
+  identity_origins="$(endpoint_values identity-origins)"
+  IFS=',' read -r -a origins <<<"${platform_origins}"
+  for origin in "${origins[@]}"; do
+    curl --fail --silent --show-error --cacert "${root_cert}" \
+      "${origin}/health/ready" >/dev/null \
+      || fail "platform readiness probe failed for ${origin}"
+  done
+  IFS=',' read -r -a origins <<<"${identity_origins}"
+  for origin in "${origins[@]}"; do
+    curl --fail --silent --show-error --cacert "${root_cert}" \
+      "${origin}/-/health/ready/" >/dev/null \
+      || fail "Authentik readiness probe failed for ${origin}"
+  done
 }
 
 write_deployment_state() {
@@ -627,7 +685,7 @@ write_deployment_state() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   return 0
 fi
-trap cleanup_canary EXIT
+trap cleanup_deployment EXIT
 
 while (($# > 0)); do
   case "$1" in
@@ -687,12 +745,15 @@ unset DOCKER_DEFAULT_PLATFORM
 unset POSTGRES_IMAGE POSTGRES_DATA_VOLUME_TARGET AUTHENTIK_IMAGE TRAEFIK_IMAGE
 unset STANDALONE_APP_IMAGE_REF PYTHON_IMAGE NODE_IMAGE NGINX_IMAGE
 
+render_endpoint_compose
+
 COMPOSE=(
   docker compose
   --project-name ai-hub-production
   --env-file "${ENV_FILE}"
   -f "${PROJECT_ROOT}/deploy/compose.yaml"
   -f "${PROJECT_ROOT}/deploy/compose.intranet-ip.yaml"
+  -f "${ENDPOINT_COMPOSE_FILE}"
   --profile base-access
 )
 

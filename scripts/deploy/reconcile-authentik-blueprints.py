@@ -5,8 +5,10 @@ instance status. The pinned apply_blueprint management command ignores the
 apply() result; its exit code alone is not a convergence receipt.
 """
 
+import os
 import sys
 import time
+from urllib.parse import urlsplit
 
 BLUEPRINT_PATHS = (
     "ai-hub/ai-hub-blueprint.yaml",
@@ -88,9 +90,63 @@ def apply_instances(instances, task, *, timeout=TIMEOUT_SECONDS):
         print(f"Applied Authentik blueprint: {instance.path}", flush=True)
 
 
+def _redirect_entries(value, redirect_type):
+    urls = [item.strip() for item in value.split(",")]
+    if not urls or any(not item for item in urls) or len(set(urls)) != len(urls):
+        raise ConvergenceError(f"Invalid {redirect_type} redirect URI list")
+    entries = []
+    for url in urls:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ConvergenceError(f"Invalid {redirect_type} redirect URI")
+        if redirect_type == "authorization" and parsed.path != "/auth/callback":
+            raise ConvergenceError("Authorization redirect URI must use /auth/callback")
+        if redirect_type == "logout" and parsed.path != "/":
+            raise ConvergenceError("Logout redirect URI must use /")
+        entries.append(
+            {
+                "matching_mode": "strict",
+                "url": url,
+                "redirect_uri_type": redirect_type,
+            }
+        )
+    return entries
+
+
+def reconcile_portal_redirect_uris(provider_model):
+    authorization = os.environ.get("AI_HUB_PORTAL_OIDC_REDIRECT_URIS") or os.environ.get(
+        "AI_HUB_PORTAL_OIDC_REDIRECT_URI", ""
+    )
+    logout = os.environ.get("AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS") or os.environ.get(
+        "AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI", ""
+    )
+    desired = _redirect_entries(authorization, "authorization") + _redirect_entries(
+        logout, "logout"
+    )
+    providers = list(provider_model.objects.filter(name="ai-hub-portal"))
+    if len(providers) != 1:
+        raise ConvergenceError("Expected exactly one ai-hub-portal OAuth2 provider")
+    provider = providers[0]
+    provider.redirect_uris = desired
+    provider.full_clean()
+    provider.save(update_fields=["redirect_uris"])
+    provider.refresh_from_db()
+    if provider.redirect_uris != desired:
+        raise ConvergenceError("AI Hub Portal redirect URI reconciliation did not converge")
+    print(f"Reconciled {len(desired)} AI Hub Portal redirect URIs", flush=True)
+
+
 def main():
     from authentik.blueprints.models import BlueprintInstance
     from authentik.blueprints.v1.tasks import apply_blueprint, blueprints_discovery
+    from authentik.providers.oauth2.models import OAuth2Provider
     from authentik.tasks.models import Task, TaskStatus
     from authentik.tenants.models import Tenant
 
@@ -105,6 +161,7 @@ def main():
         ).exclude(state__in=[TaskStatus.DONE, TaskStatus.REJECTED])
         wait_for_background_imports(instances, pending_tasks)
         apply_instances(instances, apply_blueprint)
+        reconcile_portal_redirect_uris(OAuth2Provider)
 
 
 if __name__ == "__main__":

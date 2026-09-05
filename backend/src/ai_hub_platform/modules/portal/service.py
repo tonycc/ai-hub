@@ -67,6 +67,8 @@ class LoginTransaction:
     code_verifier: str
     nonce: str
     redirect_path: str
+    portal_origin: str | None
+    redirect_uri: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +103,8 @@ class PortalSessionService:
         code_verifier: str,
         nonce: str,
         redirect_path: str,
+        portal_origin: str,
+        redirect_uri: str,
         ttl_seconds: int,
     ) -> None:
         now = datetime.now(UTC)
@@ -117,9 +121,11 @@ class PortalSessionService:
             sa.text(
                 """
                 INSERT INTO platform_core.portal_login_transaction
-                    (state_hash, code_verifier, nonce, redirect_path, expires_at)
+                    (state_hash, code_verifier, nonce, redirect_path,
+                     portal_origin, redirect_uri, expires_at)
                 VALUES
-                    (:state_hash, :code_verifier, :nonce, :redirect_path, :expires_at)
+                    (:state_hash, :code_verifier, :nonce, :redirect_path,
+                     :portal_origin, :redirect_uri, :expires_at)
                 """
             ),
             {
@@ -127,6 +133,8 @@ class PortalSessionService:
                 "code_verifier": code_verifier,
                 "nonce": nonce,
                 "redirect_path": redirect_path,
+                "portal_origin": portal_origin,
+                "redirect_uri": redirect_uri,
                 "expires_at": now + timedelta(seconds=ttl_seconds),
             },
         )
@@ -145,7 +153,8 @@ class PortalSessionService:
                     DELETE FROM platform_core.portal_login_transaction
                     WHERE state_hash = :state_hash
                       AND expires_at > CURRENT_TIMESTAMP
-                    RETURNING code_verifier, nonce, redirect_path
+                    RETURNING code_verifier, nonce, redirect_path,
+                              portal_origin, redirect_uri
                     """
                     ),
                     {"state_hash": secret_hash(state)},
@@ -162,6 +171,8 @@ class PortalSessionService:
             code_verifier=row["code_verifier"],
             nonce=row["nonce"],
             redirect_path=row["redirect_path"],
+            portal_origin=row["portal_origin"],
+            redirect_uri=row["redirect_uri"],
         )
 
     async def create_session(

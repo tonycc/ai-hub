@@ -155,5 +155,54 @@ fi
 grep -F 'explicit Authentik blueprint convergence failed' "${fixture}/identity.stderr" >/dev/null \
   || test_fail "worker CLI failure was not reported"
 
+# Candidate checks must never replace the active Compose override, including
+# preflight failures. Run with the native Bash 3.2 on macOS.
+mkdir -p "${fixture}/endpoints/generated"
+ENV_FILE="${fixture}/endpoints/runtime.env"
+printf 'AI_HUB_DEPLOY_ROOT=%s\nAI_HUB_SERVER_IP=192.168.33.20\n' \
+  "${fixture}/deploy" >"${ENV_FILE}"
+active_endpoint="${fixture}/endpoints/generated/compose.endpoints.yaml"
+printf 'active configuration\n' >"${active_endpoint}"
+cp "${ENV_FILE}" "${fixture}/original.env"
+for default_mode in omitted explicit; do
+  plan_args=(plan --env-file "${ENV_FILE}" --release-manifest "${fixture}/release.env"
+    --bind-address 192.168.33.20 --platform-origin https://192.168.33.20
+    --identity-origin https://192.168.33.20:8443)
+  if [[ "${default_mode}" == explicit ]]; then
+    plan_args+=(--platform-default-origin https://192.168.33.20
+      --identity-default-origin https://192.168.33.20:8443)
+  fi
+  /bin/bash "${project_root}/scripts/deploy/set-macmini-endpoints.sh" "${plan_args[@]}" \
+    >"${fixture}/plan.stdout" 2>"${fixture}/plan.stderr" \
+    || { cat "${fixture}/plan.stderr" >&2; test_fail "endpoint plan failed with ${default_mode} defaults"; }
+  grep -F 'AI_HUB_PLATFORM_DEFAULT_ORIGIN=https://192.168.33.20' "${fixture}/plan.stdout" >/dev/null \
+    || test_fail 'endpoint plan did not resolve its default Origin'
+done
+cmp "${ENV_FILE}" "${fixture}/original.env" || test_fail 'plan changed the active env'
+assert_equal 'active configuration' "$(cat "${active_endpoint}")" 'plan preserves active Compose'
+
+ACTION=check
+render_endpoint_compose
+first_check_file="${ENDPOINT_COMPOSE_FILE}"
+[[ "${first_check_file}" != "${active_endpoint}" && -f "${first_check_file}" ]] \
+  || test_fail 'check did not render an isolated candidate'
+render_endpoint_compose
+[[ "${first_check_file}" != "${ENDPOINT_COMPOSE_FILE}" ]] || test_fail 'checks reused a shared file'
+cleanup_deployment
+[[ ! -e "${ENDPOINT_COMPOSE_FILE}" ]] || test_fail 'successful check candidate was not cleaned'
+rm -f "${first_check_file}"
+assert_equal 'active configuration' "$(cat "${active_endpoint}")" 'check preserves active Compose'
+
+chmod 644 "${ENV_FILE}"
+if /bin/bash "${project_root}/scripts/deploy/macmini-image-deploy.sh" check \
+  --env-file "${ENV_FILE}" --release-manifest "${fixture}/release.env" \
+  >"${fixture}/check.stdout" 2>"${fixture}/check.stderr"; then
+  test_fail 'check accepted insecure env permissions'
+fi
+assert_equal 'active configuration' "$(cat "${active_endpoint}")" 'failed check preserves active Compose'
+for leftover in "${fixture}/endpoints/".compose.endpoints.check.*; do
+  [[ ! -e "${leftover}" ]] || test_fail 'failed check leaked its temporary Compose file'
+done
+
 printf 'AI Hub Mac mini image deployment smoke tests passed (%s, Bash %s)\n' \
   "$(uname -s)" "${BASH_VERSION}"

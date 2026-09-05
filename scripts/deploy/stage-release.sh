@@ -151,6 +151,10 @@ for required_path in \
   "${extracted_release}/deploy/compose.yaml" \
   "${extracted_release}/deploy/compose.intranet-ip.yaml" \
   "${extracted_release}/scripts/deploy/macmini-image-deploy.sh" \
+  "${extracted_release}/scripts/deploy/render-endpoint-compose.py" \
+  "${extracted_release}/scripts/deploy/configure-macmini-endpoints.py" \
+  "${extracted_release}/scripts/deploy/set-macmini-endpoints.sh" \
+  "${extracted_release}/scripts/deploy/issue-intranet-certificate.sh" \
   "${extracted_release}/scripts/deploy/promote-release.sh" \
   "${extracted_release}/scripts/deploy/rollback-release.sh" \
   "${extracted_release}/scripts/deploy/stage-release.sh" \

@@ -69,6 +69,7 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "20260901_core_0025" in sql
     assert "20260902_core_0026" in sql
     assert "20260902_core_0027" in sql
+    assert "20260905_core_0028" in sql
     assert "CREATE TABLE platform_core.application_admin_bootstrap" in sql
     assert "platform.application.bootstrap" in sql
     assert "platform.directory.read" in sql
@@ -126,6 +127,14 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert 'down_revision: str | None = "20260902_core_0026"' in core_0027
     assert "identity_directory_revision_state" in core_0027
     assert "assign_identity_directory_revision" in core_0027
+    core_0028 = (
+        BACKEND_ROOT / "migrations/versions/core/20260905_core_0028.py"
+    ).read_text()
+    assert 'down_revision: str | None = "20260902_core_0027"' in core_0028
+    assert 'release_phase = "expand"' in core_0028
+    assert 'rollback_compatible_with = {"20260902_core_0027"}' in core_0028
+    assert "portal_origin" in core_0028
+    assert "redirect_uri" in core_0028
 
 
 def test_platform_raw_migration_establishes_ingest_tables_without_core_objects() -> None:
