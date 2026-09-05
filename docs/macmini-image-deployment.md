@@ -2,6 +2,9 @@
 
 本文适用于以下固定边界：Apple Silicon Mac mini 是单机生产服务器，Docker Desktop 已安装，客户端只在局域网访问，只使用私有 IPv4 地址，不使用域名；应用通过镜像发布，服务器不克隆 Git 仓库、不在本机编译源码。Intel Mac mini 需要另行发布 `linux/amd64` 镜像，不能把本档位直接当作原生生产基线。
 
+需要由自动化 Agent 执行首次服务器配置时，使用
+[Mac mini Agent 部署执行手册](macmini-agent-deployment-runbook.md)。
+
 ## 1. 最终形态
 
 | 项目 | 约定 |
@@ -85,7 +88,7 @@ printf '%s' "$GHCR_READ_TOKEN" | docker login ghcr.io --username '<github-user>'
    启动，确认 Mac 重启并登录后 Docker 与容器能够恢复；
 2. 安装 GitHub CLI，并用只限目标公开仓库的只读凭据登录；安装 Docker Desktop 自带的
    Docker/Compose、`curl`、`openssl` 和 `shasum`；
-3. 在路由器/DHCP 服务中为 Mac mini 设置地址保留。初始 IP 可以晚于镜像构建确定，但第一次签发证书和启动前必须有一个实际的 RFC1918 地址，例如 `192.168.10.20`；
+3. 在路由器/DHCP 服务中为 Mac mini 设置地址保留。初始 IP 可以晚于镜像构建确定，但第一次签发证书和启动前必须有一个实际的 RFC1918 地址，例如 `192.168.33.20`；
 4. 不配置公网端口转发；主机防火墙只允许受信任局域网访问 TCP 443 和 8443；
 5. 为生产数据和 Docker Desktop 磁盘镜像预留足够空间，关闭自动睡眠，并准备
    `/Volumes/ai-hub-backups` 这类 NAS/异机文件系统挂载点。
@@ -140,8 +143,8 @@ bash scripts/deploy/init-intranet-ca.sh \
 ```bash
 bash scripts/deploy/issue-intranet-ip-certificate.sh \
   --ca-dir /absolute/private/ai-hub-ca \
-  --ip 192.168.10.20 \
-  --output-dir /absolute/staging/ai-hub-192.168.10.20
+  --ip 192.168.33.20 \
+  --output-dir /absolute/staging/ai-hub-192.168.33.20
 ```
 
 只把 staging 目录中的 `server.crt`、`server.key`、`root-ca.crt` 安全复制到 Mac mini。不要复制 `root-ca.key`。
@@ -164,18 +167,18 @@ PLATFORM_IMAGE="$(sed -n 's/^AI_HUB_PLATFORM_IMAGE_REF=//p' images.env)"
 PORTAL_IMAGE="$(sed -n 's/^AI_HUB_PORTAL_IMAGE_REF=//p' images.env)"
 
 bash scripts/deploy/generate-macmini-runtime-env.sh \
-  --ip 192.168.10.20 \
+  --ip 192.168.33.20 \
   --platform-image "$PLATFORM_IMAGE" \
   --portal-image "$PORTAL_IMAGE" \
   --repository tonycc/ai-hub \
-  --config-dir /Users/dshdeploy/services/ai-hub
+  --config-dir /Users/deploy/services/ai-hub
 ```
 
 这会创建：
 
-- `/Users/dshdeploy/services/ai-hub/runtime.env`（权限 `0600`，包含运行时、Release watcher、数据库和 OIDC 配置）；
-- `/Users/dshdeploy/services/ai-hub/backup.env`（权限 `0600`，只包含 `AI_HUB_BACKUP_KEY_BASE64`）；
-- `/Users/dshdeploy/services/ai-hub/tls/`（权限 `0700`）。
+- `/Users/deploy/services/ai-hub/runtime.env`（权限 `0600`，包含运行时、Release watcher、数据库和 OIDC 配置）；
+- `/Users/deploy/services/ai-hub/backup.env`（权限 `0600`，只包含 `AI_HUB_BACKUP_KEY_BASE64`）；
+- `/Users/deploy/services/ai-hub/tls/`（权限 `0700`）。
 
 立即把 `backup.env` 中的密钥托管到异机密钥管理系统，并验证可取回；不要把它复制到发布目录、`runtime.env`、镜像回滚文件或备份归档所在位置。本机文件是备份作业的受限工作副本，不是唯一副本。
 
@@ -183,11 +186,11 @@ bash scripts/deploy/generate-macmini-runtime-env.sh \
 
 ```bash
 install -m 0600 /path/from/staging/server.key \
-  "/Users/dshdeploy/services/ai-hub/tls/server.key"
+  "/Users/deploy/services/ai-hub/tls/server.key"
 install -m 0644 /path/from/staging/server.crt \
-  "/Users/dshdeploy/services/ai-hub/tls/server.crt"
+  "/Users/deploy/services/ai-hub/tls/server.crt"
 install -m 0644 /path/from/staging/root-ca.crt \
-  "/Users/dshdeploy/services/ai-hub/tls/root-ca.crt"
+  "/Users/deploy/services/ai-hub/tls/root-ca.crt"
 ```
 
 `runtime.env` 只生成一次。不要再次运行生成器覆盖它，否则会轮换数据库和 OIDC 密钥并导致现有数据不可用。IP 和镜像都有专用更新脚本。
@@ -196,7 +199,7 @@ install -m 0644 /path/from/staging/root-ca.crt \
 旁边的 `runtime.env.deployment-state`，在文件开头补入
 `AI_HUB_DEPLOY_ROOT=<runtime.env 所在的绝对目录>`、`AI_HUB_GITHUB_REPOSITORY`、
 `AI_HUB_AUTO_STAGE_ENABLED=true`、轮询间隔和本指南中的固定 `PATH`，再把该目录传给
-`install-release-watcher.sh`。新安装直接使用统一的 `/Users/dshdeploy/services/ai-hub`；
+`install-release-watcher.sh`。新安装直接使用统一的 `/Users/deploy/services/ai-hub`；
 旧安装如要迁移根目录，应另设维护窗口整体迁移配置、TLS 和部署状态，不能只移动
 `runtime.env`。
 
@@ -205,17 +208,17 @@ install -m 0644 /path/from/staging/root-ca.crt \
 证书准备好后，在首次下载的部署包根目录安装一次 watcher：
 
 ```bash
-bash scripts/deploy/install-release-watcher.sh /Users/dshdeploy/services/ai-hub
+bash scripts/deploy/install-release-watcher.sh /Users/deploy/services/ai-hub
 ```
 
 watcher 每 300 秒检查最新不可变 Release，验证来源并预拉取 digest 镜像，但绝不自动切换
 生产。确认 `automation/state/staged-release` 后执行首次提升：
 
 ```bash
-cat /Users/dshdeploy/services/ai-hub/automation/state/staged-release
-bash /Users/dshdeploy/services/ai-hub/releases/v2026.09.03-1/scripts/deploy/promote-release.sh \
+cat /Users/deploy/services/ai-hub/automation/state/staged-release
+bash /Users/deploy/services/ai-hub/releases/v2026.09.03-1/scripts/deploy/promote-release.sh \
   2026.09.03-1 \
-  /Users/dshdeploy/services/ai-hub
+  /Users/deploy/services/ai-hub
 ```
 
 提升脚本会校验 macOS、Docker Desktop、Compose、私有 IP、证书、发布清单和不可变镜像，
@@ -225,49 +228,76 @@ bash /Users/dshdeploy/services/ai-hub/releases/v2026.09.03-1/scripts/deploy/prom
 验证入口：
 
 ```bash
-curl --cacert "/Users/dshdeploy/services/ai-hub/tls/root-ca.crt" \
-  https://192.168.10.20/health/ready
-curl --cacert "/Users/dshdeploy/services/ai-hub/tls/root-ca.crt" \
-  https://192.168.10.20:8443/-/health/ready/
+curl --cacert "/Users/deploy/services/ai-hub/tls/root-ca.crt" \
+  https://192.168.33.20/health/ready
+curl --cacert "/Users/deploy/services/ai-hub/tls/root-ca.crt" \
+  https://192.168.33.20:8443/-/health/ready/
 ```
 
-然后从已安装根证书的局域网客户端打开 `https://192.168.10.20/`，完成一次门户登录。平台管理员用户名为 `ai-hub-platform-admin`，初始密码保存在 `runtime.env` 的 `AI_HUB_UAT_USER_PASSWORD`；authentik 自身的应急管理员为 `akadmin`，初始密码是 `AUTHENTIK_BOOTSTRAP_PASSWORD`。两者首次使用后都应以受控方式轮换。
+然后从已安装根证书的局域网客户端打开 `https://192.168.33.20/`，完成一次门户登录。平台管理员用户名为 `ai-hub-platform-admin`，初始密码保存在 `runtime.env` 的 `AI_HUB_UAT_USER_PASSWORD`；authentik 自身的应急管理员为 `akadmin`，初始密码是 `AUTHENTIK_BOOTSTRAP_PASSWORD`。两者首次使用后都应以受控方式轮换。
 
 常用命令：
 
 ```bash
-bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh status \
-  --env-file /Users/dshdeploy/services/ai-hub/runtime.env
-bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh logs \
-  --env-file /Users/dshdeploy/services/ai-hub/runtime.env
-bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh down \
-  --env-file /Users/dshdeploy/services/ai-hub/runtime.env
+bash /Users/deploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh status \
+  --env-file /Users/deploy/services/ai-hub/runtime.env
+bash /Users/deploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh logs \
+  --env-file /Users/deploy/services/ai-hub/runtime.env
+bash /Users/deploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh down \
+  --env-file /Users/deploy/services/ai-hub/runtime.env
 ```
 
 `down` 保留 PostgreSQL 和 authentik 命名卷；不要附加 `-v`。
 
 首次成功启动后还会写入部署根目录下的 `runtime.env.deployment-state`（权限 `0600`），其中只有当前/上一镜像引用、live migration head 和回滚兼容标志，不含密钥。部署根目录同时使用与 dsh-work 一致的 `current`、`previous`、`releases`、`release-artifacts`、`automation/state` 和 `logs` 结构。
 
-## 7. 后续更换 IP
+## 7. 增加、更换 IP 或增加固定域名
 
-镜像与 IP 无关，不需要重新构建。变更顺序固定为：
-
-1. 在 DHCP 中确定新地址；
-2. 在运维电脑用原根 CA 为新 IP 签发新的 `server.crt/server.key`；
-3. 把新的服务器证书和密钥替换到 Mac mini TLS 目录；
-4. 只修改运行时 IP，然后重新部署；
-5. 用新地址验证健康与 OIDC 登录。
+镜像与入口地址无关，不需要重新构建。直接 IP 和固定域名都是正式入口。先在 DHCP/网卡及
+企业 DNS 中准备地址，再在离线运维电脑用原根 CA 签发同时覆盖旧、新 IP 和域名的证书：
 
 ```bash
-bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/set-macmini-ip.sh \
-  --env-file /Users/dshdeploy/services/ai-hub/runtime.env \
-  --ip 192.168.10.30
-bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/macmini-image-deploy.sh deploy \
-  --env-file /Users/dshdeploy/services/ai-hub/runtime.env \
-  --release-manifest /Users/dshdeploy/services/ai-hub/current/release.env
+bash scripts/deploy/issue-intranet-certificate.sh \
+  --ca-dir /absolute/private/company-intranet-ca \
+  --ip 192.168.33.20 \
+  --ip 192.168.101.20 \
+  --output-dir /absolute/staging/ai-hub-endpoints
 ```
 
-只要继续使用原根 CA，客户端不需要重新安装根证书。旧 IP 的证书不能用于新 IP；只改 `runtime.env` 而不重签证书会被预检拒绝。脚本会同步改变 issuer、回调地址、门户地址和品牌地址。由于 authentik 只比较 blueprint 文件原始摘要、不会因 `!Env` 值变化自动重应用，部署脚本会重建 worker 后通过容器内受信 `ak shell`，按 baseline、production 的固定顺序调度并等待每一次蓝图任务完成，同时核对成功状态和新的应用时间；任一步失败都不会记录为成功部署。
+只把新 `server.crt`、`server.key`、`root-ca.crt` 安装到 Mac mini 既有 TLS 路径；不要复制
+根 CA 私钥。扩展证书仍覆盖旧入口，因此地址应用失败时无需回滚证书。随后使用统一命令：
+
+```bash
+bash /Users/deploy/services/ai-hub/current/scripts/deploy/set-macmini-endpoints.sh plan \
+  --env-file /Users/deploy/services/ai-hub/runtime.env \
+  --release-manifest /Users/deploy/services/ai-hub/current/release.env \
+  --bind-address 192.168.33.20 \
+  --bind-address 192.168.101.20 \
+  --platform-origin https://192.168.33.20 \
+  --platform-origin https://192.168.101.20 \
+  --identity-origin https://192.168.33.20:8443 \
+  --identity-origin https://192.168.101.20:8443 \
+  --platform-default-origin https://192.168.33.20 \
+  --identity-default-origin https://192.168.33.20:8443
+```
+
+确认预览后把 `plan` 替换为 `check`。检查通过后替换为 `apply` 并追加 `--confirm`。恢复上一
+份地址配置使用同一命令的 `rollback --confirm`，不再重复传入地址列表。旧的
+`set-macmini-ip.sh` 仅保留单 IP 兼容用途。
+
+当前已确认的第二地址为 `192.168.101.20`，因此第一次执行只启用上述两个 IP。企业域名
+稍后确定时，重新签发包含原有两个 IP 和新 DNS SAN 的证书，再向同一命令追加域名 Origin
+并把默认 Origin 切换为固定域名；不需要重新构建镜像。
+
+`check` 会验证所有 IP 已分配到 Mac 网卡、所有 IP/域名都在证书 SAN 中、Compose 可解析、
+镜像和 Release 清单仍可信。`apply` 会与 Release 暂存/提升互斥，自动对账 Authentik Portal
+Provider 的所有严格回调，重建无状态 Traefik，并逐一检查平台和认证入口；失败会恢复上一
+份 `runtime.env` 并重新应用旧入口。
+
+只要继续使用原根 CA，客户端不需要重新安装根证书。域名不变而只修改企业 DNS 的 A 记录
+时不需要重签证书；新增直接访问 IP 或新域名且尚未包含在 SAN 中时必须重签。
+
+由于 authentik 只比较 blueprint 文件原始摘要、不会因 `!Env` 值变化自动重应用，部署脚本会重建 worker 后通过容器内受信 `ak shell`，按 baseline、production 的固定顺序调度并等待每一次蓝图任务完成，同时核对成功状态和新的应用时间；任一步失败都不会记录为成功部署。
 
 蓝图写入是运维权限，不复用 `platform-api` 的 `AI_HUB_AUTHENTIK_API_TOKEN`，也不向该容器注入超管 token。原 automation 账号保留业务凭据管理所需的最小权限，蓝图权限仅用于只读查询。`view_blueprintinstance` 不保证 POST apply 被授权，不能通过给业务账号增加 flows/stages/rbac 管理权限来解决部署问题。
 
@@ -276,9 +306,9 @@ bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/macmini-image-deplo
 watcher 自动下载、验证并预拉取新 Release，但只写入 `staged-release`。先由异机/NAS 备份作业创建并完整解密校验一个 `storage_class=off-host`、`profile=base-access` 的备份；归档、`.sha256` 和 `.verified.json` 必须位于同一异机挂载目录。将新鲜验证回执的绝对路径传给提升脚本：
 
 ```bash
-bash /Users/dshdeploy/services/ai-hub/releases/v2026.09.04-1/scripts/deploy/promote-release.sh \
+bash /Users/deploy/services/ai-hub/releases/v2026.09.04-1/scripts/deploy/promote-release.sh \
   2026.09.04-1 \
-  /Users/dshdeploy/services/ai-hub \
+  /Users/deploy/services/ai-hub \
   --backup-receipt /Volumes/ai-hub-backups/ai-hub-backup-<id>.tar.aesgcm.verified.json
 ```
 
@@ -287,9 +317,9 @@ bash /Users/dshdeploy/services/ai-hub/releases/v2026.09.04-1/scripts/deploy/prom
 提升脚本只会在 `runtime.env` 旁保存权限为 `0600`、仅含两个旧镜像引用的回滚文件，不会复制数据库/OIDC/备份密钥。若发布状态和 live-data 门禁确认可回滚，请执行统一回滚入口并再次提供新鲜备份回执：
 
 ```bash
-bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/rollback-release.sh \
+bash /Users/deploy/services/ai-hub/current/scripts/deploy/rollback-release.sh \
   2026.09.03-1 \
-  /Users/dshdeploy/services/ai-hub \
+  /Users/deploy/services/ai-hub \
   --backup-receipt /Volumes/ai-hub-backups/ai-hub-backup-<id>.tar.aesgcm.verified.json
 ```
 
@@ -297,7 +327,7 @@ bash /Users/dshdeploy/services/ai-hub/current/scripts/deploy/rollback-release.sh
 
 ## 9. 与 dsh-work 的统一运维口径
 
-两个项目都位于 `/Users/dshdeploy/services/<project>`，都使用 `runtime.env`、`releases/`、
+两个项目都位于 `/Users/deploy/services/<project>`，都使用 `runtime.env`、`releases/`、
 `current`、`previous`、`release-artifacts/`、`automation/state/` 和 `logs/`；普通 push 只跑
 CI，生产制品都由 GitHub Actions 人工批准后发布为不可变 Release，再由各自的 `launchd`
 watcher 发现并验证。它们的 Release、数据库、Compose project、备份和回滚互不依赖。

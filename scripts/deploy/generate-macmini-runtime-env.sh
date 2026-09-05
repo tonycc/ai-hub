@@ -90,7 +90,7 @@ fi
 [[ "${BACKUP_OUTPUT}" == /* ]] || fail "--backup-output must be an absolute path"
 [[ "${OUTPUT}" != "${BACKUP_OUTPUT}" ]] || fail "runtime and backup outputs must differ"
 [[ ! -e "${OUTPUT}" && ! -L "${OUTPUT}" ]] \
-  || fail "${OUTPUT} already exists; use set-macmini-ip.sh for a later IP change"
+  || fail "${OUTPUT} already exists; use set-macmini-endpoints.sh for later endpoint changes"
 [[ ! -e "${BACKUP_OUTPUT}" && ! -L "${BACKUP_OUTPUT}" ]] \
   || fail "${BACKUP_OUTPUT} already exists; preserve the existing backup key"
 
@@ -122,6 +122,7 @@ AI_HUB_ENVIRONMENT=production
 AI_HUB_APPLICATION_ID=ai-hub-platform
 AI_HUB_REFERENCE_APPLICATION_ENABLED=false
 AI_HUB_SERVER_IP=${SERVER_IP}
+AI_HUB_BIND_ADDRESSES=${SERVER_IP}
 AI_HUB_PLATFORM_HOST=\${AI_HUB_SERVER_IP}
 AI_HUB_AUTH_HOST=\${AI_HUB_SERVER_IP}
 AI_HUB_PLATFORM_HTTPS_PORT=${PLATFORM_PORT}
@@ -135,6 +136,12 @@ AI_HUB_PORTAL_OIDC_AUDIENCE=ai-hub-portal
 AI_HUB_PORTAL_OIDC_CLIENT_ID=ai-hub-portal
 AI_HUB_PORTAL_OIDC_REDIRECT_URI=https://\${AI_HUB_SERVER_IP}:${PLATFORM_PORT}/auth/callback
 AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI=https://\${AI_HUB_SERVER_IP}:${PLATFORM_PORT}/
+AI_HUB_PLATFORM_ORIGINS=https://\${AI_HUB_SERVER_IP}:${PLATFORM_PORT}
+AI_HUB_PLATFORM_DEFAULT_ORIGIN=https://\${AI_HUB_SERVER_IP}:${PLATFORM_PORT}
+AI_HUB_IDENTITY_ORIGINS=https://\${AI_HUB_SERVER_IP}:${AUTH_PORT}
+AI_HUB_IDENTITY_DEFAULT_ORIGIN=https://\${AI_HUB_SERVER_IP}:${AUTH_PORT}
+AI_HUB_PORTAL_OIDC_REDIRECT_URIS=https://\${AI_HUB_SERVER_IP}:${PLATFORM_PORT}/auth/callback
+AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS=https://\${AI_HUB_SERVER_IP}:${PLATFORM_PORT}/
 AI_HUB_AUTHENTIK_API_URL=http://authentik-server:9000/api/v3
 AI_HUB_AUTHENTIK_EXTERNAL_URL=https://\${AI_HUB_SERVER_IP}:${AUTH_PORT}
 AI_HUB_AUTHENTIK_BRAND_DOMAIN=\${AI_HUB_SERVER_IP}:${AUTH_PORT}

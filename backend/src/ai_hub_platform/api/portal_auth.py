@@ -17,6 +17,7 @@ from ai_hub_platform.api.dependencies import (
     SessionDependency,
 )
 from ai_hub_platform.api.errors import ApiError
+from ai_hub_platform.api.portal_origin import resolve_portal_request_origin
 from ai_hub_platform.modules.audit.service import AuditRecord, AuditService
 from ai_hub_platform.modules.portal.service import (
     PortalIdentityNotFoundError,
@@ -70,16 +71,17 @@ def _request_id(request: Request) -> str:
     return str(request.state.request_id)
 
 
-def _error_redirect(error_code: str) -> RedirectResponse:
-    return RedirectResponse(f"/?auth_error={quote(error_code)}", status_code=302)
+def _error_redirect(origin: str, error_code: str) -> RedirectResponse:
+    return RedirectResponse(f"{origin}/?auth_error={quote(error_code)}", status_code=302)
 
 
 def _oidc_logout_url(request: Request) -> str:
     settings = request.app.state.settings
+    origin = resolve_portal_request_origin(request)
     endpoint = f"{settings.portal_oidc_issuer.rstrip('/')}/end-session/"
     return (
         f"{endpoint}?client_id={quote(settings.portal_oidc_client_id)}"
-        f"&post_logout_redirect_uri={quote(settings.portal_oidc_logout_redirect_uri, safe='')}"
+        f"&post_logout_redirect_uri={quote(settings.portal_logout_uri_for_origin(origin), safe='')}"
     )
 
 
@@ -113,10 +115,12 @@ async def login(
     return_to: Annotated[str, Query(max_length=500)] = "/",
 ) -> RedirectResponse:
     settings = request.app.state.settings
+    portal_origin = resolve_portal_request_origin(request)
+    redirect_uri = settings.portal_redirect_uri_for_origin(portal_origin)
     nonce = secrets.token_urlsafe(32)
     authorization = await _create_authorization_request(
         request,
-        settings.portal_oidc_redirect_uri,
+        redirect_uri,
         nonce,
     )
     await PortalSessionService().create_login_transaction(
@@ -125,6 +129,8 @@ async def login(
         code_verifier=authorization.code_verifier,
         nonce=nonce,
         redirect_path=_safe_return_path(return_to),
+        portal_origin=portal_origin,
+        redirect_uri=redirect_uri,
         ttl_seconds=settings.portal_login_ttl_seconds,
     )
     return RedirectResponse(authorization.url, status_code=302)
@@ -138,15 +144,23 @@ async def callback(
     state: Annotated[str, Query(min_length=1, max_length=512)],
 ) -> RedirectResponse:
     settings = request.app.state.settings
+    request_origin = resolve_portal_request_origin(request)
     portal_sessions = PortalSessionService()
     try:
         transaction = await portal_sessions.consume_login_transaction(
             session,
             state=state,
         )
+        portal_origin = transaction.portal_origin or request_origin
+        if portal_origin != request_origin:
+            raise PortalLoginTransactionError("Portal callback Origin does not match login Origin")
+        expected_redirect_uri = settings.portal_redirect_uri_for_origin(portal_origin)
+        redirect_uri = transaction.redirect_uri or expected_redirect_uri
+        if redirect_uri != expected_redirect_uri:
+            raise PortalLoginTransactionError("Portal callback URI is not allowed")
         token = await _oidc_client(request).exchange_code(
             code,
-            settings.portal_oidc_redirect_uri,
+            redirect_uri,
             transaction.code_verifier,
         )
         verified = await _token_validator(request).verify(
@@ -164,13 +178,13 @@ async def callback(
         )
     except PortalLoginTransactionError:
         await _append_login_audit(request, session, "DENIED", "invalid_login_state")
-        return _error_redirect("invalid_login_state")
+        return _error_redirect(request_origin, "invalid_login_state")
     except OAuthProtocolError, TokenValidationError:
         await _append_login_audit(request, session, "DENIED", "token_exchange_failed")
-        return _error_redirect("token_exchange_failed")
+        return _error_redirect(request_origin, "token_exchange_failed")
     except PortalIdentityNotFoundError:
         await _append_login_audit(request, session, "DENIED", "identity_not_mapped")
-        return _error_redirect("identity_not_mapped")
+        return _error_redirect(request_origin, "identity_not_mapped")
 
     await _append_login_audit(
         request,
@@ -179,7 +193,7 @@ async def callback(
         None,
         actor_id=created.principal.subject,
     )
-    response = RedirectResponse(transaction.redirect_path, status_code=302)
+    response = RedirectResponse(f"{request_origin}{transaction.redirect_path}", status_code=302)
     cookie_secure = settings.environment not in {"local", "test"}
     max_age = max(
         1,

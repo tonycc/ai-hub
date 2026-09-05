@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
+from ipaddress import IPv4Address, IPv4Network
 from typing import Literal, Self
 from urllib.parse import SplitResult, unquote, urlsplit
 
@@ -20,6 +21,10 @@ _PLACEHOLDER_MARKERS = (
     "replace-me",
 )
 _STRICT_ENVIRONMENTS = {"integration", "uat", "production"}
+_DEFAULT_PORTAL_LOGOUT_REDIRECT_URI = "http://platform.localhost:8088/"
+_PRIVATE_IPV4_NETWORKS = tuple(
+    IPv4Network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 
 
 def _is_strict_environment(environment: Environment) -> bool:
@@ -160,6 +165,68 @@ def _validate_redirect_uri(value: str, *, field_name: str, strict: bool) -> None
         raise ValueError(f"{field_name} cannot use a local hostname outside local/test")
 
 
+def _normalize_origin(value: str, *, field_name: str, strict: bool) -> str:
+    if value != value.lower():
+        raise ValueError(f"{field_name} must use lowercase")
+    parsed = _parse_url(value, field_name=field_name, allowed_schemes={"http", "https"})
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"{field_name} cannot include credentials")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError(f"{field_name} must be an Origin without path, query, or fragment")
+    if strict and parsed.scheme != "https":
+        raise ValueError(f"{field_name} must use https outside local/test")
+    hostname = parsed.hostname or ""
+    if ":" in hostname:
+        raise ValueError(f"{field_name} does not support IPv6")
+    try:
+        address = IPv4Address(hostname)
+    except ValueError:
+        labels = hostname.split(".")
+        if strict and len(labels) < 2:
+            raise ValueError(f"{field_name} must use a complete DNS name") from None
+        if len(hostname) > 253 or any(
+            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) is None
+            for label in labels
+        ):
+            raise ValueError(f"{field_name} contains an invalid DNS name") from None
+    else:
+        if not any(address in network for network in _PRIVATE_IPV4_NETWORKS):
+            raise ValueError(f"{field_name} IPv4 address must be RFC1918 private")
+    normalized_port = parsed.port
+    if (parsed.scheme, normalized_port) in {("http", 80), ("https", 443)}:
+        normalized_port = None
+    port = f":{normalized_port}" if normalized_port is not None else ""
+    return f"{parsed.scheme}://{hostname}{port}"
+
+
+def _parse_origin_csv(value: str, *, field_name: str, strict: bool) -> tuple[str, ...]:
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError(f"{field_name} cannot contain control characters")
+    items = tuple(item.strip() for item in value.split(","))
+    if not items or any(not item for item in items):
+        raise ValueError(f"{field_name} cannot contain empty entries")
+    origins = tuple(
+        _normalize_origin(item, field_name=f"{field_name}[{index}]", strict=strict)
+        for index, item in enumerate(items)
+    )
+    if len(set(origins)) != len(origins):
+        raise ValueError(f"{field_name} cannot contain duplicate Origins")
+    return origins
+
+
+def _url_origin(value: str, *, field_name: str, strict: bool) -> str:
+    parsed = _parse_url(value, field_name=field_name, allowed_schemes={"http", "https"})
+    normalized_port = parsed.port
+    if (parsed.scheme, normalized_port) in {("http", 80), ("https", 443)}:
+        normalized_port = None
+    port = f":{normalized_port}" if normalized_port is not None else ""
+    return _normalize_origin(
+        f"{parsed.scheme}://{parsed.hostname}{port}",
+        field_name=field_name,
+        strict=strict,
+    )
+
+
 def _validate_internal_api_url(value: str, *, field_name: str, strict: bool) -> None:
     # Cluster-internal admin endpoints may legitimately use plain HTTP on the
     # private overlay network even in production: routing them through the
@@ -216,7 +283,11 @@ class Settings(_PlatformSettings):
     portal_oidc_client_id: str = "ai-hub-portal"
     portal_oidc_client_secret: SecretStr = SecretStr("local-only-portal-oidc-client-secret")
     portal_oidc_redirect_uri: str = "http://platform.localhost:8088/auth/callback"
-    portal_oidc_logout_redirect_uri: str = "http://platform.localhost:8088/"
+    portal_oidc_logout_redirect_uri: str = _DEFAULT_PORTAL_LOGOUT_REDIRECT_URI
+    platform_origins: str = ""
+    platform_default_origin: str = ""
+    portal_oidc_redirect_uris: str = ""
+    portal_oidc_logout_redirect_uris: str = ""
     portal_session_ttl_seconds: int = 900
     portal_login_ttl_seconds: int = 300
     portal_session_cookie_name: str = "ai_hub_portal_session"
@@ -273,6 +344,7 @@ class Settings(_PlatformSettings):
             field_name="portal_oidc_redirect_uri",
             strict=strict,
         )
+        self._portal_origin_configuration(strict=strict)
         _validate_internal_api_url(
             self.authentik_api_url,
             field_name="authentik_api_url",
@@ -366,6 +438,136 @@ class Settings(_PlatformSettings):
         if strict and _has_placeholder_secret(self.oidc_client_secret.get_secret_value()):
             raise ValueError("oidc_client_secret cannot use a placeholder outside local/test")
         return self
+
+    def portal_allowed_origins(self) -> tuple[str, ...]:
+        return self._portal_origin_configuration(
+            strict=_is_strict_environment(self.environment)
+        )[0]
+
+    def portal_default_origin_value(self) -> str:
+        return self._portal_origin_configuration(
+            strict=_is_strict_environment(self.environment)
+        )[1]
+
+    def portal_redirect_uri_for_origin(self, origin: str) -> str:
+        origins, _, redirects, _ = self._portal_origin_configuration(
+            strict=_is_strict_environment(self.environment)
+        )
+        try:
+            return redirects[origins.index(origin)]
+        except ValueError as error:
+            raise ValueError("portal request Origin is not allowed") from error
+
+    def portal_logout_uri_for_origin(self, origin: str) -> str:
+        origins, _, _, logout_uris = self._portal_origin_configuration(
+            strict=_is_strict_environment(self.environment)
+        )
+        try:
+            return logout_uris[origins.index(origin)]
+        except ValueError as error:
+            raise ValueError("portal request Origin is not allowed") from error
+
+    def _portal_origin_configuration(
+        self,
+        *,
+        strict: bool,
+    ) -> tuple[tuple[str, ...], str, tuple[str, ...], tuple[str, ...]]:
+        if not self.platform_origins.strip():
+            origin = _url_origin(
+                self.portal_oidc_redirect_uri,
+                field_name="portal_oidc_redirect_uri",
+                strict=strict,
+            )
+            logout_uri = self._legacy_logout_uri(origin=origin, strict=strict)
+            logout_origin = _url_origin(
+                logout_uri, field_name="portal_oidc_logout_redirect_uri", strict=strict
+            )
+            if logout_origin != origin:
+                raise ValueError("portal OIDC redirect and logout URI Origins must match")
+            return (
+                (origin,),
+                origin,
+                (self.portal_oidc_redirect_uri,),
+                (logout_uri,),
+            )
+
+        origins = _parse_origin_csv(
+            self.platform_origins,
+            field_name="platform_origins",
+            strict=strict,
+        )
+        default_origin = (
+            _normalize_origin(
+                self.platform_default_origin,
+                field_name="platform_default_origin",
+                strict=strict,
+            )
+            if self.platform_default_origin.strip()
+            else origins[0]
+        )
+        if default_origin not in origins:
+            raise ValueError("platform_default_origin must be listed in platform_origins")
+        redirects = self._portal_uri_list(
+            self.portal_oidc_redirect_uris,
+            origins=origins,
+            field_name="portal_oidc_redirect_uris",
+            default_path="/auth/callback",
+            strict=strict,
+        )
+        logout_uris = self._portal_uri_list(
+            self.portal_oidc_logout_redirect_uris,
+            origins=origins,
+            field_name="portal_oidc_logout_redirect_uris",
+            default_path="/",
+            strict=strict,
+        )
+        legacy_redirect_origin = _url_origin(
+            self.portal_oidc_redirect_uri,
+            field_name="portal_oidc_redirect_uri",
+            strict=strict,
+        )
+        legacy_logout_uri = self._legacy_logout_uri(origin=origins[0], strict=strict)
+        legacy_logout_origin = _url_origin(
+            legacy_logout_uri, field_name="portal_oidc_logout_redirect_uri", strict=strict
+        )
+        if (
+            legacy_redirect_origin not in origins
+            or redirects[origins.index(legacy_redirect_origin)] != self.portal_oidc_redirect_uri
+            or legacy_logout_origin not in origins
+            or logout_uris[origins.index(legacy_logout_origin)]
+            != legacy_logout_uri
+        ):
+            raise ValueError("multi-Origin portal settings conflict with legacy portal OIDC URIs")
+        return origins, default_origin, redirects, logout_uris
+
+    def _legacy_logout_uri(self, *, origin: str, strict: bool) -> str:
+        if strict and self.portal_oidc_logout_redirect_uri == _DEFAULT_PORTAL_LOGOUT_REDIRECT_URI:
+            return f"{origin}/"
+        return self.portal_oidc_logout_redirect_uri
+
+    @staticmethod
+    def _portal_uri_list(
+        value: str,
+        *,
+        origins: tuple[str, ...],
+        field_name: str,
+        default_path: str,
+        strict: bool,
+    ) -> tuple[str, ...]:
+        uris = (
+            tuple(f"{origin}{default_path}" for origin in origins)
+            if not value.strip()
+            else tuple(item.strip() for item in value.split(","))
+        )
+        if len(uris) != len(origins) or any(not uri for uri in uris):
+            raise ValueError(f"{field_name} must have exactly one URI per platform Origin")
+        for index, (origin, uri) in enumerate(zip(origins, uris, strict=True)):
+            _validate_redirect_uri(uri, field_name=f"{field_name}[{index}]", strict=strict)
+            if _url_origin(uri, field_name=f"{field_name}[{index}]", strict=strict) != origin:
+                raise ValueError(f"{field_name}[{index}] must use the matching platform Origin")
+        if len(set(uris)) != len(uris):
+            raise ValueError(f"{field_name} cannot contain duplicate URIs")
+        return uris
 
 
 class CoreMigrationSettings(_PlatformSettings):

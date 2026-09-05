@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Update only AI_HUB_SERVER_IP in an existing runtime env. Secrets and image
-# references are preserved. A new IP certificate must be issued before deploy.
+# Legacy single-IP editor. New multi-entry changes should use
+# set-macmini-endpoints.sh so every derived URL is changed consistently.
 
 set -euo pipefail
 
