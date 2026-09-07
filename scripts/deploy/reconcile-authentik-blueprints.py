@@ -120,7 +120,24 @@ def _redirect_entries(value, redirect_type):
     return entries
 
 
+def _redirect_uri_models(entries, redirect_uri, matching_mode, redirect_uri_type):
+    return [
+        redirect_uri(
+            matching_mode=matching_mode(entry["matching_mode"]),
+            url=entry["url"],
+            redirect_uri_type=redirect_uri_type(entry["redirect_uri_type"]),
+        )
+        for entry in entries
+    ]
+
+
 def reconcile_portal_redirect_uris(provider_model):
+    from authentik.providers.oauth2.models import (
+        RedirectURI,
+        RedirectURIMatchingMode,
+        RedirectURIType,
+    )
+
     authorization = os.environ.get("AI_HUB_PORTAL_OIDC_REDIRECT_URIS") or os.environ.get(
         "AI_HUB_PORTAL_OIDC_REDIRECT_URI", ""
     )
@@ -130,15 +147,25 @@ def reconcile_portal_redirect_uris(provider_model):
     desired = _redirect_entries(authorization, "authorization") + _redirect_entries(
         logout, "logout"
     )
+    desired_models = _redirect_uri_models(
+        desired,
+        RedirectURI,
+        RedirectURIMatchingMode,
+        RedirectURIType,
+    )
     providers = list(provider_model.objects.filter(name="ai-hub-portal"))
     if len(providers) != 1:
         raise ConvergenceError("Expected exactly one ai-hub-portal OAuth2 provider")
     provider = providers[0]
-    provider.redirect_uris = desired
-    provider.full_clean()
-    provider.save(update_fields=["redirect_uris"])
+    provider.redirect_uris = desired_models
+    # Authentik's inherited Provider model rejects unrelated optional fields
+    # during full_clean(); the URI values have already been strictly validated
+    # and converted to Authentik's own RedirectURI dataclasses above.
+    # ``redirect_uris`` is an Authentik property backed by ``_redirect_uris``;
+    # Django update_fields must name the concrete JSONField.
+    provider.save(update_fields=["_redirect_uris"])
     provider.refresh_from_db()
-    if provider.redirect_uris != desired:
+    if provider.redirect_uris != desired_models:
         raise ConvergenceError("AI Hub Portal redirect URI reconciliation did not converge")
     print(f"Reconciled {len(desired)} AI Hub Portal redirect URIs", flush=True)
 

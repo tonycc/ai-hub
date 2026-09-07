@@ -179,3 +179,38 @@ def test_automation_token_keeps_only_read_only_blueprint_permissions() -> None:
     # blueprint writes from this token's deployment responsibilities.
     assert "authentik_providers_oauth2.change_oauth2provider" in permissions
     assert "authentik_core.reset_user_password" in permissions
+
+
+def test_redirect_entries_are_converted_to_authentik_models() -> None:
+    from dataclasses import dataclass
+
+    helper = load_helper()
+
+    @dataclass(frozen=True)
+    class RedirectURI:
+        matching_mode: str
+        url: str
+        redirect_uri_type: str
+
+    entries = helper["_redirect_entries"](
+        "https://a.example.com/auth/callback,https://b.example.com/auth/callback",
+        "authorization",
+    )
+
+    def matching_mode(value: str) -> str:
+        return f"mode:{value}"
+
+    def redirect_uri_type(value: str) -> str:
+        return f"type:{value}"
+
+    models = helper["_redirect_uri_models"](
+        entries,
+        RedirectURI,
+        matching_mode,
+        redirect_uri_type,
+    )
+
+    assert models == [
+        RedirectURI("mode:strict", "https://a.example.com/auth/callback", "type:authorization"),
+        RedirectURI("mode:strict", "https://b.example.com/auth/callback", "type:authorization"),
+    ]
