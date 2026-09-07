@@ -194,3 +194,11 @@ def test_m1_revokes_the_authoritative_application_credential() -> None:
 
     assert "UPDATE platform_core.application_credential SET status = 'REVOKED'" in runtime_gate
     assert "UPDATE platform_core.application SET service_subject = NULL" not in runtime_gate
+
+
+def test_m1_treats_revoked_credentials_as_authentication_failures() -> None:
+    runtime_gate = (PROJECT_ROOT / "scripts/ci/m1-runtime.sh").read_text(encoding="utf-8")
+
+    assert 'm1_expect_code 401 "${m1_revoked_code}"' in runtime_gate
+    assert '.error_code == "invalid_issuer"' in runtime_gate
+    assert "action = 'platform.access.authenticate'" in runtime_gate

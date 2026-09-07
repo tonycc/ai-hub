@@ -259,8 +259,10 @@ def test_m4_credential_migration_is_expand_only_and_old_schema_compatible() -> N
         "20260901_core_0025",
         "20260902_core_0026",
         "20260902_core_0027",
+        "20260905_core_0028",
     )
     assert transitions["core"].phases == (
+        "expand",
         "expand",
         "expand",
         "expand",

@@ -12,6 +12,7 @@ from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_hub_platform.api.errors import ApiError
+from ai_hub_platform.api.portal_origin import request_origin_header_matches
 from ai_hub_platform.modules.audit.service import AuditRecord, AuditService
 from ai_hub_platform.modules.portal.service import (
     PortalPrincipal,
@@ -274,6 +275,7 @@ async def _validate_portal_csrf(
     csrf_valid = bool(
         csrf_header
         and csrf_cookie
+        and request_origin_header_matches(request)
         and hmac.compare_digest(csrf_header, csrf_cookie)
         and hmac.compare_digest(secret_hash(csrf_header), principal.csrf_hash)
     )

@@ -97,7 +97,11 @@ class RegisteredOidcTokenValidator:
                              AND e.environment = c.environment
                             WHERE c.issuer = :issuer
                               AND c.client_id = ANY(CAST(:audiences AS varchar[]))
-                              AND c.status IN ('ACTIVE', 'DRAINING', 'REVOKED')
+                              -- A revoked credential must not route either
+                              -- newly-issued or still-unexpired tokens. The
+                              -- DRAINING state is the intentional overlap
+                              -- window during rotation.
+                              AND c.status IN ('ACTIVE', 'DRAINING')
                               AND a.status = 'ACTIVE'
                               AND e.status = 'ACTIVE'
                               AND (c.expires_at IS NULL

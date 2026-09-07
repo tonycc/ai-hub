@@ -67,6 +67,9 @@ services:
 
   traefik:
     command: ["--configFile=/etc/traefik/traefik.yaml"]
+    environment:
+      AI_HUB_PLATFORM_HOST_RULE: "Host(`${AI_HUB_SERVER_IP:?Set AI_HUB_SERVER_IP}`)"
+      AI_HUB_IDENTITY_HOST_RULE: "Host(`${AI_HUB_SERVER_IP:?Set AI_HUB_SERVER_IP}`)"
     ports: !override
       - "${AI_HUB_SERVER_IP:?Set AI_HUB_SERVER_IP}:${AI_HUB_PLATFORM_HTTPS_PORT:-443}:443"
       - "${AI_HUB_SERVER_IP:?Set AI_HUB_SERVER_IP}:${AI_HUB_AUTH_HTTPS_PORT:-8443}:8443"

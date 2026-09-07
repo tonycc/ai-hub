@@ -43,17 +43,20 @@ for deploy_script in \
   scripts/deploy/generate-macmini-runtime-env.sh \
   scripts/deploy/init-intranet-ca.sh \
   scripts/deploy/install-release-watcher.sh \
+  scripts/deploy/issue-intranet-certificate.sh \
   scripts/deploy/issue-intranet-ip-certificate.sh \
   scripts/deploy/macmini-image-deploy.sh \
   scripts/deploy/prepare-intranet-ca-bundle.sh \
   scripts/deploy/promote-release.sh \
   scripts/deploy/rollback-release.sh \
   scripts/deploy/set-macmini-images.sh \
+  scripts/deploy/set-macmini-endpoints.sh \
   scripts/deploy/set-macmini-ip.sh \
   scripts/deploy/stage-release.sh \
   scripts/deploy/watch-release.sh; do
   bash -n "${deploy_script}"
 done
+python3 -c "import ast; from pathlib import Path; [ast.parse(Path(path).read_text()) for path in ('scripts/deploy/configure-macmini-endpoints.py', 'scripts/deploy/render-endpoint-compose.py')]"
 bash -n scripts/ci/macmini-image-deploy.test.sh
 bash -n scripts/ci/macmini-authentik-runtime.sh
 bash -n scripts/ci/macmini-release-watcher.test.sh
@@ -111,6 +114,56 @@ bash scripts/deploy/issue-intranet-ip-certificate.sh \
   --ca-dir "${DEPLOY_TMP}/offline-ca" \
   --ip "${TEST_IP}" \
   --output-dir "${ISSUED_DIR}" >/dev/null 2>&1
+
+MULTI_IP=192.168.51.20
+bash scripts/deploy/issue-intranet-certificate.sh \
+  --ca-dir "${DEPLOY_TMP}/offline-ca" \
+  --ip "${TEST_IP}" --ip "${MULTI_IP}" \
+  --dns aihub.example.com --dns auth.example.com \
+  --output-dir "${DEPLOY_TMP}/issued-multi" >/dev/null 2>&1
+openssl x509 -in "${DEPLOY_TMP}/issued-multi/server.crt" -noout -text \
+  | grep -F "IP Address:${MULTI_IP}" >/dev/null
+openssl x509 -in "${DEPLOY_TMP}/issued-multi/server.crt" -noout -text \
+  | grep -F 'DNS:auth.example.com' >/dev/null
+
+python3 scripts/deploy/configure-macmini-endpoints.py \
+  --env-file "${RUNTIME_ENV}" --output "${DEPLOY_TMP}/multi-runtime.env" \
+  --bind-address "${TEST_IP}" --bind-address "${MULTI_IP}" \
+  --platform-origin "https://${TEST_IP}" --platform-origin "https://${MULTI_IP}" \
+  --platform-origin https://aihub.example.com \
+  --identity-origin "https://${TEST_IP}:8443" --identity-origin "https://${MULTI_IP}:8443" \
+  --identity-origin https://auth.example.com:8443 \
+  --platform-default-origin https://aihub.example.com \
+  --identity-default-origin https://auth.example.com:8443
+python3 scripts/deploy/render-endpoint-compose.py \
+  --env-file "${DEPLOY_TMP}/multi-runtime.env" \
+  --output "${DEPLOY_TMP}/compose.endpoints.yaml" >/dev/null
+grep -q "${MULTI_IP}:443:443" "${DEPLOY_TMP}/compose.endpoints.yaml"
+grep -q 'Host(`aihub.example.com`)' "${DEPLOY_TMP}/compose.endpoints.yaml"
+grep -q 'AI_HUB_PORTAL_OIDC_REDIRECT_URIS=.*aihub.example.com/auth/callback' \
+  "${DEPLOY_TMP}/multi-runtime.env"
+docker compose --env-file "${DEPLOY_TMP}/multi-runtime.env" \
+  -f deploy/compose.yaml -f deploy/compose.intranet-ip.yaml \
+  -f "${DEPLOY_TMP}/compose.endpoints.yaml" --profile base-access \
+  config --format json >"${DEPLOY_TMP}/multi-compose.json"
+jq -e --arg second_ip "${MULTI_IP}" '
+  ([.services.traefik.ports[] | select(.host_ip == $second_ip)] | length) == 2
+  and (.services.traefik.environment.AI_HUB_PLATFORM_HOST_RULE
+    | contains("Host(`aihub.example.com`)"))
+  and (.services.traefik.environment.AI_HUB_IDENTITY_HOST_RULE
+    | contains("Host(`auth.example.com`)"))
+' "${DEPLOY_TMP}/multi-compose.json" >/dev/null
+python3 scripts/deploy/configure-macmini-endpoints.py \
+  --env-file "${RUNTIME_ENV}" --output "${DEPLOY_TMP}/public-origin.env" \
+  --bind-address "${TEST_IP}" \
+  --platform-origin "https://${TEST_IP}" --platform-origin https://203.0.113.10 \
+  --identity-origin "https://${TEST_IP}:8443"
+if python3 scripts/deploy/render-endpoint-compose.py \
+  --env-file "${DEPLOY_TMP}/public-origin.env" \
+  --output "${DEPLOY_TMP}/public-origin.yaml" >/dev/null 2>&1; then
+  fail "endpoint renderer accepted a public IP Origin"
+fi
+python3 -c 'import runpy; module = runpy.run_path("scripts/deploy/reconcile-authentik-blueprints.py"); entries = module["_redirect_entries"]("https://a.example.com/auth/callback,https://b.example.com/auth/callback", "authorization"); assert len(entries) == 2 and all(item["matching_mode"] == "strict" for item in entries)'
 
 install -m 0600 "${ISSUED_DIR}/server.key" "${CONFIG_DIR}/tls/server.key"
 install -m 0644 "${ISSUED_DIR}/server.crt" "${CONFIG_DIR}/tls/server.crt"

@@ -359,12 +359,15 @@ m1_revoked_code="$(curl --silent --show-error --max-time 15 \
 m1_psql -c \
   "UPDATE platform_core.application_credential SET status = 'ACTIVE', revoked_at = NULL WHERE application_id = 'standalone-example' AND environment = 'local';" \
   >/dev/null
-m1_expect_code 403 "${m1_revoked_code}" "revoked service binding"
+# Revoked credentials are excluded during token routing, so the still-valid
+# token is rejected at the authentication boundary before service binding
+# authorization can run. This must remain a 401/invalid_issuer response.
+m1_expect_code 401 "${m1_revoked_code}" "revoked service credential"
 jq --exit-status \
-  '.error_code == "service_identity_revoked" and .request_id == "m1-revoked-service"' \
+  '.error_code == "invalid_issuer" and .request_id == "m1-revoked-service"' \
   "${M1_WORK_DIR}/revoked-service.json" >/dev/null
 m1_assert_audit m1-revoked-service \
-  "result = 'DENIED' AND error_code = 'service_identity_revoked'"
+  "action = 'platform.access.authenticate' AND result = 'DENIED' AND error_code = 'invalid_issuer'"
 
 m1_note "verifying cached JWKS during a short authentik outage"
 sleep 2

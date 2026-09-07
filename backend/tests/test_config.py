@@ -19,6 +19,59 @@ def test_local_runtime_defaults_are_valid(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.oidc_issuer.startswith("http://localhost:")
 
 
+def test_portal_supports_multiple_exact_origins_with_legacy_compatibility() -> None:
+    settings = Settings(
+        _env_file=None,  # pyright: ignore[reportCallIssue]
+        portal_oidc_redirect_uri="http://192.168.33.20:8088/auth/callback",
+        portal_oidc_logout_redirect_uri="http://192.168.33.20:8088/",
+        platform_origins=(
+            "http://192.168.33.20:8088,http://platform.example.com:8088"
+        ),
+        platform_default_origin="http://platform.example.com:8088",
+        portal_oidc_redirect_uris=(
+            "http://192.168.33.20:8088/auth/callback,"
+            "http://platform.example.com:8088/auth/callback"
+        ),
+        portal_oidc_logout_redirect_uris=(
+            "http://192.168.33.20:8088/,http://platform.example.com:8088/"
+        ),
+    )
+
+    assert settings.portal_allowed_origins() == (
+        "http://192.168.33.20:8088",
+        "http://platform.example.com:8088",
+    )
+    assert settings.portal_default_origin_value() == "http://platform.example.com:8088"
+    assert settings.portal_redirect_uri_for_origin("http://192.168.33.20:8088") == (
+        "http://192.168.33.20:8088/auth/callback"
+    )
+    assert settings.portal_logout_uri_for_origin("http://platform.example.com:8088") == (
+        "http://platform.example.com:8088/"
+    )
+
+
+def test_portal_rejects_public_ip_duplicate_and_conflicting_origins() -> None:
+    with pytest.raises(ValidationError, match="RFC1918"):
+        Settings(
+            _env_file=None,  # pyright: ignore[reportCallIssue]
+            platform_origins="http://203.0.113.10:8088",
+        )
+    with pytest.raises(ValidationError, match="duplicate Origins"):
+        Settings(
+            _env_file=None,  # pyright: ignore[reportCallIssue]
+            portal_oidc_redirect_uri="http://192.168.33.20:8088/auth/callback",
+            portal_oidc_logout_redirect_uri="http://192.168.33.20:8088/",
+            platform_origins=(
+                "http://192.168.33.20:8088,http://192.168.33.20:8088"
+            ),
+        )
+    with pytest.raises(ValidationError, match="conflict with legacy"):
+        Settings(
+            _env_file=None,  # pyright: ignore[reportCallIssue]
+            platform_origins="http://192.168.33.20:8088",
+        )
+
+
 def test_production_rejects_local_runtime_defaults() -> None:
     with pytest.raises(ValidationError, match="database_url cannot use a local hostname"):
         Settings(environment="production")
