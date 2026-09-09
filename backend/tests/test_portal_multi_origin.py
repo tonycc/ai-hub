@@ -73,3 +73,21 @@ def _request(
             "state": {},
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_logout_without_retained_id_token_uses_valid_no_redirect_request() -> None:
+    from urllib.parse import parse_qs, urlsplit
+
+    from ai_hub_platform.api.portal_auth import logout_redirect
+
+    settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+    request = _request(settings, host="platform.localhost:8088")
+    response = await logout_redirect(request)
+    assert response.status_code == 302
+    assert response.headers["Cache-Control"] == "no-store"
+    url = urlsplit(response.headers["Location"])
+    assert url.path.endswith("/application/o/ai-hub-portal/end-session/")
+    assert parse_qs(url.query) == {"client_id": [settings.portal_oidc_client_id]}
+    with pytest.raises(ApiError, match="not allowed"):
+        await logout_redirect(_request(settings, host="unknown.example.com:8088"))

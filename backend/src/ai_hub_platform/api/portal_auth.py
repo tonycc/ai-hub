@@ -77,12 +77,13 @@ def _error_redirect(origin: str, error_code: str) -> RedirectResponse:
 
 def _oidc_logout_url(request: Request) -> str:
     settings = request.app.state.settings
-    origin = resolve_portal_request_origin(request)
+    resolve_portal_request_origin(request)
     endpoint = f"{settings.portal_oidc_issuer.rstrip('/')}/end-session/"
-    return (
-        f"{endpoint}?client_id={quote(settings.portal_oidc_client_id)}"
-        f"&post_logout_redirect_uri={quote(settings.portal_logout_uri_for_origin(origin), safe='')}"
-    )
+    # Portal sessions retain identity and authorization, not upstream ID Tokens.
+    # Authentik requires id_token_hint whenever post_logout_redirect_uri is set.
+    # Existing sessions therefore use the standard no-redirect logout request;
+    # Authentik ends SSO and owns the signed-out landing flow.
+    return f"{endpoint}?client_id={quote(settings.portal_oidc_client_id, safe='')}"
 
 
 async def _create_authorization_request(
@@ -276,7 +277,9 @@ async def logout(
 async def logout_redirect(request: Request) -> RedirectResponse:
     """End the upstream OIDC session after the platform session is revoked."""
 
-    return RedirectResponse(_oidc_logout_url(request), status_code=302)
+    response = RedirectResponse(_oidc_logout_url(request), status_code=302)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @session_router.get("/session", response_model=PortalSessionResponse)

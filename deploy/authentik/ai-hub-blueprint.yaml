@@ -27,6 +27,7 @@ entries:
       branding_logo: !Env [AI_HUB_BRAND_ICON_URL, http://platform.localhost:8088/ai-hub-icon.svg]
       branding_favicon: !Env [AI_HUB_BRAND_ICON_URL, http://platform.localhost:8088/ai-hub-icon.svg]
       attributes:
+        ai_hub_portal_url: !Env [AI_HUB_PORTAL_EXTERNAL_URL, http://platform.localhost:8088]
         settings:
           locale: zh-Hans
           theme:

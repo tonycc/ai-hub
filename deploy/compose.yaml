@@ -292,6 +292,10 @@ services:
         target: /data
         volume:
           nocopy: true
+      - type: bind
+        source: ./authentik/templates/if/user.html
+        target: /templates/if/user.html
+        read_only: true
     shm_size: 512mb
     restart: unless-stopped
 
