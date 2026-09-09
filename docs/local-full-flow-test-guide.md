@@ -584,3 +584,13 @@ docker compose --env-file .env -f deploy/compose.yaml \
 - [发布与回滚手册](runbooks/release-rollback.md)
 - [备份恢复手册](runbooks/backup-restore.md)
 - [告警响应手册](runbooks/alert-response.md)
+
+### Authentik 用户目录入口
+
+AI Hub 使用 `deploy/authentik/templates/if/user.html` 覆盖 Authentik 的用户页模板，挂载到 `/templates/if/user.html`。空 hash 和 `#/library` 跳转至品牌属性 `ai_hub_portal_url`（蓝图从 `AI_HUB_PORTAL_EXTERNAL_URL` 读取），账号设置等其他用户页继续加载锁定版本的原生界面。来自账号设置的 hash 导航也受同一规则处理；此功能是入口体验控制，不是业务授权边界。
+
+只覆盖用户页模板，不修改 OIDC、登录、退出、后台或安全设置路由。业务应用显式提供的退出回跳仍由身份平台校验并处理，不统一改成门户。部署时同步品牌蓝图并重建 authentik-server 以加载模板挂载；已有本地环境只同步本地蓝图，不能应用生产蓝图。Mac mini 使用对应发布流程生效。升级 Authentik 时检查 `base/header_js.html`、`UserInterface` 资源入口及 hash 路由兼容性。
+
+回归检查：`node --test scripts/ci/authentik-user-directory.test.mjs`。另需在真实 Authentik 中验证目录跳转、账号设置保留及应用登录/退出回跳。
+
+门户退出先撤销本地 Session，再发起 Authentik `end-session`。现有门户会话不保存上游 ID Token，因此不发送 `post_logout_redirect_uri`；当前 Authentik 在带此参数时要求 `id_token_hint`，仅提供 `client_id` 会被拒绝。退出后由身份服务显示默认登录流程，重新登录后用户目录会进入配置的 AI Hub 门户。若未来要求退出后立即回到原门户，需先增加 ID Token 的安全保存和退出交接，不能删除提供方白名单或放松校验。
