@@ -353,7 +353,7 @@ onMounted(loadAll)
                   <el-icon v-if="pos.is_primary" class="primary-icon"><Star /></el-icon>
                 </el-tag>
               </div>
-              <span v-else>—</span>
+              <span v-else>{{ scope.row.organization_name || scope.row.primary_organization_id || '—' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="账号类型" min-width="120"><template #default="scope">{{ scope.row.platform_roles?.length ? '平台管理账号' : '业务用户' }}</template></el-table-column>

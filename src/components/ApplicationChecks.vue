@@ -6,13 +6,12 @@ import StatusTag from '../components/StatusTag.vue'
 import { apiRequest, queryString } from '../services/platformApi'
 import { usePortalSession } from '../stores/session'
 
-const props = defineProps({ applicationId: { type: String, required: true } })
+const props = defineProps({ application: { type: Object, required: true } })
 const session = usePortalSession()
 const loading = ref(false)
 const error = ref(null)
-const selectedApplication = ref(null)
 const runs = ref([])
-const applicationId = computed(() => props.applicationId)
+const applicationId = computed(() => props.application.application_id)
 const detailVisible = ref(false)
 const selected = ref(null)
 const runVisible = ref(false)
@@ -32,11 +31,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [appResponse, runResponse] = await Promise.all([
-      apiRequest(`applications/${applicationId.value}`),
-      apiRequest(`conformance-runs${queryString({ application_id: applicationId.value, limit: 100 })}`),
-    ])
-    selectedApplication.value = appResponse
+    const runResponse = await apiRequest(`conformance-runs${queryString({ application_id: applicationId.value, limit: 100 })}`)
     runs.value = runResponse.items
   } catch (caught) {
     error.value = caught
@@ -53,8 +48,9 @@ async function showDetail(row) {
   }
 }
 function openRun() {
-  const capabilities = selectedApplication.value?.capabilities || []
-  runForm.environment = selectedApplication.value?.environments?.[0]?.environment || 'local'
+  if (!props.application.environments?.length) { ElMessage.warning('请先登记应用环境'); return }
+  const capabilities = props.application?.capabilities || []
+  runForm.environment = props.application?.environments?.[0]?.environment || ''
   runForm.profiles = ['OIDC_ONLY']
   if (capabilities.includes('DATA_INGEST')) runForm.profiles.push('DATA_INGEST')
   runVisible.value = true
@@ -135,7 +131,7 @@ onMounted(load)
         title="DATA_INGEST 认证只接受应用提交的运行门禁证据，不会跨库读取应用导出表。"
       />
       <el-form label-position="top" class="run-form">
-        <el-form-item label="环境"><el-input v-model="runForm.environment" /></el-form-item>
+        <el-form-item label="环境" required><el-select v-model="runForm.environment" style="width: 100%"><el-option v-for="item in props.application.environments" :key="item.environment" :value="item.environment" :label="item.environment" /></el-select></el-form-item>
         <el-form-item label="认证配置">
           <el-checkbox-group v-model="runForm.profiles" class="profile-options">
             <el-checkbox v-for="item in profileOptions" :key="item[0]" :value="item[0]">

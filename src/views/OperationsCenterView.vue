@@ -17,6 +17,11 @@ const tabs = [
   ['sources', '数据来源'],
   ['freshness', '同步新鲜度'],
 ]
+const unknownCount = computed(() => {
+  if (!summary.value) return 0
+  return [...summary.value.application_entries, ...summary.value.data_source_entries, ...summary.value.sync_freshness_entries]
+    .filter((item) => item.status === 'UNKNOWN').length
+})
 const warningCount = computed(() => {
   if (!summary.value) return 0
   return [
@@ -85,10 +90,10 @@ onMounted(load)
         <div class="metric-grid page-section">
           <MetricCard
             label="整体状态"
-            :value="summary.overall_status === 'HEALTHY' ? '健康' : '降级'"
-            hint="平台只读诊断"
+            :value="summary.overall_status === 'DEGRADED' ? '降级' : unknownCount ? '待确认' : '健康'"
+            :hint="unknownCount ? `${unknownCount} 项状态未知` : '平台只读诊断'"
             icon="Monitor"
-            :tone="summary.overall_status === 'HEALTHY' ? 'green' : 'amber'"
+            :tone="summary.overall_status === 'HEALTHY' && !unknownCount ? 'green' : 'amber'"
           />
           <MetricCard
             label="异常对象"

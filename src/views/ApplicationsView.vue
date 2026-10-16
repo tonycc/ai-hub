@@ -445,7 +445,7 @@ onMounted(async () => {
         </div>
         <el-form-item label="说明" required><el-input v-model="createForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="应用负责人" required>
-          <el-select v-model="createForm.owner_id" filterable clearable placeholder="需要首次管理员领取时选择" style="width: 100%">
+          <el-select v-model="createForm.owner_id" filterable clearable placeholder="请选择应用负责人" style="width: 100%">
             <el-option v-for="item in businessUsers" :key="item.user_id" :label="businessUserOptionLabel(item)" :value="item.user_id" />
           </el-select>
           <small class="subline">负责人承担业务治理与联络责任，不会因此获得业务应用权限；每个环境的初始管理员在环境配置中独立指定。</small>
@@ -483,7 +483,7 @@ onMounted(async () => {
             <el-select v-model="selected.scopes" :disabled="!canEditSelected" multiple value-key="scope_code" style="width: 100%" placeholder="选择权限范围"><el-option v-for="item in scopeOptions" :key="item.scope_code" :label="`${item.name} · ${item.scope_code}`" :value="item" /></el-select>
           </div>
 
-          <ApplicationChecks v-if="session.hasPermission('platform.application.read', selected.application_id)" :key="selected.application_id" :application-id="selected.application_id" />
+          <ApplicationChecks v-if="session.hasPermission('platform.application.read', selected.application_id)" :key="selected.application_id" :application="selected" />
           <div class="drawer-section"><div class="section-heading"><div><h3>发布记录</h3><p>版本属于公开接入配置，不代表业务版本。</p></div></div>
             <el-table :data="selected.releases" style="width: 100%"><el-table-column prop="environment" label="环境" width="100" /><el-table-column prop="version" label="版本" min-width="130" /><el-table-column prop="status" label="状态" width="110"><template #default="scope"><StatusTag :status="scope.row.status" /></template></el-table-column><el-table-column prop="created_at" label="创建时间" min-width="180"><template #default="scope">{{ formatTime(scope.row.created_at) }}</template></el-table-column></el-table>
           </div>

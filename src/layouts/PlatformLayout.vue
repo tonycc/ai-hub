@@ -56,6 +56,11 @@ const visibleNavGroups = computed(() => navGroups.map((group) => ({
   }),
 })).filter((group) => group.items.length))
 
+const canViewRoute = computed(() => {
+  const permission = routePermissions[route.path]
+  return !permission || session.hasPermission(permission)
+})
+
 const canViewIdentity = computed(() => session.hasPermission('platform.identity.read'))
 
 const userInitial = computed(() => session.principal.value?.display_name?.slice(0, 1) || '访')
@@ -71,14 +76,15 @@ const activeMenu = computed(() => route.path)
 
 const searchResults = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
-  const appResults = registeredApplications.value.map((item) => ({
+  const appResults = (session.hasPermission('platform.application.read') ? registeredApplications.value : []).map((item) => ({
     type: '应用',
     title: item.name,
     subtitle: item.description || item.application_id,
     path: '/applications',
     icon: 'Grid',
   }))
-  const capabilityResults = platformCapabilityGroups.flatMap((group) => group.items).map((item) => ({
+  const capabilityResults = platformCapabilityGroups.flatMap((group) => group.items)
+    .filter((item) => !routePermissions[item.route] || session.hasPermission(routePermissions[item.route])).map((item) => ({
     type: '平台能力',
     title: item.name,
     subtitle: `${item.code} · ${item.description}`,
@@ -236,7 +242,16 @@ onBeforeUnmount(() => {
       </el-header>
 
       <el-main class="platform-content">
-        <router-view />
+        <template v-if="session.principal.value">
+          <router-view v-if="canViewRoute" />
+          <el-result v-else icon="warning" title="无权访问此页面" sub-title="请使用具备相应平台管理权限的账号。">
+            <template #extra><el-button type="primary" @click="navigate('/')">返回首页</el-button></template>
+          </el-result>
+        </template>
+        <el-skeleton v-else-if="session.state.status === 'loading' || session.state.status === 'idle'" :rows="5" animated />
+        <el-result v-else-if="session.state.status === 'error'" icon="error" title="平台会话加载失败">
+          <template #extra><el-button @click="handleVisibilityRefresh">重试</el-button></template>
+        </el-result>
       </el-main>
     </el-container>
 

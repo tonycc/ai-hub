@@ -70,13 +70,16 @@ const operationsState = computed(() => {
   if (operationsLoading.value) return 'loading'
   if (operationsError.value) return 'error'
   if (!operationsSummary.value) return 'unavailable'
-  return operationsSummary.value.overall_status === 'HEALTHY' ? 'healthy' : 'degraded'
+  if (operationsSummary.value.overall_status === 'DEGRADED') return 'degraded'
+  const entries = [...operationsSummary.value.application_entries, ...operationsSummary.value.data_source_entries, ...operationsSummary.value.sync_freshness_entries]
+  return entries.some((entry) => entry.status === 'UNKNOWN') ? 'unknown' : 'healthy'
 })
 const operationsLabel = computed(() => ({
   loading: '加载中',
   error: '不可用',
   unavailable: '暂无数据',
   healthy: '正常',
+  unknown: '待确认',
   degraded: '降级',
 }[operationsState.value]))
 const operationsHint = computed(() => {
@@ -90,6 +93,7 @@ const operationsTone = computed(() => ({
   error: 'orange',
   unavailable: 'blue',
   healthy: 'blue',
+  unknown: 'orange',
   degraded: 'orange',
 }[operationsState.value]))
 
@@ -169,7 +173,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="page-section">
+    <section v-if="visiblePlatformEntries.length" class="page-section">
       <div class="section-heading">
         <div><h2>管理入口</h2><p>按当前角色权限显示</p></div>
       </div>
