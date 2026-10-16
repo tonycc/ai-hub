@@ -21,10 +21,10 @@ const operationsSummary = ref(null)
 const operationsError = ref(null)
 const operationsLoading = ref(false)
 const canReadOperations = computed(() => session.hasPermission('platform.operations.read'))
-const isPlatformUser = computed(() => session.hasPermission('platform.application.read'))
+const canReadApplications = computed(() => session.hasPermission('platform.application.read'))
 
 async function loadApplications() {
-  if (!isPlatformUser.value) return
+  if (!canReadApplications.value) return
   applicationsLoading.value = true
   applicationsError.value = null
   try {
@@ -126,7 +126,7 @@ onMounted(() => {
     />
 
     <div class="metric-grid page-section">
-      <template v-if="isPlatformUser">
+      <template v-if="canReadApplications">
         <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="当前权限范围内" icon="Grid" tone="blue" />
         <MetricCard label="运行中应用" :value="activeApps.length" unit="个" hint="状态为 ACTIVE" icon="CircleCheck" tone="green" />
       </template>
@@ -155,7 +155,7 @@ onMounted(() => {
       <el-button text type="primary" @click="router.push('/platform/operations')">查看运维中心<el-icon><ArrowRight /></el-icon></el-button>
     </section>
 
-    <section v-if="!isPlatformUser" class="page-section">
+    <section class="page-section">
       <div class="section-heading">
         <div><h2>应用入口</h2><p>业务权限由各应用在登录后判定</p></div>
       </div>
@@ -186,7 +186,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section v-if="isPlatformUser" class="page-section">
+    <section v-if="canReadApplications" class="page-section">
       <div class="section-heading">
         <div><h2>已登记应用</h2><p>点击应用查看详情、环境和密钥</p></div>
         <el-button text @click="router.push('/applications')">应用中心<el-icon><ArrowRight /></el-icon></el-button>

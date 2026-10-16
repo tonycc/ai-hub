@@ -61,6 +61,7 @@ onMounted(load)
       <el-button @click="load">刷新</el-button>
       <el-button v-if="canWrite" type="primary" @click="openAssignment">分配角色</el-button>
     </template></PageHeader>
+    <p class="subline">平台角色仅用于管理 AI Hub，不授予业务系统权限；同一用户可由业务系统独立授权。</p>
     <section class="surface-panel page-section">
       <ApiState :loading="loading" :error="error" :empty="!assignments.length" empty-text="暂无平台角色分配" @retry="load">
         <el-table :data="assignments" style="width: 100%">

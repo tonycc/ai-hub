@@ -31,12 +31,11 @@ class DirectoryUser:
     status: str
     organization_id: str
     organization_name: str
-    business_user: bool
     updated_at: datetime
 
     @property
     def tombstone(self) -> bool:
-        return self.status != "ACTIVE" or not self.business_user
+        return self.status != "ACTIVE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,10 +166,7 @@ class ApplicationIdentityBridgeService:
                 "Authenticated credential does not match the bootstrap environment"
             )
 
-        # Serialize bootstrap claims with platform-role assignment for this
-        # identity.  GovernanceService takes the same identity row lock before
-        # creating an assignment; the following statement therefore observes
-        # a stable eligibility point inside this transaction.
+        # Keep the claimant active throughout the claim transaction.
         claimant = (
             (
                 await session.execute(
@@ -188,28 +184,8 @@ class ApplicationIdentityBridgeService:
             .mappings()
             .one_or_none()
         )
-        platform_role = (
-            (
-                await session.execute(
-                    sa.text(
-                        """
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM platform_core.platform_role_assignment
-                            WHERE user_id = :user_id
-                        ) AS assigned
-                        """
-                    ),
-                    {"user_id": user_id},
-                )
-            )
-            .mappings()
-            .one()
-        )
-        if claimant is None or claimant["status"] != "ACTIVE" or platform_role["assigned"] is True:
-            raise AdminBootstrapDeniedError(
-                "Initial administrator must remain an active business user"
-            )
+        if claimant is None or claimant["status"] != "ACTIVE":
+            raise AdminBootstrapDeniedError("Initial administrator must remain an active user")
 
         initial_admin_user_id = cast(UUID, row["initial_admin_user_id"])
         consumed_by = cast(UUID | None, row["consumed_by_user_id"])
@@ -281,11 +257,6 @@ class ApplicationIdentityBridgeService:
                         """
                         SELECT u.user_id, u.subject, u.display_name, u.email, u.status,
                                u.primary_organization_id, o.name AS organization_name,
-                               NOT EXISTS (
-                                   SELECT 1
-                                   FROM platform_core.platform_role_assignment AS pra
-                                   WHERE pra.user_id = u.user_id
-                               ) AS business_user,
                                u.updated_at, u.directory_revision
                         FROM platform_core.identity_user AS u
                         JOIN platform_core.organization AS o
@@ -321,7 +292,6 @@ class ApplicationIdentityBridgeService:
                 status=str(row["status"]),
                 organization_id=str(row["primary_organization_id"]),
                 organization_name=str(row["organization_name"]),
-                business_user=bool(row["business_user"]),
                 updated_at=cast(datetime, row["updated_at"]),
             )
             for row in visible_rows

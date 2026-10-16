@@ -128,7 +128,6 @@ async def me(
         status=user.status,
         organization_id=user.organization_id,
         organization_name=user.organization_name,
-        business_user=user.business_user,
     )
 
 
@@ -358,7 +357,6 @@ async def directory_users(
                 status=item.status,
                 organization_id=item.organization_id,
                 organization_name=item.organization_name,
-                business_user=item.business_user,
                 updated_at=item.updated_at,
                 tombstone=item.tombstone,
             )

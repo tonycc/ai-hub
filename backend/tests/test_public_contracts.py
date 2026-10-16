@@ -57,8 +57,15 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     bootstrap = contract["components"]["schemas"]["AdminBootstrapClaim"]
     assert "initial_admin_user_id" in bootstrap["required"]
     assert "owner_user_id" not in bootstrap["properties"]
-    assert "business_user" in contract["components"]["schemas"]["CurrentUser"]["required"]
-    assert "business_user" in contract["components"]["schemas"]["DirectoryUser"]["required"]
+    for schema_name in ("CurrentUser", "DirectoryUser"):
+        schema = contract["components"]["schemas"][schema_name]
+        assert "business_user" not in schema["required"]
+        assert "business_user" not in schema["properties"]
+        assert "platform_roles" not in schema["properties"]
+    tombstone_description = contract["components"]["schemas"]["DirectoryUser"]["properties"][
+        "tombstone"
+    ]["description"]
+    assert "not a business user" not in tombstone_description
 
 
 def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:

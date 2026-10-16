@@ -25,13 +25,13 @@ class ApplicationManagementValidationError(ValueError):
 
 
 class ApplicationManagementService:
-    async def _active_business_user(
+    async def _active_user(
         self,
         session: AsyncSession,
         *,
         user_id: str | UUID,
     ) -> tuple[str, str | None] | None:
-        """Return an active user only when they hold no AI Hub platform role."""
+        """Return an active identity regardless of platform roles."""
         row = (
             (
                 await session.execute(
@@ -41,11 +41,6 @@ class ApplicationManagementService:
                         FROM platform_core.identity_user AS u
                         WHERE u.user_id = :user_id
                           AND u.status = 'ACTIVE'
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM platform_core.platform_role_assignment AS pra
-                              WHERE pra.user_id = u.user_id
-                          )
                         """
                     ),
                     {"user_id": user_id},
@@ -65,12 +60,7 @@ class ApplicationManagementService:
         *,
         query: str | None,
     ) -> list[dict[str, Any]]:
-        """Return active employees eligible for business application roles.
-
-        Business users must have an active directory identity and no AI Hub
-        platform-role assignment. Platform accounts remain available for
-        platform administration but cannot own or bootstrap business apps.
-        """
+        """Return active identities; platform roles do not confer business permissions."""
         rows = (
             (
                 await session.execute(
@@ -83,11 +73,6 @@ class ApplicationManagementService:
                     JOIN platform_core.organization AS o
                       ON o.organization_id = u.primary_organization_id
                     WHERE u.status = 'ACTIVE'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM platform_core.platform_role_assignment AS pra
-                          WHERE pra.user_id = u.user_id
-                      )
                       AND (
                           CAST(:query AS varchar) IS NULL
                           OR u.subject ILIKE '%' || :query || '%'
@@ -344,11 +329,9 @@ class ApplicationManagementService:
         ):
             raise ApplicationManagementConflictError("Application identifier already exists")
 
-        owner = await self._active_business_user(session, user_id=owner_id)
+        owner = await self._active_user(session, user_id=owner_id)
         if owner is None:
-            raise ApplicationManagementValidationError(
-                "Selected owner is not an active business user"
-            )
+            raise ApplicationManagementValidationError("Selected owner is not an active user")
 
         await session.execute(
             sa.text(
@@ -384,11 +367,9 @@ class ApplicationManagementService:
         capabilities: list[str],
     ) -> dict[str, Any]:
         if owner_id is not None:
-            selected_owner = await self._active_business_user(session, user_id=owner_id)
+            selected_owner = await self._active_user(session, user_id=owner_id)
             if selected_owner is None:
-                raise ApplicationManagementValidationError(
-                    "Selected owner is not an active business user"
-                )
+                raise ApplicationManagementValidationError("Selected owner is not an active user")
 
         updated = await session.scalar(
             sa.text(
@@ -461,13 +442,13 @@ class ApplicationManagementService:
                         "A consumed initial administrator assignment cannot be changed"
                     )
             else:
-                initial_admin = await self._active_business_user(
+                initial_admin = await self._active_user(
                     session,
                     user_id=initial_admin_user_id,
                 )
                 if initial_admin is None:
                     raise ApplicationManagementValidationError(
-                        "Selected initial administrator is not an active business user"
+                        "Selected initial administrator is not an active user"
                     )
 
         if clear_pending_bootstrap:

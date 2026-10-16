@@ -19,7 +19,6 @@ class CurrentUser(BaseModel):
     status: str
     organization_id: str
     organization_name: str
-    business_user: bool
 
 
 class ApplicationEnvironment(BaseModel):
@@ -62,7 +61,6 @@ class DirectoryUser(BaseModel):
     status: str
     organization_id: str
     organization_name: str
-    business_user: bool
     updated_at: datetime
     tombstone: bool
 

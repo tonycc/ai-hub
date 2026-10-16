@@ -336,7 +336,7 @@ onMounted(loadAll)
 
     <section class="surface-panel page-section list-panel">
       <ApiState :loading="loading" :error="error" @retry="loadAll">
-        <!-- 业务用户表格 -->
+        <!-- 统一用户目录 -->
         <el-table v-if="activeTab === 'users'" :data="users" style="width: 100%">
           <el-table-column prop="display_name" label="用户姓名" min-width="150" />
           <el-table-column prop="subject" label="登录账号" min-width="180">
@@ -356,7 +356,7 @@ onMounted(loadAll)
               <span v-else>{{ scope.row.organization_name || scope.row.primary_organization_id || '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="账号类型" min-width="120"><template #default="scope">{{ scope.row.platform_roles?.length ? '平台管理账号' : '业务用户' }}</template></el-table-column>
+          <el-table-column label="平台角色" min-width="120"><template #default="scope">{{ scope.row.platform_roles?.map(role => ({ PLATFORM_ADMIN: '平台管理员', APPLICATION_DEVELOPER: '应用开发者' }[role] || role)).join('、') || '无' }}</template></el-table-column>
           <el-table-column prop="status" label="状态" width="90">
             <template #default="scope"><StatusTag :status="scope.row.status" /></template>
           </el-table-column>

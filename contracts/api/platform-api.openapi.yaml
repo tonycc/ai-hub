@@ -158,10 +158,10 @@ paths:
       description: |
         Returns employee identity/profile changes using an opaque, commit-ordered directory revision.
         Only a service identity bound to the calling application may use this endpoint.
-        `business_user=false` identifies an AI Hub platform account rather than a business
-        employee. `tombstone=true` means the identity is inactive or is not a business user;
-        consumers must disable local login and sessions but must not overwrite locally managed
-        role history.
+        Platform roles do not exclude identities from this directory or grant business permissions.
+        `tombstone=true` means the identity is inactive; consumers must disable local login
+        and sessions but must not overwrite locally managed role history.
+        New identities have no local business roles by default.
       tags: [identity]
       security:
         - oidcAuth: [ai_hub.identity, platform.directory.read]
@@ -569,7 +569,7 @@ components:
     CurrentUser:
       type: object
       additionalProperties: false
-      required: [user_id, subject, display_name, status, organization_id, organization_name, business_user]
+      required: [user_id, subject, display_name, status, organization_id, organization_name]
       properties:
         user_id: {type: string, format: uuid, description: Stable platform user uuid.}
         subject: {type: string, description: OIDC subject (`sub`) claim.}
@@ -578,7 +578,6 @@ components:
         status: {type: string, description: Platform account status (for example ACTIVE).}
         organization_id: {type: string, description: Organization slug or id.}
         organization_name: {type: string, description: Organization display name.}
-        business_user: {type: boolean, description: True only when the identity has no AI Hub platform-role assignment and may enter business applications.}
     ApplicationEnvironment:
       type: object
       additionalProperties: false
@@ -629,7 +628,7 @@ components:
     DirectoryUser:
       type: object
       additionalProperties: false
-      required: [user_id, subject, display_name, status, organization_id, organization_name, business_user, updated_at, tombstone]
+      required: [user_id, subject, display_name, status, organization_id, organization_name, updated_at, tombstone]
       properties:
         user_id: {type: string, format: uuid, description: Stable AI Hub user id used as the external identity key.}
         subject: {type: string, description: OIDC subject currently mapped to the user.}
@@ -638,9 +637,8 @@ components:
         status: {type: string, description: Current AI Hub identity status.}
         organization_id: {type: string, description: Current primary organization id.}
         organization_name: {type: string, description: Current primary organization name.}
-        business_user: {type: boolean, description: True only for identities eligible for business-application employee directories.}
         updated_at: {type: string, format: date-time, description: Last identity/profile update timestamp.}
-        tombstone: {type: boolean, description: True when the identity is inactive or not a business user and local access must be disabled.}
+        tombstone: {type: boolean, description: True only when the identity is inactive and local access must be disabled; platform roles do not affect this value.}
     DirectoryPage:
       type: object
       additionalProperties: false

@@ -14,7 +14,7 @@
 4. 用户请求使用授权码 + PKCE；后台任务使用 Client Credentials。两类令牌不可互换。
 5. 应用本地验证用户 JWT 的 issuer、audience、签名、有效期和 scope，再调用 `/me` 获取基本身份。OIDC 登录成功本身不授予任何业务权限。
 6. 环境中指定的初始管理员首次登录时调用 `admin-bootstrap`；应用在本地幂等创建首个管理员。负责人变化不修改待领取或已领取的初始管理员，也不改写本地管理员。
-7. 后台任务按 cursor 调用 `/directory/users` 同步员工资料和状态。新员工默认无本地角色；`business_user=false` 的平台账号不得进入业务员工列表，且与停用员工一样会返回 `tombstone=true`。应用应禁止其登录并撤销会话，但不要覆盖或删除本地角色历史。
+7. 后台任务按 cursor 调用 `/directory/users` 同步员工资料和状态。所有活动用户（包括平台管理员）均可同步，新用户默认无本地业务角色。平台角色不授予任何业务权限；仅身份停用时返回 `tombstone=true`，应用应禁止其登录并撤销会话，但不要覆盖或删除本地角色历史。身份接口不再提供互斥分类字段 `business_user`；曾按旧规则同步的应用需从空 cursor 完整重同步目录，恢复活动身份资料，但不得自动恢复或新增业务权限。
 8. 角色、功能权限、数据范围、对象归属、业务状态和并发规则始终由应用自己存储并最终校验。
 
 上述模式等价于企业内部的 “Sign in with Google”：AI Hub 负责认证和基本资料，业务应用负责全部功能授权。详细边界见 [ADR-034](adr/ADR-034-identity-provider-application-owned-authorization.md)。平台不托管业务授权，不提供 `/me/permissions` 与 `/authorization/decisions`；应用不得在 AI Hub 登记业务权限码。

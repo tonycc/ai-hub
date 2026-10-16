@@ -7,7 +7,9 @@ from uuid import UUID
 
 import pytest
 from ai_hub_platform.modules.identity.application_bridge import (
+    AdminBootstrapConsumedError,
     AdminBootstrapDeniedError,
+    AdminBootstrapNotFoundError,
     ApplicationIdentityBridgeService,
     DirectoryCursorError,
 )
@@ -52,7 +54,7 @@ class SessionStub:
 
 
 @pytest.mark.asyncio
-async def test_current_identity_marks_platform_role_accounts_as_non_business() -> None:
+async def test_current_identity_does_not_classify_users_by_platform_role() -> None:
     session_stub = SessionStub(
         [
             MappingResultStub(
@@ -65,7 +67,6 @@ async def test_current_identity_marks_platform_role_accounts_as_non_business() -
                         "status": "ACTIVE",
                         "primary_organization_id": "org-platform",
                         "organization_name": "Platform",
-                        "business_user": False,
                         "authorization_version": 3,
                     }
                 ]
@@ -78,8 +79,8 @@ async def test_current_identity_marks_platform_role_accounts_as_non_business() -
         cast(VerifiedToken, SimpleNamespace(subject="platform-admin")),
     )
 
-    assert identity.business_user is False
-    assert "platform_role_assignment" in session_stub.statements[0]
+    assert identity.subject == "platform-admin"
+    assert "platform_role_assignment" not in session_stub.statements[0]
 
 
 @pytest.mark.asyncio
@@ -99,7 +100,6 @@ async def test_initial_admin_claims_bootstrap_and_retries_idempotently() -> None
         [
             MappingResultStub([pending]),
             MappingResultStub([{"status": "ACTIVE"}]),
-            MappingResultStub([{"assigned": False}]),
             MappingResultStub([{"consumed_at": consumed_at}]),
         ]
     )
@@ -117,8 +117,8 @@ async def test_initial_admin_claims_bootstrap_and_retries_idempotently() -> None
     assert claim.consumed_at == consumed_at
     assert "FOR UPDATE OF b" in session_stub.statements[0]
     assert "FOR UPDATE" in session_stub.statements[1]
-    assert "platform_role_assignment" in session_stub.statements[2]
-    assert "SET status = 'CONSUMED'" in session_stub.statements[3]
+    assert all("platform_role_assignment" not in sql for sql in session_stub.statements)
+    assert "SET status = 'CONSUMED'" in session_stub.statements[2]
 
     retry_stub = SessionStub(
         [
@@ -133,7 +133,6 @@ async def test_initial_admin_claims_bootstrap_and_retries_idempotently() -> None
                 ]
             ),
             MappingResultStub([{"status": "ACTIVE"}]),
-            MappingResultStub([{"assigned": False}]),
         ]
     )
     retried = await service.claim_admin_bootstrap(
@@ -144,7 +143,7 @@ async def test_initial_admin_claims_bootstrap_and_retries_idempotently() -> None
         credential_audiences=("dsh-work__local__v1",),
     )
     assert retried.consumed_at == consumed_at
-    assert len(retry_stub.statements) == 3
+    assert len(retry_stub.statements) == 2
 
 
 @pytest.mark.asyncio
@@ -167,7 +166,6 @@ async def test_non_configured_user_cannot_claim_pending_bootstrap() -> None:
                 ]
             ),
             MappingResultStub([{"status": "ACTIVE"}]),
-            MappingResultStub([{"assigned": False}]),
         ]
     )
 
@@ -182,7 +180,7 @@ async def test_non_configured_user_cannot_claim_pending_bootstrap() -> None:
 
 
 @pytest.mark.asyncio
-async def test_platform_role_account_cannot_claim_pending_bootstrap() -> None:
+async def test_inactive_user_cannot_claim_pending_bootstrap() -> None:
     initial_admin_id = UUID("11000000-0000-4000-8000-000000000001")
     session_stub = SessionStub(
         [
@@ -199,12 +197,11 @@ async def test_platform_role_account_cannot_claim_pending_bootstrap() -> None:
                     }
                 ]
             ),
-            MappingResultStub([{"status": "ACTIVE"}]),
-            MappingResultStub([{"assigned": True}]),
+            MappingResultStub([{"status": "DISABLED"}]),
         ]
     )
 
-    with pytest.raises(AdminBootstrapDeniedError, match="active business user"):
+    with pytest.raises(AdminBootstrapDeniedError, match="active user"):
         await ApplicationIdentityBridgeService().claim_admin_bootstrap(
             cast(AsyncSession, session_stub),
             application_id="dsh-work",
@@ -213,7 +210,7 @@ async def test_platform_role_account_cannot_claim_pending_bootstrap() -> None:
             credential_audiences=("dsh-work__local__v1",),
         )
 
-    assert len(session_stub.statements) == 3
+    assert len(session_stub.statements) == 2
 
 
 @pytest.mark.asyncio
@@ -261,7 +258,6 @@ async def test_directory_cursor_is_stable_and_invalid_values_fail_closed() -> No
                 "status": "ACTIVE" if index < 2 else "DISABLED",
                 "primary_organization_id": "org-platform",
                 "organization_name": "Platform",
-                "business_user": index != 1,
                 "directory_revision": index + 1,
                 "updated_at": first_at + timedelta(minutes=index),
             }
@@ -274,14 +270,19 @@ async def test_directory_cursor_is_stable_and_invalid_values_fail_closed() -> No
     )
 
     assert [item.subject for item in page.items] == ["employee-1", "platform-admin"]
-    assert page.items[0].business_user is True
     assert page.items[0].tombstone is False
-    assert page.items[1].business_user is False
-    assert page.items[1].tombstone is True
+    assert page.items[1].tombstone is False
     assert page.has_more is True
     assert page.next_cursor
     assert session_stub.parameters[0]["row_limit"] == 3
-    assert "platform_role_assignment" in session_stub.statements[0]
+    assert "platform_role_assignment" not in session_stub.statements[0]
+
+    inactive = await service.list_directory_users(
+        cast(AsyncSession, SessionStub([MappingResultStub(rows[2:])])),
+        cursor=page.next_cursor,
+        limit=2,
+    )
+    assert inactive.items[0].tombstone is True
 
     empty_stub = SessionStub([MappingResultStub([])])
     empty = await service.list_directory_users(
@@ -295,6 +296,74 @@ async def test_directory_cursor_is_stable_and_invalid_values_fail_closed() -> No
             cast(AsyncSession, SessionStub([])), cursor="not-a-cursor", limit=2
         )
     with pytest.raises(DirectoryCursorError):
-        await service.list_directory_users(
-            cast(AsyncSession, SessionStub([])), cursor="=", limit=2
+        await service.list_directory_users(cast(AsyncSession, SessionStub([])), cursor="=", limit=2)
+
+
+@pytest.mark.asyncio
+async def test_no_bootstrap_configuration_does_not_grant_administrator_access() -> None:
+    session_stub = SessionStub([MappingResultStub([])])
+    with pytest.raises(AdminBootstrapNotFoundError):
+        await ApplicationIdentityBridgeService().claim_admin_bootstrap(
+            cast(AsyncSession, session_stub),
+            application_id="dsh-work",
+            environment="local",
+            user_id=UUID("11000000-0000-4000-8000-000000000001"),
+            credential_audiences=("dsh-work__local__v1",),
         )
+    assert len(session_stub.statements) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled_target", ["application_status", "environment_status"])
+async def test_disabled_target_denies_even_configured_administrator(disabled_target: str) -> None:
+    user_id = UUID("11000000-0000-4000-8000-000000000001")
+    row: dict[str, object] = {
+        "initial_admin_user_id": user_id,
+        "status": "PENDING",
+        "application_status": "ACTIVE",
+        "environment_status": "ACTIVE",
+        "credential_matches_environment": True,
+    }
+    row[disabled_target] = "DISABLED"
+    session_stub = SessionStub([MappingResultStub([row])])
+    with pytest.raises(AdminBootstrapDeniedError, match="both be active"):
+        await ApplicationIdentityBridgeService().claim_admin_bootstrap(
+            cast(AsyncSession, session_stub),
+            application_id="dsh-work",
+            environment="local",
+            user_id=user_id,
+            credential_audiences=("dsh-work__local__v1",),
+        )
+    assert len(session_stub.statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_other_user_cannot_replay_consumed_bootstrap() -> None:
+    initial_admin_id = UUID("11000000-0000-4000-8000-000000000001")
+    session_stub = SessionStub(
+        [
+            MappingResultStub(
+                [
+                    {
+                        "initial_admin_user_id": initial_admin_id,
+                        "status": "CONSUMED",
+                        "consumed_by_user_id": initial_admin_id,
+                        "consumed_at": datetime(2026, 9, 1, tzinfo=UTC),
+                        "application_status": "ACTIVE",
+                        "environment_status": "ACTIVE",
+                        "credential_matches_environment": True,
+                    }
+                ]
+            ),
+            MappingResultStub([{"status": "ACTIVE"}]),
+        ]
+    )
+    with pytest.raises(AdminBootstrapConsumedError):
+        await ApplicationIdentityBridgeService().claim_admin_bootstrap(
+            cast(AsyncSession, session_stub),
+            application_id="dsh-work",
+            environment="local",
+            user_id=UUID("11000000-0000-4000-8000-000000000002"),
+            credential_audiences=("dsh-work__local__v1",),
+        )
+    assert len(session_stub.statements) == 2

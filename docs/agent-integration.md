@@ -127,7 +127,7 @@ Authorization: Bearer <platform service token>
 - [ ] 凭据与 scope 已配置；`client_secret` 已安全存储。
 - [ ] 用户流：PKCE 换 token → 本地 JWT 验证 → `GET /platform-api/v1/me`。
 - [ ] 可选管理员领取：已指定的环境初始管理员领取 Bootstrap；业务角色/权限/数据范围全部保存在应用本地。
-- [ ] 若采用目录同步：持久化 `next_cursor`；仅展示 `business_user=true` 的业务员工；新员工默认无角色；tombstone 只停用访问，不覆盖本地角色历史。
+- [ ] 若采用目录同步：持久化 `next_cursor`；活动身份均可作为业务用户，包括平台管理员；新用户默认无业务角色，平台角色不参与业务授权；tombstone 只停用访问，不覆盖本地角色历史。
 - [ ] 服务流：Client Credentials → `GET /health/live` → `GET /platform-api/v1/applications/{application_id}`。
 - [ ] 错误处理：解析 `ErrorResponse.error_code`，记录 `request_id`，不记录 token/secret。
 - [ ] 请求头：按需传 `X-Application-ID`；传播 `X-Request-ID` / `X-Trace-ID`。

@@ -41,7 +41,6 @@ async def test_request_context_and_application_identity_are_forwarded() -> None:
                 "status": "ACTIVE",
                 "organization_id": "org-demo",
                 "organization_name": "AI Hub Demo Organization",
-                "business_user": True,
                 "authorization_version": 1,
             },
         )
@@ -95,7 +94,6 @@ async def test_identity_bridge_contracts_are_typed_and_forward_application_conte
                         "status": "ACTIVE",
                         "organization_id": "org-platform",
                         "organization_name": "Platform",
-                        "business_user": True,
                         "updated_at": "2026-09-01T08:05:00Z",
                         "tombstone": False,
                     }
@@ -119,5 +117,4 @@ async def test_identity_bridge_contracts_are_typed_and_forward_application_conte
     assert claim.status == "CONSUMED"
     assert str(claim.initial_admin_user_id) == "11000000-0000-4000-8000-000000000001"
     assert page.items[0].subject == "employee-2"
-    assert page.items[0].business_user is True
     assert page.next_cursor == "next-cursor"
