@@ -56,7 +56,6 @@ class RecoveryTargetsResponse(ApiModel):
 
 class RetentionTargetsResponse(ApiModel):
     audit_days: int
-    notification_days: int
     portal_session_days_after_expiry: int
     conformance_days_after_expiry: int
     backup_hourly_count: int
@@ -180,7 +179,6 @@ def production_targets_response(
             },
             "retention": {
                 "audit_days": targets.retention.audit_days,
-                "notification_days": targets.retention.notification_days,
                 "portal_session_days_after_expiry": (
                     targets.retention.portal_session_days_after_expiry
                 ),
@@ -241,9 +239,7 @@ async def operations_summary(
         summary = await OperationsService().summary(
             session,
             raw_session=raw_session,
-            visible_application_ids=principal.application_scope(
-                "platform.application.read"
-            ),
+            visible_application_ids=principal.application_scope("platform.application.read"),
         )
     return OperationsSummaryResponse.model_validate(summary)
 

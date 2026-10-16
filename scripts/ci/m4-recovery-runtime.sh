@@ -25,7 +25,7 @@ m4_recovery_compose() {
     --project-name "${M4_RECOVERY_PROJECT_NAME}" \
     --env-file "${M4_RECOVERY_ENV_FILE}" \
     -f "${M4_RECOVERY_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 
@@ -196,7 +196,7 @@ AI_HUB_BACKUP_KEY_BASE64="$("${M4_RECOVERY_PYTHON}" -c \
 m4_recovery_backup_json="$(m4_recovery_backup create \
   --compose-file "${M4_RECOVERY_COMPOSE_FILE}" \
   --env-file "${M4_RECOVERY_ENV_FILE}" \
-  --profile base-access \
+  --profile base-access --profile reference-app \
   --project-name "${M4_RECOVERY_PROJECT_NAME}" \
   --output-dir "${M4_RECOVERY_WORK_DIR}" \
   --storage-class local-drill)"
@@ -228,7 +228,7 @@ m4_recovery_wait_service postgres "isolated restore target"
 m4_recovery_restore_json="$(m4_recovery_backup restore \
   --compose-file "${M4_RECOVERY_COMPOSE_FILE}" \
   --env-file "${M4_RECOVERY_ENV_FILE}" \
-  --profile base-access \
+  --profile base-access --profile reference-app \
   --project-name "${M4_RECOVERY_PROJECT_NAME}" \
   --confirm-replace \
   "${m4_recovery_archive}")"

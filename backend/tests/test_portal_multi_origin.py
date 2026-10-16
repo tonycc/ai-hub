@@ -12,11 +12,7 @@ from starlette.requests import Request
 def test_request_origin_accepts_only_an_exact_forwarded_origin() -> None:
     settings = Settings(
         _env_file=None,  # pyright: ignore[reportCallIssue]
-        portal_oidc_redirect_uri="http://192.168.33.20:8088/auth/callback",
-        portal_oidc_logout_redirect_uri="http://192.168.33.20:8088/",
-        platform_origins=(
-            "http://192.168.33.20:8088,http://platform.example.com:8088"
-        ),
+        platform_origins=("http://192.168.33.20:8088,http://platform.example.com:8088"),
     )
     request = _request(
         settings,
@@ -33,8 +29,12 @@ def test_request_origin_accepts_only_an_exact_forwarded_origin() -> None:
 
 def test_origin_header_must_match_the_forwarded_portal_origin() -> None:
     settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
-    matching = _request(settings, host="platform.localhost:8088", origin="http://platform.localhost:8088")
-    mismatched = _request(settings, host="platform.localhost:8088", origin="http://evil.localhost:8088")
+    matching = _request(
+        settings, host="platform.localhost:8088", origin="http://platform.localhost:8088"
+    )
+    mismatched = _request(
+        settings, host="platform.localhost:8088", origin="http://evil.localhost:8088"
+    )
 
     assert request_origin_header_matches(matching) is True
     assert request_origin_header_matches(mismatched) is False

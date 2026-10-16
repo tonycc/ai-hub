@@ -87,17 +87,6 @@ def _decode_cursor(cursor: str | None) -> tuple[int | None, UUID | None]:
         raw = base64.urlsafe_b64decode((cursor + padding).encode())
         payload = cast(dict[str, Any], json.loads(raw))
 
-        # Cursors emitted before the commit-ordered directory revision was
-        # introduced used mutable timestamps.  A valid legacy cursor restarts
-        # from the beginning once so an upgrade cannot strand a consumer on an
-        # unsafe watermark.
-        if "version" not in payload and "updated_at" in payload:
-            updated_at = datetime.fromisoformat(str(payload["updated_at"]))
-            if updated_at.tzinfo is None:
-                raise ValueError("cursor timestamp must include a timezone")
-            UUID(str(payload["user_id"]))
-            return None, None
-
         if payload.get("version") != _DIRECTORY_CURSOR_VERSION:
             raise ValueError("unsupported cursor version")
         revision = payload["revision"]
@@ -217,11 +206,7 @@ class ApplicationIdentityBridgeService:
             .mappings()
             .one()
         )
-        if (
-            claimant is None
-            or claimant["status"] != "ACTIVE"
-            or platform_role["assigned"] is True
-        ):
+        if claimant is None or claimant["status"] != "ACTIVE" or platform_role["assigned"] is True:
             raise AdminBootstrapDeniedError(
                 "Initial administrator must remain an active business user"
             )

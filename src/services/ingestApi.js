@@ -49,9 +49,6 @@ export async function ingestSaveContract(body) {
   return apiRequest('ingest/contracts', { method: 'PUT', body })
 }
 
-export async function ingestInferContract(body) {
-  return apiRequest('ingest/contracts/infer', { method: 'POST', body })
-}
 
 export async function ingestActivateContract(body) {
   return apiRequest('ingest/contracts/activate', { method: 'POST', body })

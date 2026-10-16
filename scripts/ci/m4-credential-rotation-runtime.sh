@@ -28,7 +28,9 @@ export AI_HUB_AUTHENTIK_EXTERNAL_URL="${M4_ROTATION_CANONICAL_AUTH_BASE}"
 export AI_HUB_PUBLIC_PLATFORM_BASE_URL="${M4_ROTATION_PLATFORM_BASE}"
 export AI_HUB_PUBLIC_IDENTITY_BASE_URL="${M4_ROTATION_AUTH_BASE}"
 export AI_HUB_CREDENTIAL_ROTATION_OVERLAP_SECONDS="${M4_ROTATION_OVERLAP_SECONDS}"
-export AI_HUB_PORTAL_OIDC_REDIRECT_URI="${M4_ROTATION_PLATFORM_BASE}/auth/callback"
+export AI_HUB_PLATFORM_ORIGINS="${M4_ROTATION_PLATFORM_BASE}"
+export AI_HUB_PLATFORM_DEFAULT_ORIGIN="${M4_ROTATION_PLATFORM_BASE}"
+export AI_HUB_PORTAL_OIDC_REDIRECT_URIS="${M4_ROTATION_PLATFORM_BASE}/auth/callback"
 export AI_HUB_PORTAL_EXTERNAL_URL="${M4_ROTATION_PLATFORM_BASE}"
 
 m4_rotation_compose() {
@@ -36,7 +38,7 @@ m4_rotation_compose() {
     --project-name "${M4_ROTATION_PROJECT_NAME}" \
     --env-file "${M4_ROTATION_ENV_FILE}" \
     -f "${M4_ROTATION_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 
@@ -171,7 +173,9 @@ import os
 from uuid import UUID
 
 from ai_hub_platform.config import get_settings
-from ai_hub_platform.modules.app_management.authentik import AuthentikAdminClient
+from ai_hub_platform.modules.app_management.authentik import (
+    AuthentikAdminClient, AuthentikManagementError,
+)
 from ai_hub_platform.modules.app_management.service import ApplicationManagementService
 from ai_hub_platform.shared.database import Database
 
@@ -192,12 +196,27 @@ async def main():
     try:
         async with database.session_factory() as session:
             if operation == "provision":
+                # HTTP health precedes blueprint/admin-token initialization.
+                # Poll only a read; never retry a partially completed provision.
+                for attempt in range(60):
+                    try:
+                        template = await authentik._provider_by_client_id(
+                            settings.authentik_provider_template_client_id
+                        )
+                        if template is not None:
+                            break
+                    except AuthentikManagementError:
+                        pass
+                    await asyncio.sleep(2)
+                else:
+                    raise RuntimeError("Authentik management template did not become ready")
                 await service.create_application(
                     session,
                     application_id=application_id,
                     name="M4 credential rotation fixture",
                     description="Business-neutral credential rotation verification",
-                    owner_id=os.environ["M4_ROTATION_OWNER_ID"],
+                    owner_id="10000000-0000-4000-8000-000000000001",
+                    created_by_user_id=os.environ["M4_ROTATION_OWNER_ID"],
                     capabilities=["API_CLIENT"],
                 )
                 await service.upsert_environment(
@@ -223,7 +242,7 @@ async def main():
                     application_id=application_id,
                     name="M4 credential rotation fixture",
                     description="Business-neutral credential rotation verification",
-                    owner_id=os.environ["M4_ROTATION_OWNER_ID"],
+                    owner_id="10000000-0000-4000-8000-000000000001",
                     status="ACTIVE",
                     capabilities=["API_CLIENT"],
                 )
@@ -370,9 +389,10 @@ m4_rotation_old_secret_code="$(curl --silent --show-error --max-time 20 \
 
 m4_rotation_old_token_code="$(m4_rotation_call_platform \
   "${m4_rotation_v1_overlap_token}" m4-rotation-v1-revoked)"
-[[ "${m4_rotation_old_token_code}" == "403" ]] \
+# Dedicated credential issuers are removed from routing immediately on revoke.
+[[ "${m4_rotation_old_token_code}" == "401" ]] \
   || m4_rotation_fail "already-issued v1 token was not immediately rejected"
-jq --exit-status '.error_code == "service_identity_revoked"' \
+jq --exit-status '.error_code == "invalid_issuer"' \
   "${M4_ROTATION_WORK_DIR}/m4-rotation-v1-revoked.json" >/dev/null
 
 m4_rotation_v2_after_code="$(m4_rotation_call_platform \

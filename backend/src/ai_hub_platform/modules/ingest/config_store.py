@@ -69,9 +69,7 @@ class IngestSourceRow:
     updated_at: datetime
 
 
-def _enabling_push_source(
-    existing: IngestSourceRow | None, config: IngestSourceConfig
-) -> bool:
+def _enabling_push_source(existing: IngestSourceRow | None, config: IngestSourceConfig) -> bool:
     if config.transport_mode != "PUSH_AGENT" or not config.enabled:
         return False
     if existing is None:
@@ -81,18 +79,12 @@ def _enabling_push_source(
     return not existing.config.enabled
 
 
-def _switching_pull_to_enforce(
-    existing: IngestSourceRow | None, config: IngestSourceConfig
-) -> bool:
-    if config.transport_mode != "PULL_EXPORT":
-        return False
-    if config.contract_validation_mode != "ENFORCE":
+def _enabling_pull_source(existing: IngestSourceRow | None, config: IngestSourceConfig) -> bool:
+    if config.transport_mode != "PULL_EXPORT" or not config.enabled:
         return False
     if existing is None:
         return True
     if existing.config.transport_mode != "PULL_EXPORT":
-        return True
-    if existing.config.contract_validation_mode != "ENFORCE":
         return True
     return not existing.config.enabled
 
@@ -110,9 +102,7 @@ def _row_to_source(row: Any) -> IngestSourceRow:
             enabled=bool(row.enabled),
             transport_mode=cast(TransportMode, str(row.transport_mode)),
             push_protocol_version=(
-                None
-                if row.push_protocol_version is None
-                else str(row.push_protocol_version)
+                None if row.push_protocol_version is None else str(row.push_protocol_version)
             ),
             contract_validation_mode=cast(
                 ContractValidationMode, str(row.contract_validation_mode)
@@ -138,9 +128,7 @@ class IngestConfigStore:
         )
         return [_row_to_source(row) for row in result.all()]
 
-    async def list_enabled_source_configs(
-        self, session: AsyncSession
-    ) -> list[IngestSourceConfig]:
+    async def list_enabled_source_configs(self, session: AsyncSession) -> list[IngestSourceConfig]:
         rows = await self.list_sources(session)
         return [row.config for row in rows if row.config.enabled]
 
@@ -176,10 +164,7 @@ class IngestConfigStore:
             source_application_id=config.source_application_id,
             object_type=config.object_type,
         )
-        if (
-            existing is not None
-            and existing.config.transport_mode != config.transport_mode
-        ):
+        if existing is not None and existing.config.transport_mode != config.transport_mode:
             if existing.config.enabled or config.enabled:
                 raise IngestTransportImmutableError(
                     "transport_mode cannot change while the source is enabled; "
@@ -190,9 +175,9 @@ class IngestConfigStore:
                 "enabled PUSH_AGENT requires the contract migration that isolates "
                 "certification change records from the production unique key"
             )
-        if _switching_pull_to_enforce(existing, config) or _enabling_push_source(
-            existing, config
-        ):
+        if _enabling_pull_source(existing, config):
+            await self._require_active_contract(session, config)
+        if _enabling_push_source(existing, config):
             await self._require_approved_certification(session, config)
         await session.execute(
             text(
@@ -244,6 +229,26 @@ class IngestConfigStore:
             raise IngestConfigError("failed to persist ingest source")
         return stored
 
+    async def _require_active_contract(
+        self, session: AsyncSession, config: IngestSourceConfig
+    ) -> None:
+        # Pull has no separate certification transport. Start strict ingestion
+        # with a reviewed ACTIVE contract, then collect real certification evidence.
+        result = await session.execute(
+            text("""
+            SELECT contract_version FROM platform_core.ingest_contract
+            WHERE source_application_id = :source_application_id
+              AND object_type = :object_type AND status = 'ACTIVE'
+            LIMIT 1
+        """),
+            {
+                "source_application_id": config.source_application_id,
+                "object_type": config.object_type,
+            },
+        )
+        if result.one_or_none() is None:
+            raise IngestConfigError("enabled Pull requires a reviewed ACTIVE ingest contract")
+
     async def _require_approved_certification(
         self, session: AsyncSession, config: IngestSourceConfig
     ) -> None:
@@ -273,13 +278,11 @@ class IngestConfigStore:
         )
         if result.one_or_none() is None:
             raise IngestEnforceNotCertifiedError(
-                "enabled PUSH_AGENT and Pull ENFORCE require an APPROVED "
+                "enabled PUSH_AGENT requires an APPROVED "
                 "certification for the ACTIVE ingest contract and schema fingerprint"
             )
 
-    async def seed_sources(
-        self, session: AsyncSession, configs: list[IngestSourceConfig]
-    ) -> int:
+    async def seed_sources(self, session: AsyncSession, configs: list[IngestSourceConfig]) -> int:
         """Insert sources that do not already exist; returns how many were added."""
         added = 0
         for config in configs:
@@ -331,9 +334,7 @@ class IngestConfigStore:
         if policy.page_limit_default > policy.page_limit_max:
             raise IngestConfigError("page_limit_default cannot exceed page_limit_max")
         if not 1 <= policy.push_staging_retention_hours <= 168:
-            raise IngestConfigError(
-                "push_staging_retention_hours must be between 1 and 168"
-            )
+            raise IngestConfigError("push_staging_retention_hours must be between 1 and 168")
         await session.execute(
             text(
                 """

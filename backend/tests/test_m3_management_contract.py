@@ -47,25 +47,15 @@ def test_m3_management_openapi_exposes_required_server_authorized_resources() ->
             "/portal-api/v1/applications/{application_id}/environments/"
             "{environment}/credentials/revoke"
         ): {"post"},
-        "/portal-api/v1/notification-configurations": {"get"},
-        "/portal-api/v1/applications/{application_id}/notification-recipients": {"get"},
-        "/portal-api/v1/applications/{application_id}/notification-configurations/{channel}": {
-            "put"
-        },
-        "/portal-api/v1/applications/{application_id}/notifications/test": {"post"},
-        "/portal-api/v1/notifications": {"get"},
         "/portal-api/v1/audit-events": {"get"},
         "/portal-api/v1/developer/catalog": {"get"},
-        "/portal-api/v1/developer/sandbox": {"get"},
         "/portal-api/v1/conformance-runs": {"get"},
         "/portal-api/v1/conformance-runs/{run_id}": {"get"},
         "/portal-api/v1/applications/{application_id}/conformance-runs": {"post"},
         "/portal-api/v1/operations/targets": {"get"},
         "/portal-api/v1/operations/summary": {"get"},
         "/portal-api/v1/data/objects": {"get"},
-        "/portal-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}": {
-            "get"
-        },
+        "/portal-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}": {"get"},
         "/portal-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}/history": {
             "get"
         },
@@ -73,9 +63,7 @@ def test_m3_management_openapi_exposes_required_server_authorized_resources() ->
         "/portal-api/v1/ingest/contracts/activate": {"post"},
         "/portal-api/v1/ingest/contracts/reject": {"post"},
         "/portal-api/v1/ingest/contracts/certifications": {"get", "post"},
-        "/portal-api/v1/ingest/contracts/certifications/{certification_id}/approve": {
-            "post"
-        },
+        "/portal-api/v1/ingest/contracts/certifications/{certification_id}/approve": {"post"},
         "/platform-api/v1/ingest/push/capabilities": {"get"},
         "/platform-api/v1/ingest/push/generations": {"post"},
         "/platform-api/v1/ingest/push/generations/{generation_id}": {"get"},
@@ -151,14 +139,6 @@ def test_credential_response_ignores_service_join_context() -> None:
                 "CAST(:status AS varchar)",
                 "CAST(:organization_id AS varchar)",
                 "CAST(:user_id AS uuid)",
-            ),
-        ),
-        (
-            "backend/src/ai_hub_platform/modules/notification/service.py",
-            (
-                "CAST(:application_ids AS varchar[])",
-                "CAST(:status AS varchar)",
-                "CAST(:recipient_user_id AS uuid)",
             ),
         ),
         (
@@ -324,9 +304,9 @@ async def test_authentik_credential_lifecycle_uses_whitelisted_payloads() -> Non
 
 
 def test_operations_summary_exposes_application_entries_without_event_queues() -> None:
-    source = (
-        PROJECT_ROOT / "backend/src/ai_hub_platform/modules/operations/service.py"
-    ).read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "backend/src/ai_hub_platform/modules/operations/service.py").read_text(
+        encoding="utf-8"
+    )
 
     assert '"application_entries": applications' in source
     assert "event_queues" not in source

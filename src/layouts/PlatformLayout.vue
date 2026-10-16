@@ -22,15 +22,12 @@ const navGroups = [
     items: [
       { label: '平台首页', path: '/', icon: 'HomeFilled' },
       { label: '应用中心', path: '/applications', icon: 'Grid' },
-      { label: '通知中心', path: '/platform/notifications', icon: 'Bell' },
     ],
   },
   {
     title: '平台治理',
     items: [
       { label: '用户与组织', path: '/platform/identity', icon: 'UserFilled' },
-      { label: '权限与安全', path: '/platform/permissions', icon: 'Lock' },
-      { label: '接入治理', path: '/platform/integrations', icon: 'Connection' },
       { label: '审计中心', path: '/platform/audit', icon: 'Tickets' },
     ],
   },
@@ -39,25 +36,16 @@ const navGroups = [
     items: [
       { label: '运维中心', path: '/platform/operations', icon: 'Monitor' },
       { label: '数据接入', path: '/platform/ingest', icon: 'Coin' },
-      { label: '平台配置', path: '/platform/settings', icon: 'SetUp' },
-      { label: '开发者中心', path: '/platform/developer', icon: 'Tools' },
-      { label: '平台用户', path: '/platform/platform-users', icon: 'UserFilled' },
     ],
   },
 ]
 
 const routePermissions = {
   '/applications': 'platform.application.read',
-  '/platform/notifications': 'platform.notification.read',
   '/platform/identity': 'platform.identity.read',
-  '/platform/permissions': 'platform.authorization.read',
-  '/platform/integrations': 'platform.application.read',
   '/platform/audit': 'platform.audit.read',
   '/platform/operations': 'platform.operations.read',
   '/platform/ingest': 'platform.ingest.read',
-  '/platform/settings': 'platform.operations.read',
-  '/platform/developer': 'platform.developer.read',
-  '/platform/platform-users': 'platform.identity.read',
 }
 
 const visibleNavGroups = computed(() => navGroups.map((group) => ({
@@ -69,7 +57,6 @@ const visibleNavGroups = computed(() => navGroups.map((group) => ({
 })).filter((group) => group.items.length))
 
 const canViewIdentity = computed(() => session.hasPermission('platform.identity.read'))
-const canViewPermissions = computed(() => session.hasPermission('platform.authorization.read'))
 
 const userInitial = computed(() => session.principal.value?.display_name?.slice(0, 1) || '访')
 const environmentLabel = computed(() => {
@@ -111,7 +98,6 @@ function navigate(path) {
 }
 
 async function handleUserCommand(command) {
-  if (command === 'permissions') navigate('/platform/permissions')
   if (command === 'profile') navigate('/platform/identity')
   if (command === 'logout') {
     try {
@@ -233,9 +219,6 @@ onBeforeUnmount(() => {
             <el-icon><Monitor /></el-icon>
             <span>{{ environmentLabel }}</span>
           </div>
-          <el-tooltip content="消息中心" placement="bottom">
-            <button type="button" class="icon-button" aria-label="打开消息中心" @click="navigate('/platform/notifications')"><el-icon><Bell /></el-icon></button>
-          </el-tooltip>
           <el-dropdown @command="handleUserCommand">
             <button type="button" class="user-button">
               <el-avatar :size="30">{{ userInitial }}</el-avatar>
@@ -245,7 +228,6 @@ onBeforeUnmount(() => {
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-if="canViewIdentity" command="profile">个人与身份</el-dropdown-item>
-                <el-dropdown-item v-if="canViewPermissions" command="permissions">权限与安全</el-dropdown-item>
                 <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>

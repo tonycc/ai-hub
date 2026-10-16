@@ -20,14 +20,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def test_production_targets_match_their_schema_and_safety_invariants() -> None:
     operations = PROJECT_ROOT / "deploy" / "operations"
     targets = json.loads((operations / "production-targets.json").read_text(encoding="utf-8"))
-    schema = json.loads(
-        (operations / "production-targets.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads((operations / "production-targets.schema.json").read_text(encoding="utf-8"))
 
     Draft202012Validator(schema).validate(targets)  # pyright: ignore[reportUnknownMemberType]
-    assert targets["recovery"]["backup_interval_minutes"] <= targets["recovery"][
-        "rpo_minutes"
-    ]
+    assert targets["recovery"]["backup_interval_minutes"] <= targets["recovery"]["rpo_minutes"]
     assert targets["slo"]["public_api_p95_ms"] <= targets["slo"]["public_api_p99_ms"]
     assert targets["deployment_tier"]["profile"] == "base-access"
     assert "event_backlog_warning" not in targets["slo"]
@@ -57,8 +53,7 @@ def test_backup_encryption_round_trip_and_tamper_detection(tmp_path: Path) -> No
 def test_retention_keeps_hourly_and_daily_recovery_points() -> None:
     now = datetime(2026, 8, 13, 12, tzinfo=UTC)
     backups = [
-        (Path(f"backup-{hours}.aesgcm"), now - timedelta(hours=hours))
-        for hours in range(72)
+        (Path(f"backup-{hours}.aesgcm"), now - timedelta(hours=hours)) for hours in range(72)
     ]
 
     keep, delete = retention_selection(
@@ -114,19 +109,15 @@ def test_systemd_monitor_runs_each_minute_with_durable_state_and_no_public_bind(
 
 
 def test_production_runtime_disables_and_does_not_publish_reference_application() -> None:
-    generator = (
-        PROJECT_ROOT / "scripts" / "deploy" / "generate-runtime-env.sh"
-    ).read_text(encoding="utf-8")
+    generator = (PROJECT_ROOT / "scripts" / "deploy" / "generate-runtime-env.sh").read_text(
+        encoding="utf-8"
+    )
     compose = (PROJECT_ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
-    production = (PROJECT_ROOT / "deploy" / "compose.production.yaml").read_text(
+    production = (PROJECT_ROOT / "deploy" / "compose.production.yaml").read_text(encoding="utf-8")
+    dynamic = (PROJECT_ROOT / "deploy/traefik/dynamic.production.yaml").read_text(encoding="utf-8")
+    core_blueprint = (PROJECT_ROOT / "deploy/authentik/ai-hub-blueprint.yaml").read_text(
         encoding="utf-8"
     )
-    dynamic = (PROJECT_ROOT / "deploy/traefik/dynamic.production.yaml").read_text(
-        encoding="utf-8"
-    )
-    core_blueprint = (
-        PROJECT_ROOT / "deploy/authentik/ai-hub-blueprint.yaml"
-    ).read_text(encoding="utf-8")
     reference_blueprint = (
         PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
     ).read_text(encoding="utf-8")
@@ -134,8 +125,8 @@ def test_production_runtime_disables_and_does_not_publish_reference_application(
         PROJECT_ROOT / "deploy/authentik/ai-hub-production-blueprint.yaml"
     ).read_text(encoding="utf-8")
 
-    assert "AI_HUB_REFERENCE_APPLICATION_ENABLED=false" in generator
-    assert 'AI_HUB_REFERENCE_APPLICATION_ENABLED: "false"' in production
+    assert "AI_HUB_REFERENCE_APPLICATION_ENABLED" not in generator
+    assert "AI_HUB_REFERENCE_APPLICATION_ENABLED" not in production
     assert "platform-ingest-scheduler:" in production
     assert "AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:?" in production
     assert "profiles: !override\n      - reference-app" in production
@@ -157,10 +148,10 @@ def test_production_runtime_disables_and_does_not_publish_reference_application(
     assert "AI_HUB_AUTHENTIK_API_URL=https://${AUTH_HOST}" not in generator
     # Base/local compose still mounts the reference fixture and passes its URL.
     assert "STANDALONE_PORTAL_URL: ${STANDALONE_PORTAL_URL" in compose
-    assert "AI_HUB_STANDALONE_PORTAL_URL: ${AI_HUB_STANDALONE_PORTAL_URL" in compose
-    assert "AI_HUB_STANDALONE_API_BASE_URL: ${AI_HUB_STANDALONE_API_BASE_URL" in compose
-    assert "AI_HUB_STANDALONE_HEALTH_URL: ${AI_HUB_STANDALONE_HEALTH_URL" in compose
-    assert "AI_HUB_STANDALONE_OIDC_REDIRECT_URI: ${AI_HUB_STANDALONE_OIDC_REDIRECT_URI" in compose
+    assert "AI_HUB_STANDALONE_PORTAL_URL" not in compose
+    assert "AI_HUB_STANDALONE_API_BASE_URL" not in compose
+    assert "AI_HUB_STANDALONE_HEALTH_URL" not in compose
+    assert "AI_HUB_STANDALONE_OIDC_REDIRECT_URI" not in compose
     # The blueprint reads the value instead of hardcoding the callback as the
     # launch URL.
     assert "STANDALONE_PORTAL_URL" in reference_blueprint
@@ -169,16 +160,3 @@ def test_production_runtime_disables_and_does_not_publish_reference_application(
     assert "AI_HUB_BRAND_ICON_URL=https://${PLATFORM_HOST}/ai-hub-icon.svg" in generator
     assert "AI_HUB_BRAND_ICON_URL: ${AI_HUB_BRAND_ICON_URL" in compose
     assert "branding_logo: !Env [AI_HUB_BRAND_ICON_URL" in core_blueprint
-
-
-def test_sandbox_configuration_uses_dedicated_provider_identity() -> None:
-    # The developer center copies the sandbox configuration into the reference
-    # app's environment, so the issuer/audience must describe the sandbox
-    # application's own dedicated provider, not the shared platform provider.
-    source = (
-        PROJECT_ROOT / "backend" / "src" / "ai_hub_platform" / "api" / "developer.py"
-    ).read_text(encoding="utf-8")
-    assert 'f"/application/o/{settings.sandbox_application_id}/"' in source
-    assert "oidc_audience=settings.sandbox_application_id" in source
-    assert '"/application/o/ai-hub/"' not in source
-    assert "oidc_audience=settings.oidc_audience" not in source

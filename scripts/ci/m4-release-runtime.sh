@@ -48,7 +48,7 @@ m4_release_compose() {
     --project-name "${M4_RELEASE_PROJECT_NAME}" \
     --env-file "${M4_RELEASE_ENV_FILE}" \
     -f "${M4_RELEASE_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 
@@ -311,7 +311,7 @@ m4_release_cli create-manifest \
   --project-root "${M4_RELEASE_PROJECT_ROOT}" \
   --release-id "${M4_RELEASE_CANDIDATE_ID}" \
   --environment test \
-  --profile base-access \
+  --profile base-access --profile reference-app \
   --platform-image "${M4_RELEASE_CANDIDATE_PLATFORM_IMAGE}" \
   --portal-image "${M4_RELEASE_CANDIDATE_PORTAL_IMAGE}" \
   --backup-receipt "${M4_RELEASE_BACKUP_RECEIPT}" \
@@ -369,7 +369,7 @@ m4_release_note "rolling back images without downgrading the expanded schema"
 m4_release_cli rollback "${M4_RELEASE_MANIFEST}" \
   --compose-file "${M4_RELEASE_COMPOSE_FILE}" \
   --env-file "${M4_RELEASE_ENV_FILE}" \
-  --profile base-access \
+  --profile base-access --profile reference-app \
   --project-name "${M4_RELEASE_PROJECT_NAME}" \
   >"${M4_RELEASE_WORK_DIR}/rollback.json"
 jq --exit-status \

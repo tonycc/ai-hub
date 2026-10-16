@@ -24,7 +24,7 @@ returns. Services keep running in the background; no log streaming by default.
 Start the frontend separately with npm run dev.
 
 Profile:
-  base-access  API, identity, raw ingest, and reference application (default)
+  base-access  API, identity, and raw ingest (default)
 
 Options:
   --no-build       Reuse existing local application images

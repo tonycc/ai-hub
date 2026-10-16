@@ -1,5 +1,7 @@
 # AI Hub Platform Backend
 
+> 2026-10-16 简化基线：平台保留统一身份、应用登记与凭据、数据接入、审计和运维。平台托管业务授权及测试通知已退役，相关旧接口、SDK 方法和菜单不再提供；业务授权全部由应用执行。初始管理员领取与员工目录同步为可选能力。数据接入仅支持 ENFORCE，已移除推断草稿与 AUDIT_ONLY。本文后续涉及旧功能或阶段性兼容的内容仅作历史记录，当前接入以 开发者指南 `docs/developer-integration-guide.md` 和 API 契约为准。
+
 Python 模块化单体。HTTP API 与增量 ingest Worker 使用同一组领域和应用模块，但以不同进程运行和扩缩容。
 
 实施顺序、数据库逻辑隔离、身份/API 门禁见[方案实施计划](../docs/implementation-plan.md)。M1 已完成 authentik、Traefik、正式 OIDC/JWKS 本地验证、应用登记、身份权限、服务身份、测试通知和追加式审计；不使用临时身份实现替代。M7 提供应用数据的增量拉取接入（ingest）。

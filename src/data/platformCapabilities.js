@@ -1,68 +1,9 @@
-export const platformCapabilityGroups = [
-  {
-    key: 'foundation',
-    name: '平台基础与接入',
-    description: '建立可独立部署、可验证、可恢复的平台接入骨架。',
-    icon: 'Connection',
-    color: '#416f86',
-    items: [
-      { code: 'M0-DEPLOY', name: '部署基线', description: '单 PostgreSQL 集群、逻辑隔离、部署档位和配置校验', route: '/platform/operations', phase: 'M0', status: '已具备' },
-      { code: 'APP-REGISTRY', name: '应用注册', description: '登记环境、入口、回调、健康、版本和接入能力', route: '/applications', phase: 'V0.1', status: '已具备' },
-      { code: 'PORTAL-APP', name: '平台门户', description: '按权限展示应用入口和平台治理入口', route: '/', phase: 'V0.1', status: '已具备' },
-      { code: 'ACCESS-API', name: '平台 API 接入', description: '用户令牌、服务身份、权限范围、错误码和调用审计', route: '/platform/integrations', phase: 'V0.1', status: '已具备' },
-      { code: 'DATA-INGEST', name: '增量数据接入', description: '应用导出契约、版本水位、平台拉取与对账', route: '/platform/ingest', phase: 'V0.1', status: '已具备' },
-    ],
-  },
-  {
-    key: 'identity-security',
-    name: '身份、权限与安全',
-    description: '统一治理身份映射、组织、角色、权限点、数据范围和密钥。',
-    icon: 'Lock',
-    color: '#527a64',
-    items: [
-      { code: 'IAM-IDENTITY', name: '用户与组织', description: 'authentik 身份映射、组织和账号生命周期', route: '/platform/identity', phase: 'V0.5', status: '已具备' },
-      { code: 'IAM-RBAC', name: '角色与权限点', description: '角色、权限注册、授权版本和访问复核', route: '/platform/permissions', phase: 'V0.5', status: '已具备' },
-      { code: 'IAM-SCOPE', name: '数据范围', description: '应用级数据范围契约与本地对象级校验边界', route: '/platform/permissions', phase: 'V0.5', status: '已具备' },
-      { code: 'APP-CREDENTIAL', name: '应用密钥', description: '服务身份、权限范围、生成、删除和紧急停用', route: '/applications', phase: 'V0.5', status: '已具备' },
-      { code: 'AUDIT-SECURITY', name: '安全审计', description: '身份、授权、密钥和公共能力调用审计', route: '/platform/audit', phase: 'V0.5', status: '已具备' },
-    ],
-  },
-  {
-    key: 'public-services',
-    name: '平台公共服务',
-    description: '通过稳定契约向独立应用提供最小公共能力。',
-    icon: 'Grid',
-    color: '#836b48',
-    items: [
-      { code: 'MSG-NOTIFY', name: '站内测试通知', description: '验证通知配置、幂等、状态查询和审计链路；不代表外部消息渠道', route: '/platform/notifications', phase: 'V0.5', status: '已具备' },
-      { code: 'XAPP-CATALOG', name: '契约目录', description: 'OpenAPI、能力、版本和消费方登记', route: '/platform/developer', phase: 'V0.5', status: '已具备' },
-      { code: 'PLATFORM-CONFIG', name: '平台配置', description: '运行目标、保留策略、责任路由和高可用触发条件的只读配置即代码视图', route: '/platform/settings', phase: 'V1.0', status: '已具备' },
-    ],
-  },
-  {
-    key: 'operations-development',
-    name: '运维与开发者体验',
-    description: '保障平台可以发布、监控、恢复并被独立应用稳定消费。',
-    icon: 'SetUp',
-    color: '#58667b',
-    items: [
-      { code: 'OBS-CENTER', name: '运行诊断', description: '应用入口、数据来源与同步新鲜度只读诊断', route: '/platform/operations', phase: 'V0.5', status: '已具备' },
-      { code: 'BACKUP-RECOVERY', name: '备份恢复', description: '备份、恢复演练、RPO、RTO 和运行手册', route: '/platform/operations', phase: 'V1.0', status: '已具备' },
-      { code: 'DEV-CONTRACT', name: '开发者中心', description: '公开契约、SDK、沙箱、本地替身和接入文档', route: '/platform/developer', phase: 'V0.5', status: '已具备' },
-      { code: 'CONFORMANCE', name: '接入认证', description: 'API-only 与 DATA_INGEST 配置的一致性测试', route: '/platform/integrations', phase: 'V0.5', status: '已具备' },
-    ],
-  },
-  {
-    key: 'later-governance',
-    name: '后续治理能力',
-    description: '只有形成明确平台需求和验收标准后才启动。',
-    icon: 'MagicStick',
-    color: '#735f84',
-    items: [
-      { code: 'SEM-CENTER', name: '企业语义中心', description: '语义目录、版本、来源绑定和变更影响', route: '/semantics', phase: 'V1.1', status: '待实施' },
-      { code: 'AI-GOVERNANCE', name: 'AI 治理中心', description: '模型、知识、工具、评测、证据和运行审计', route: '/ai-center', phase: 'V1.2', status: '待实施' },
-      { code: 'OPTIONAL-WORKFLOW', name: '工作流与统一待办', description: '仅在正式纳入平台产品范围后独立立项', route: '/platform/developer', phase: '后置', status: '未启用' },
-      { code: 'OPTIONAL-FILE', name: '文件与通用表单', description: '仅在正式纳入平台产品范围后独立立项', route: '/platform/developer', phase: '后置', status: '未启用' },
-    ],
-  },
-]
+export const platformCapabilityGroups = [{
+  key: 'platform', name: '平台能力', items: [
+    { code: 'IDENTITY', name: '用户与组织', description: '企业身份、组织与平台管理权限', route: '/platform/identity' },
+    { code: 'APPLICATIONS', name: '应用接入', description: '应用登记、凭据、接入检查与文档', route: '/applications' },
+    { code: 'INGEST', name: '数据接入', description: '契约化数据汇聚、对账与重建', route: '/platform/ingest' },
+    { code: 'AUDIT', name: '审计', description: '平台操作审计', route: '/platform/audit' },
+    { code: 'OPERATIONS', name: '运维', description: '运行状态与部署配置', route: '/platform/operations' },
+  ],
+}]

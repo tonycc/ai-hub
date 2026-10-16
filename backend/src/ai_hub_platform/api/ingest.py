@@ -71,7 +71,7 @@ class IngestSourceResponse(ApiModel):
     page_limit: int
     enabled: bool
     push_protocol_version: str | None = None
-    contract_validation_mode: str = "AUDIT_ONLY"
+    contract_validation_mode: str = "ENFORCE"
     allow_empty_full: bool = False
     updated_at: datetime
     last_cursor: int | None = None
@@ -92,7 +92,7 @@ class IngestSourceUpsertRequest(ApiModel):
     page_limit: int | None = Field(default=None, ge=1, le=5000)
     enabled: bool = False
     push_protocol_version: str | None = None
-    contract_validation_mode: Literal["AUDIT_ONLY", "ENFORCE"] = "AUDIT_ONLY"
+    contract_validation_mode: Literal["ENFORCE"] = "ENFORCE"
     allow_empty_full: bool = False
 
 
@@ -436,16 +436,11 @@ async def put_ingest_source(
         page_limit = (
             body.page_limit
             if body.page_limit is not None
-            else (
-                existing.config.page_limit
-                if existing is not None
-                else policy.page_limit_default
-            )
+            else (existing.config.page_limit if existing is not None else policy.page_limit_default)
         )
         if page_limit > policy.page_limit_max:
             raise IngestConfigError(
-                f"page_limit cannot exceed the configured maximum "
-                f"({policy.page_limit_max})"
+                f"page_limit cannot exceed the configured maximum ({policy.page_limit_max})"
             )
         config = IngestSourceConfig(
             source_application_id=body.source_application_id,
@@ -460,10 +455,7 @@ async def put_ingest_source(
             contract_validation_mode=body.contract_validation_mode,
             allow_empty_full=body.allow_empty_full,
         )
-        if (
-            existing is not None
-            and existing.config.transport_mode != config.transport_mode
-        ):
+        if existing is not None and existing.config.transport_mode != config.transport_mode:
             try:
                 await _reject_if_active_push_generation(
                     session,
@@ -474,8 +466,7 @@ async def put_ingest_source(
                 raise
             except Exception as error:  # noqa: BLE001 - fail closed if raw is unreachable
                 raise IngestTransportBusyError(
-                    "cannot verify in-flight push generations before changing "
-                    "transport_mode"
+                    "cannot verify in-flight push generations before changing transport_mode"
                 ) from error
         saved = await store.upsert_source(session, config)
     except IngestEnforceNotCertifiedError as error:
@@ -506,9 +497,7 @@ async def put_ingest_source(
                 "new": config.transport_mode,
             },
             "contract_validation_mode": {
-                "old": None
-                if existing is None
-                else existing.config.contract_validation_mode,
+                "old": None if existing is None else existing.config.contract_validation_mode,
                 "new": config.contract_validation_mode,
             },
         },
@@ -529,7 +518,7 @@ async def action_sync(
             )
         ),
     ],
-    ) -> dict[str, Any]:
+) -> dict[str, Any]:
     settings = request.app.state.settings
     store = IngestConfigStore()
     enabled = pull_export_sources(await store.list_enabled_source_configs(session))

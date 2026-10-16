@@ -3,7 +3,13 @@
   "schema_version": 1,
   "timezone": "Asia/Shanghai",
   "service_window": {
-    "days": ["MON", "TUE", "WED", "THU", "FRI"],
+    "days": [
+      "MON",
+      "TUE",
+      "WED",
+      "THU",
+      "FRI"
+    ],
     "start": "08:00",
     "end": "20:00",
     "planned_maintenance_notice_hours": 24
@@ -29,7 +35,6 @@
   },
   "retention": {
     "audit_days": 365,
-    "notification_days": 90,
     "portal_session_days_after_expiry": 7,
     "conformance_days_after_expiry": 7,
     "backup_hourly_count": 168,

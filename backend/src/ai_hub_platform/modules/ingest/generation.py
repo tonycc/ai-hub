@@ -41,9 +41,7 @@ GenerationStatus = Literal[
 ]
 GenerationPurpose = Literal["production", "certification"]
 ACTIVE_GENERATION_STATUSES = frozenset({"OPEN", "RECEIVING", "COMPLETING"})
-TERMINAL_GENERATION_STATUSES = frozenset(
-    {"COMPLETED", "FAILED", "ABORTED", "EXPIRED"}
-)
+TERMINAL_GENERATION_STATUSES = frozenset({"COMPLETED", "FAILED", "ABORTED", "EXPIRED"})
 CLIENT_LEASE = timedelta(seconds=60)
 WORKER_LEASE = timedelta(seconds=120)
 STAGING_RETENTION = timedelta(hours=24)
@@ -169,9 +167,7 @@ class StagingRecord:
 
 
 class GenerationStore(Protocol):
-    async def lock_source(
-        self, source_application_id: str, object_type: str
-    ) -> None: ...
+    async def lock_source(self, source_application_id: str, object_type: str) -> None: ...
 
     async def get(
         self, generation_id: UUID, *, for_update: bool = False
@@ -266,13 +262,9 @@ class GenerationStore(Protocol):
         purpose: GenerationPurpose = "production",
     ) -> dict[str, Any]: ...
 
-    async def list_lease_candidates(
-        self, now: datetime
-    ) -> list[GenerationState]: ...
+    async def list_lease_candidates(self, now: datetime) -> list[GenerationState]: ...
 
-    async def list_completing_candidates(
-        self, now: datetime
-    ) -> list[GenerationState]: ...
+    async def list_completing_candidates(self, now: datetime) -> list[GenerationState]: ...
 
     async def get_committed_watermark(
         self, source_application_id: str, object_type: str
@@ -297,23 +289,17 @@ class InMemoryGenerationStore:
         self.staging: dict[UUID, list[StagingRecord]] = {}
         self.current: dict[tuple[str, str, str], IngestRecord] = {}
         self.changes: dict[tuple[str, str, str, int, GenerationPurpose], IngestRecord] = {}
-        self.batch_receipts: dict[
-            tuple[str, str, str, GenerationPurpose], SourceBatchReceipt
-        ] = {}
+        self.batch_receipts: dict[tuple[str, str, str, GenerationPurpose], SourceBatchReceipt] = {}
         self.committed_watermarks: dict[tuple[str, str], int] = {}
         self.updated_at: dict[UUID, datetime] = {}
         self.published_full_count = 0
         self.transitions: list[GenerationTransition] = []
         self._persisted_status: dict[UUID, str] = {}
 
-    async def lock_source(
-        self, source_application_id: str, object_type: str
-    ) -> None:
+    async def lock_source(self, source_application_id: str, object_type: str) -> None:
         del source_application_id, object_type
 
-    async def get(
-        self, generation_id: UUID, *, for_update: bool = False
-    ) -> GenerationState | None:
+    async def get(self, generation_id: UUID, *, for_update: bool = False) -> GenerationState | None:
         del for_update
         return self.generations.get(generation_id)
 
@@ -430,9 +416,7 @@ class InMemoryGenerationStore:
         self.generations[generation.generation_id] = generation
         self.updated_at[generation.generation_id] = datetime.now(tz=UTC)
 
-    async def append_staging(
-        self, generation_id: UUID, records: Sequence[StagingRecord]
-    ) -> None:
+    async def append_staging(self, generation_id: UUID, records: Sequence[StagingRecord]) -> None:
         staged = self.staging.setdefault(generation_id, [])
         seen = {(item.sequence_no, item.record.object_id) for item in staged}
         for item in records:
@@ -605,11 +589,9 @@ class InMemoryGenerationStore:
             existing_key = (*version_key, purpose)
             existing_change = self.changes.get(existing_key)
             if existing_change is not None:
-                if (
-                    existing_change.operation != record.operation
-                    or payload_content_hash(existing_change.payload)
-                    != payload_content_hash(record.payload)
-                ):
+                if existing_change.operation != record.operation or payload_content_hash(
+                    existing_change.payload
+                ) != payload_content_hash(record.payload):
                     raise IngestRecordConflictError(
                         f"object_id/version already exists with different content: "
                         f"{record.object_id}@{record.version}"
@@ -653,10 +635,7 @@ class InMemoryGenerationStore:
             generation
             for generation in self.generations.values()
             if generation.status in {"OPEN", "RECEIVING"}
-            and (
-                now > generation.client_lease_expires_at
-                or _lifetime_exceeded(generation, now)
-            )
+            and (now > generation.client_lease_expires_at or _lifetime_exceeded(generation, now))
         ]
 
     async def list_completing_candidates(self, now: datetime) -> list[GenerationState]:
@@ -668,9 +647,7 @@ class InMemoryGenerationStore:
             and now > generation.worker_lease_expires_at
         ]
 
-    async def get_committed_watermark(
-        self, source_application_id: str, object_type: str
-    ) -> int:
+    async def get_committed_watermark(self, source_application_id: str, object_type: str) -> int:
         return self.committed_watermarks.get((source_application_id, object_type), 0)
 
     async def put_committed_watermark(
@@ -708,7 +685,6 @@ class PushGenerationService:
         clock: Clock | None = None,
         payload_max_bytes: int = 1_048_576,
         batch_row_limit: int = 5_000,
-        pull_enforcement_gate: bool = False,
         actor: str | None = None,
         request_id: str | None = None,
     ) -> None:
@@ -717,7 +693,6 @@ class PushGenerationService:
         self.clock = clock or (lambda: datetime.now(tz=UTC))
         self.payload_max_bytes = payload_max_bytes
         self.batch_row_limit = batch_row_limit
-        self.pull_enforcement_gate = pull_enforcement_gate
         self.actor = actor
         self.request_id = request_id
 
@@ -745,9 +720,7 @@ class PushGenerationService:
     ) -> GenerationState:
         _assert_caller(source, caller_application_id)
         digest = canonical_json_digest(dict(request))
-        await self.store.lock_source(
-            source.source_application_id, source.object_type
-        )
+        await self.store.lock_source(source.source_application_id, source.object_type)
         active = await self.store.get_active(
             source.source_application_id,
             source.object_type,
@@ -777,9 +750,7 @@ class PushGenerationService:
                 "PUSH_AGENT requires an ACTIVE ingest contract",
                 status_code=400,
             )
-        still_active = await self.store.get_active(
-            source.source_application_id, source.object_type
-        )
+        still_active = await self.store.get_active(source.source_application_id, source.object_type)
         if still_active is not None:
             raise PushIngestError(
                 "generation_in_progress",
@@ -801,9 +772,7 @@ class PushGenerationService:
             purpose=purpose,
             created_at=self.clock(),
         )
-        await self.store.insert(
-            generation, actor=self.actor, request_id=self.request_id
-        )
+        await self.store.insert(generation, actor=self.actor, request_id=self.request_id)
         return generation
 
     async def peek_generation(self, generation_id: UUID) -> GenerationState:
@@ -838,9 +807,7 @@ class PushGenerationService:
         lease_seconds: int = 60,
     ) -> GenerationState:
         _assert_caller(source, caller_application_id)
-        await self.store.lock_source(
-            source.source_application_id, source.object_type
-        )
+        await self.store.lock_source(source.source_application_id, source.object_type)
         generation = await self.get_generation(generation_id)
         _assert_writable_push_source(source, purpose=generation.purpose)
         if generation.status not in {"OPEN", "RECEIVING"}:
@@ -876,9 +843,7 @@ class PushGenerationService:
         caller_application_id: str,
     ) -> GenerationState:
         _assert_caller(source, caller_application_id)
-        await self.store.lock_source(
-            source.source_application_id, source.object_type
-        )
+        await self.store.lock_source(source.source_application_id, source.object_type)
         generation = await self.get_generation(generation_id)
         _assert_writable_push_source(source, purpose=generation.purpose)
         if generation.status not in {"OPEN", "RECEIVING"}:
@@ -906,9 +871,7 @@ class PushGenerationService:
         schema_fingerprint: str,
     ) -> dict[str, Any]:
         _assert_caller(source, caller_application_id)
-        await self.store.lock_source(
-            source.source_application_id, source.object_type
-        )
+        await self.store.lock_source(source.source_application_id, source.object_type)
         generation = await self.get_generation(generation_id)
         _assert_batch_content_digest(records, content_sha256)
         if generation.status == "EXPIRED":
@@ -989,15 +952,14 @@ class PushGenerationService:
             (
                 batch
                 for batch in generation.accepted_batches
-                if batch.external_batch_id == external_batch_id
-                or batch.sequence_no == sequence_no
+                if batch.external_batch_id == external_batch_id or batch.sequence_no == sequence_no
             ),
             None,
         )
         if existing is not None:
             if (
                 existing.external_batch_id == external_batch_id
-                and                 existing.content_sha256 == content_sha256
+                and existing.content_sha256 == content_sha256
                 and existing.sequence_no == sequence_no
             ):
                 return _idempotent_replay(
@@ -1078,10 +1040,7 @@ class PushGenerationService:
                 "schema_fingerprint cannot change mid-generation",
                 status_code=400,
             )
-        if (
-            contract is not None
-            and schema_fingerprint != contract.schema_fingerprint
-        ):
+        if contract is not None and schema_fingerprint != contract.schema_fingerprint:
             raise PushIngestError(
                 "ingest_contract_rejected",
                 "schema_fingerprint does not match the registered ACTIVE contract",
@@ -1124,10 +1083,7 @@ class PushGenerationService:
 
         raw_batch_id: str | None = None
         if generation.sync_mode == "incremental":
-            if (
-                source_receipt is not None
-                and source_receipt.batch.raw_batch_id is not None
-            ):
+            if source_receipt is not None and source_receipt.batch.raw_batch_id is not None:
                 _assert_materialized_envelope(
                     source_receipt.batch,
                     high_watermark=high_watermark,
@@ -1138,9 +1094,7 @@ class PushGenerationService:
                 raw_batch_id = source_receipt.batch.raw_batch_id
                 committed_watermark = source_receipt.batch.high_watermark
             else:
-                await self._assert_watermark_not_regressed(
-                    generation, high_watermark
-                )
+                await self._assert_watermark_not_regressed(generation, high_watermark)
                 try:
                     raw_batch_id = await self.store.load_incremental(
                         source_application_id=source.source_application_id,
@@ -1152,9 +1106,7 @@ class PushGenerationService:
                         external_batch_id=external_batch_id,
                         content_sha256=content_sha256,
                         schema_fingerprint=schema_fingerprint,
-                        apply_current_state=_applies_production_current_state(
-                            generation.purpose
-                        ),
+                        apply_current_state=_applies_production_current_state(generation.purpose),
                         purpose=generation.purpose,
                     )
                 except IngestRecordConflictError as error:
@@ -1164,9 +1116,7 @@ class PushGenerationService:
                         status_code=409,
                     ) from error
                 committed_watermark = high_watermark
-            await self._commit_watermark_if_production(
-                generation, committed_watermark
-            )
+            await self._commit_watermark_if_production(generation, committed_watermark)
         else:
             await self.store.append_staging(
                 generation.generation_id,
@@ -1218,9 +1168,7 @@ class PushGenerationService:
         publish: bool = True,
     ) -> GenerationState:
         _assert_caller(source, caller_application_id)
-        await self.store.lock_source(
-            source.source_application_id, source.object_type
-        )
+        await self.store.lock_source(source.source_application_id, source.object_type)
         generation = await self.get_generation(generation_id)
         digest = canonical_json_digest(
             {
@@ -1286,10 +1234,7 @@ class PushGenerationService:
             generation.source_application_id, generation.object_type
         )
         previous_hw = max(
-            (
-                batch.high_watermark
-                for batch in generation.accepted_batches[:-1]
-            ),
+            (batch.high_watermark for batch in generation.accepted_batches[:-1]),
             default=0,
         )
         minimum_hw = max(persisted_hw, committed_hw, previous_hw)
@@ -1314,14 +1259,10 @@ class PushGenerationService:
                     high_watermark=high_watermark,
                 )
             except IngestValidationError:
-                return await self._fail_generation(
-                    generation, "generation_complete_mismatch"
-                )
+                return await self._fail_generation(generation, "generation_complete_mismatch")
             object_ids = [item.record.object_id for item in staged]
             if len(object_ids) != len(set(object_ids)):
-                return await self._fail_generation(
-                    generation, "duplicate_object_in_full"
-                )
+                return await self._fail_generation(generation, "duplicate_object_in_full")
 
         generation.status = "COMPLETING"
         generation.completion_digest = digest
@@ -1373,16 +1314,13 @@ class PushGenerationService:
         peeked = await self.store.get(generation_id, for_update=False)
         if peeked is None:
             return None
-        await self.store.lock_source(
-            peeked.source_application_id, peeked.object_type
-        )
+        await self.store.lock_source(peeked.source_application_id, peeked.object_type)
         now = self.clock()
         generation = await self.store.get(generation_id, for_update=True)
         if generation is None:
             return None
         if generation.status in {"OPEN", "RECEIVING"} and (
-            now > generation.client_lease_expires_at
-            or _lifetime_exceeded(generation, now)
+            now > generation.client_lease_expires_at or _lifetime_exceeded(generation, now)
         ):
             generation.status = "EXPIRED"
             await self._persist(
@@ -1402,9 +1340,7 @@ class PushGenerationService:
         peeked = await self.store.get(generation_id, for_update=False)
         if peeked is None:
             return None
-        await self.store.lock_source(
-            peeked.source_application_id, peeked.object_type
-        )
+        await self.store.lock_source(peeked.source_application_id, peeked.object_type)
         now = self.clock()
         generation = await self.store.get(generation_id, for_update=True)
         if (
@@ -1456,9 +1392,7 @@ class PushGenerationService:
                 recovered.append(result)
         return recovered
 
-    async def purge_stale_staging(
-        self, *, retention: timedelta | None = None
-    ) -> int:
+    async def purge_stale_staging(self, *, retention: timedelta | None = None) -> int:
         hold = STAGING_RETENTION if retention is None else retention
         return await self.store.purge_terminal_staging(self.clock() - hold)
 
@@ -1497,9 +1431,7 @@ class PushGenerationService:
         try:
             return await self._publish(generation, high_watermark)
         except IngestValidationError:
-            return await self._fail_generation(
-                generation, "generation_complete_mismatch"
-            )
+            return await self._fail_generation(generation, "generation_complete_mismatch")
 
     async def _publish(
         self,
@@ -1520,9 +1452,7 @@ class PushGenerationService:
                 payload_contract_version=contract_version,
                 generation_id=generation.generation_id,
                 schema_fingerprint=generation.schema_fingerprint,
-                apply_current_state=_applies_production_current_state(
-                    generation.purpose
-                ),
+                apply_current_state=_applies_production_current_state(generation.purpose),
                 purpose=generation.purpose,
             )
             raw_batch_id = receipt.get("raw_batch_id")
@@ -1539,9 +1469,7 @@ class PushGenerationService:
                     )
         else:
             receipt = {
-                "record_count": sum(
-                    batch.record_count for batch in generation.accepted_batches
-                ),
+                "record_count": sum(batch.record_count for batch in generation.accepted_batches),
                 "tombstones": 0,
                 "high_watermark": high_watermark,
             }
@@ -1596,9 +1524,7 @@ def _assert_generation_limits(
             status_code=409,
             details={"max_batches": PUSH_MAX_BATCHES},
         )
-    total_rows = (
-        sum(batch.record_count for batch in generation.accepted_batches) + record_count
-    )
+    total_rows = sum(batch.record_count for batch in generation.accepted_batches) + record_count
     if total_rows > PUSH_MAX_GENERATION_ROWS:
         raise PushIngestError(
             "generation_limit_exceeded",
@@ -1606,9 +1532,7 @@ def _assert_generation_limits(
             status_code=409,
             details={"max_generation_rows": PUSH_MAX_GENERATION_ROWS},
         )
-    total_bytes = (
-        sum(batch.content_bytes for batch in generation.accepted_batches) + content_bytes
-    )
+    total_bytes = sum(batch.content_bytes for batch in generation.accepted_batches) + content_bytes
     if total_bytes > PUSH_MAX_GENERATION_BYTES:
         raise PushIngestError(
             "generation_limit_exceeded",
@@ -1677,9 +1601,7 @@ def _assert_materialized_envelope(
         )
 
 
-def _assert_batch_content_digest(
-    records: Sequence[IngestRecord], content_sha256: str
-) -> None:
+def _assert_batch_content_digest(records: Sequence[IngestRecord], content_sha256: str) -> None:
     if _batch_content_digest(records) != content_sha256:
         raise PushIngestError(
             "batch_digest_conflict",

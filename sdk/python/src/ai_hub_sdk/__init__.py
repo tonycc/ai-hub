@@ -1,10 +1,5 @@
 """Public Python integration SDK for AI Hub."""
 
-from ai_hub_sdk.authorization import (
-    AuthorizationCache,
-    AuthorizationUnavailableError,
-    AuthorizationVersionMismatchError,
-)
 from ai_hub_sdk.client import AiHubClient
 from ai_hub_sdk.export import (
     EXPORT_SCOPE,
@@ -33,17 +28,11 @@ from ai_hub_sdk.models import (
     AdminBootstrapClaim,
     ApplicationEnvironment,
     ApplicationRegistration,
-    AuthorizationDecision,
-    AuthorizationDecisionRequest,
     CurrentUser,
-    DataScope,
     DirectoryPage,
     DirectoryUser,
     ErrorResponse,
     HealthResponse,
-    NotificationRequest,
-    NotificationResult,
-    PermissionSnapshot,
 )
 
 __all__ = [
@@ -51,14 +40,8 @@ __all__ = [
     "AiHubClient",
     "ApplicationEnvironment",
     "ApplicationRegistration",
-    "AuthorizationCache",
-    "AuthorizationDecision",
-    "AuthorizationDecisionRequest",
     "AuthorizationRequest",
-    "AuthorizationUnavailableError",
-    "AuthorizationVersionMismatchError",
     "CurrentUser",
-    "DataScope",
     "DirectoryPage",
     "DirectoryUser",
     "EXPORT_SCOPE",
@@ -72,14 +55,11 @@ __all__ = [
     "assert_versions_monotonic",
     "build_export_page",
     "HealthResponse",
-    "NotificationRequest",
-    "NotificationResult",
     "OAuthProtocolError",
     "OAuthToken",
     "OidcClient",
     "OidcTokenValidator",
     "paginate_export_records",
-    "PermissionSnapshot",
     "require_export_scope",
     "TokenValidationError",
     "VerifiedToken",

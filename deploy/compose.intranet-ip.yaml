@@ -27,7 +27,6 @@ services:
     image: ${AI_HUB_PLATFORM_IMAGE_REF:?Set immutable AI_HUB_PLATFORM_IMAGE_REF}
     build: !reset null
     environment:
-      AI_HUB_REFERENCE_APPLICATION_ENABLED: "false"
       SSL_CERT_FILE: /etc/ai-hub/ca/ca-bundle.crt
     volumes:
       - type: bind

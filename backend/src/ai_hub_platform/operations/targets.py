@@ -49,7 +49,6 @@ class RecoveryTargets:
 @dataclass(frozen=True, slots=True)
 class RetentionTargets:
     audit_days: int
-    notification_days: int
     portal_session_days_after_expiry: int
     conformance_days_after_expiry: int
     backup_hourly_count: int
@@ -239,9 +238,7 @@ def load_production_targets(path_value: str) -> ProductionTargets:
     )
     _exact_keys(
         recovery,
-        required=frozenset(
-            {"rpo_minutes", "rto_minutes", "backup_interval_minutes"}
-        ),
+        required=frozenset({"rpo_minutes", "rto_minutes", "backup_interval_minutes"}),
         context="recovery",
     )
     _exact_keys(
@@ -249,7 +246,6 @@ def load_production_targets(path_value: str) -> ProductionTargets:
         required=frozenset(
             {
                 "audit_days",
-                "notification_days",
                 "portal_session_days_after_expiry",
                 "conformance_days_after_expiry",
                 "backup_hourly_count",
@@ -293,7 +289,6 @@ def load_production_targets(path_value: str) -> ProductionTargets:
         ),
         retention=RetentionTargets(
             audit_days=_positive_integer(retention, "audit_days"),
-            notification_days=_positive_integer(retention, "notification_days"),
             portal_session_days_after_expiry=_positive_integer(
                 retention, "portal_session_days_after_expiry"
             ),

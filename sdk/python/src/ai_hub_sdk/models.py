@@ -2,18 +2,13 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
     version: str
-
-
-class DataScope(BaseModel):
-    scope_type: str
-    value: dict[str, Any]
 
 
 class CurrentUser(BaseModel):
@@ -25,32 +20,6 @@ class CurrentUser(BaseModel):
     organization_id: str
     organization_name: str
     business_user: bool
-    authorization_version: int = Field(ge=1)
-
-
-class PermissionSnapshot(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    application_id: str
-    user_id: UUID
-    permissions: list[str]
-    data_scopes: list[DataScope]
-    authorization_version: int = Field(ge=1)
-    expires_at: datetime
-
-
-class AuthorizationDecisionRequest(BaseModel):
-    application_id: str
-    permission: str
-    risk: Literal["low", "high"] = "high"
-
-
-class AuthorizationDecision(BaseModel):
-    allowed: bool
-    permission: str
-    authorization_version: int = Field(ge=1)
-    reason_code: str
-    expires_at: datetime
 
 
 class ApplicationEnvironment(BaseModel):
@@ -103,26 +72,6 @@ class DirectoryPage(BaseModel):
     next_cursor: str | None = None
     has_more: bool
     synchronized_at: datetime
-
-
-class NotificationRequest(BaseModel):
-    recipient_user_id: UUID
-    subject: str = Field(min_length=1, max_length=200)
-    body: str = Field(min_length=1, max_length=4000)
-    idempotency_key: str = Field(min_length=8, max_length=128)
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class NotificationResult(BaseModel):
-    notification_id: UUID
-    application_id: str
-    recipient_user_id: UUID
-    subject: str
-    status: Literal["PENDING", "DELIVERED", "FAILED"]
-    requested_at: datetime
-    delivered_at: datetime | None = None
-    delivery_reference: str | None = None
-    failure_reason: str | None = None
 
 
 class ErrorResponse(BaseModel):

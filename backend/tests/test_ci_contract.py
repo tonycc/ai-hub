@@ -368,10 +368,11 @@ def test_m4_rotation_runtime_script_passes_owner_id_uuid() -> None:
     script = (
         PROJECT_ROOT / "scripts/ci/m4-credential-rotation-runtime.sh"
     ).read_text(encoding="utf-8")
-    assert "owner_id=os.environ" in script
+    assert 'owner_id="10000000-0000-4000-8000-000000000001"' in script
+    assert 'created_by_user_id=os.environ["M4_ROTATION_OWNER_ID"]' in script
     assert "owner=" not in script
-    # The seeded platform admin user is guaranteed ACTIVE in the isolated
-    # deployment, so it is a valid owner for the fixture application.
+    # The platform administrator registers the application; its owner is
+    # the separate seeded business employee.
     assert "11000000-0000-4000-8000-000000000001" in script
 
 

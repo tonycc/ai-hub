@@ -51,9 +51,7 @@ class ContractResponse(ApiModel):
     json_schema: dict[str, Any]
     schema_fingerprint: str
     field_classifications: dict[str, Any]
-    compatibility_mode: str
     origin: str
-    inference_evidence_ref: str | None
     status: str
     reviewed_by: str | None
     reviewed_at: datetime | None
@@ -61,13 +59,9 @@ class ContractResponse(ApiModel):
 
 
 class ContractIdentifiers(ApiModel):
-    source_application_id: str = Field(
-        min_length=1, max_length=SOURCE_APPLICATION_ID_MAX_LENGTH
-    )
+    source_application_id: str = Field(min_length=1, max_length=SOURCE_APPLICATION_ID_MAX_LENGTH)
     object_type: str = Field(min_length=1, max_length=OBJECT_TYPE_MAX_LENGTH)
-    contract_version: str = Field(
-        min_length=1, max_length=PUSH_CONTRACT_VERSION_MAX_LENGTH
-    )
+    contract_version: str = Field(min_length=1, max_length=PUSH_CONTRACT_VERSION_MAX_LENGTH)
 
     @field_validator("source_application_id", "object_type", "contract_version")
     @classmethod
@@ -81,11 +75,6 @@ class ContractIdentifiers(ApiModel):
 class ContractDraftRequest(ContractIdentifiers):
     json_schema: dict[str, Any]
     field_classifications: dict[str, Any] = Field(default_factory=dict)
-    compatibility_mode: Literal["BACKWARD", "FORWARD", "FULL", "NONE"] = "BACKWARD"
-
-
-class ContractInferRequest(ContractIdentifiers):
-    pass
 
 
 class ContractVersionRequest(ContractIdentifiers):
@@ -195,9 +184,7 @@ def _contract_response(row: IngestContractRow) -> ContractResponse:
         json_schema=row.json_schema,
         schema_fingerprint=row.schema_fingerprint,
         field_classifications=row.field_classifications,
-        compatibility_mode=row.compatibility_mode,
         origin=row.origin,
-        inference_evidence_ref=row.inference_evidence_ref,
         status=row.status,
         reviewed_by=row.reviewed_by,
         reviewed_at=row.reviewed_at,
@@ -273,7 +260,6 @@ async def put_ingest_contract_draft(
             contract_version=body.contract_version,
             json_schema=body.json_schema,
             field_classifications=body.field_classifications,
-            compatibility_mode=body.compatibility_mode,
         )
         await session.commit()
     except IngestContractError as error:
@@ -285,45 +271,6 @@ async def put_ingest_contract_draft(
         action="platform.ingest.contract.draft",
         target_id=f"{body.source_application_id}:{body.object_type}:{body.contract_version}",
         detail={"schema_fingerprint": saved.schema_fingerprint},
-    )
-    return _contract_response(saved)
-
-
-@router.post("/contracts/infer", response_model=ContractResponse)
-async def infer_ingest_contract_draft(
-    request: Request,
-    body: ContractInferRequest,
-    session: SessionDependency,
-    principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                INGEST_WRITE, application_parameter=None, require_csrf=True
-            )
-        ),
-    ],
-) -> ContractResponse:
-    store = IngestContractStore()
-    try:
-        saved = await store.infer_draft_from_raw(
-            session,
-            source_application_id=body.source_application_id,
-            object_type=body.object_type,
-            contract_version=body.contract_version,
-        )
-        await session.commit()
-    except IngestContractError as error:
-        await session.rollback()
-        raise _map_error(error) from error
-    await _audit(
-        request,
-        principal,
-        action="platform.ingest.contract.infer",
-        target_id=f"{body.source_application_id}:{body.object_type}:{body.contract_version}",
-        detail={
-            "schema_fingerprint": saved.schema_fingerprint,
-            "origin": saved.origin,
-        },
     )
     return _contract_response(saved)
 
