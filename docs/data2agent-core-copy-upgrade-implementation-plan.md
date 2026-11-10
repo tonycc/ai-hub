@@ -863,7 +863,9 @@ shared database / identity / permission / audit
 | C1-A | **代码门禁已通过** | 平台接收端、共用契约、generation/staging 与门户已合入 `main`；purpose contract 候选进入验证，Push 默认关闭 |
 | C1-B | **独立门禁已通过** | data2agent PR #5 已实现 `AiHubObjectPushSink`；专项 106 项、全仓 1336 项及兼容/架构/smoke 门禁通过 |
 | C1-C | **自动化兼容门禁已通过；生产启用待批准** | 锁定组合的隔离空库与真实 PostgreSQL 故障矩阵已通过；目标环境维护窗口、容量/恢复演练及按来源批准尚待执行 |
-| C0-B、C2～C5 | 未开始 | 立项 B；不得作为立项 A 或启用 Push 的前置 |
+| C0-B | **已完成** | [ADR-035](adr/ADR-035-semantic-center-and-mcp-kickoff-decisions.md) 已接受（2026-11-10）；其中数据范围决策替代本方案 §6.3、§6.4 对平台权限决策和组织/工厂范围的表述 |
+| C2 | **代码完成，待目标环境验收** | 元模型、校验、生命周期、契约草稿生成、`semantic` 库表（core 迁移 `20261110_core_0030`）、管理 API、种子导入命令和语义中心门户页面已实现；迁移、全流程和接口层已在一次性 PostgreSQL 17 上验证。未做：门户页面的真人登录走查、PostgreSQL 18 与运行时门禁脚本、数据集页面（属 C3） |
+| C3～C5 | 未开始 | 立项 B；不得作为立项 A 或启用 Push 的前置 |
 
 C1-A/C1-B 与 C1-C 自动化代码门禁完成仍不得据此启用生产 Push：`20260831_raw_0007` 是待批准维护窗口执行的 **contract** 候选，旧 Pull 镜像在迁移后不兼容。隔离环境已完成真实 PostgreSQL 双会话竞态、空库 Push 开通和跨仓恢复；目标环境仍须完成 Authentik 双人批准、容量、备份恢复、凭据轮换和监控/回滚门禁。候选代码将 `CHANGE_RECORD_PURPOSE_UNIQUE` 与五列约束一同切换，但仓库默认 `DATA_INGEST_PUSH_ENABLED=false`。
 
