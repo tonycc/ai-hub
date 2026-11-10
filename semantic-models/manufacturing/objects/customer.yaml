@@ -1,0 +1,32 @@
+object: Customer
+display_name: 客户
+description: 下单主体(渔具 OEM/ODM 场景多为海外品牌商 / 贸易商)
+domain: 销售
+source_of_truth: 鼎捷 ERP 客户主档
+keys: [customer_code]
+properties:
+  - { name: customer_code, type: string, desc: 客户编号 }
+  - { name: name, type: string, desc: 客户名称 }
+  - { name: region, type: string, desc: 区域 / 国家 }
+  - { name: currency, type: string, desc: 结算币别 }
+  - { name: payment_days, type: int, desc: 账期(天) }
+  - { name: contact, type: string, desc: 联系方式, sensitive: true }
+bindings:
+  - source: digiwin_yifei
+    tables: [COPMA]
+    status: draft
+    notes: 易飞客户主档参考表名,以现场数据字典核对为准
+  - source: digiwin_e10
+    tables: [CUSTOMER, CURRENCY]
+    status: draft
+    key_map: { customer_code: CUSTOMER.CUSTOMER_CODE }
+    field_map:
+      customer_code: CUSTOMER.CUSTOMER_CODE
+      name: CUSTOMER.CUSTOMER_NAME
+      region: CUSTOMER.COUNTRY_REGION
+      currency: CURRENCY.CURRENCY_CODE (join CUSTOMER.CURRENCY_ID)
+      payment_days: CUSTOMER.PAYMENT_TERM_DAYS
+      contact: CUSTOMER.CONTACT_EMAIL
+    watermark: CUSTOMER.LAST_MODIFIED_DATE
+    notes: E10-like 参考表形(docs/dict/digiwin_e10.md);E10 币别为 ID 关联需 join 取码;真实环境以现场字典核对为准
+knowledge_refs: [客户信用与账期政策]

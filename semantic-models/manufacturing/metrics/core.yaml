@@ -1,0 +1,22 @@
+metrics:
+  - metric: gross_margin_rate
+    display_name: 毛利率
+    status: draft
+    formula: (营业收入 - 营业成本) / 营业收入
+    grain: [月, 客户, 产品, 订单]
+    dimensions: [客户, 品类, 区域]
+    caveats: 营业成本是否含运费与模具摊销,校准时逐项确认;春节所在月建议合并解读
+
+  - metric: quote_response_hours
+    display_name: 报价响应时长
+    status: draft
+    formula: 报出时间 - 询单接收时间(小时)
+    grain: [单, 月]
+    caveats: MVP 验收指标之一;基线于启动周实测
+
+  - metric: overdue_receivable_amount
+    display_name: 逾期应收金额
+    status: draft
+    formula: 超过账期未回款的应收余额合计
+    grain: [日, 客户]
+    caveats: 账期以客户主档约定为准,校准时确认

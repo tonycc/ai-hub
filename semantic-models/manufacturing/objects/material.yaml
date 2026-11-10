@@ -1,0 +1,32 @@
+object: Material
+display_name: 物料(品号)
+description: 原材料、半成品与成品品号;渔具变体(长度 / 颜色等)由品号编码规则表达,相似检索按型谱聚合
+domain: 产品
+source_of_truth: 鼎捷 ERP 品号主档
+keys: [item_code]
+properties:
+  - { name: item_code, type: string, desc: 品号 }
+  - { name: name, type: string, desc: 品名 }
+  - { name: spec, type: text, desc: 规格描述 }
+  - { name: category, type: string, desc: 大类(竿 / 轮 / 饵 / 配件 / 原料) }
+  - { name: unit, type: string, desc: 计量单位 }
+  - { name: standard_cost, type: money, desc: 标准成本, sensitive: true }
+bindings:
+  - source: digiwin_yifei
+    tables: [INVMB]
+    status: draft
+    watermark: 待核对(品号修改日期字段)
+  - source: digiwin_e10
+    tables: [ITEM]
+    status: draft
+    key_map: { item_code: ITEM.ITEM_CODE }
+    field_map:
+      item_code: ITEM.ITEM_CODE
+      name: ITEM.ITEM_NAME
+      spec: ITEM.ITEM_SPECIFICATION
+      category: ITEM.CATEGORY_CODE
+      unit: ITEM.UNIT_CODE
+      standard_cost: ITEM.STANDARD_COST
+    watermark: ITEM.LAST_MODIFIED_DATE
+    notes: E10-like 参考表形;真实 E10 大类 / 单位为基础档外键,参考库简化为编码列
+knowledge_refs: [物料优选与归一化规则]
