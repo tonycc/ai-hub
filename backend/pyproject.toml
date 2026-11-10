@@ -14,6 +14,7 @@ dependencies = [
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.10,<3",
   "pyjwt[crypto]>=2.10,<3",
+  "pyyaml>=6,<7",
   "sqlalchemy[asyncio]>=2.0,<3",
   "uvicorn[standard]>=0.35,<1",
 ]
@@ -27,7 +28,6 @@ dev = [
   "pyright>=1.1.403",
   "pytest>=8.4",
   "pytest-asyncio>=1.0",
-  "pyyaml>=6,<7",
   "ruff>=0.12",
 ]
 
