@@ -1,0 +1,61 @@
+object: Quotation
+display_name: 报价单
+description: 询单与报价记录(含未成交);接单评审链核心历史数据,MVP 阶段主要来自 Excel 导入
+domain: 销售
+source_of_truth: 历史报价 Excel(MVP)/ 后续沉淀于平台
+keys: [quote_no]
+properties:
+  - { name: quote_no, type: string, desc: 报价单号 }
+  - { name: customer, type: ref, ref: Customer, desc: 客户 }
+  - { name: quote_date, type: date, desc: 报价日期 }
+  - { name: inquiry_at, type: datetime, desc: 询单接收时间(报价响应时长起点) }
+  - { name: submitted_at, type: datetime, desc: 报出时间(报价响应时长终点;草稿为空) }
+  - { name: spec_summary, type: text, desc: 规格摘要(竿:长度/节数/调性;轮:齿比/轴承;饵:类型/颜色数) }
+  - { name: target_price, type: money, desc: 客户目标价 }
+  - { name: quoted_price, type: money, desc: 报价(阶梯明细放自定义字段) }
+  - { name: currency, type: string, desc: 币别 }
+  - { name: fx_assumption, type: decimal, desc: 汇率假设 }
+  - { name: result, type: enum, enum_values: [成交, 未成交, 待定], desc: 结果 }
+states: [草稿, 已报出, 成交, 未成交]
+actions:
+  - { name: quote_review, desc: 发起接单评审链生成评审卡, tier: 说 }
+bindings:
+  - source: excel_quotation
+    tables: [QUOTATION]
+    status: draft
+    key_map: { quote_no: QUOTATION.quote_no }
+    field_map:
+      quote_no: QUOTATION.quote_no
+      customer: QUOTATION.customer
+      quote_date: QUOTATION.quote_date
+      inquiry_at: QUOTATION.inquiry_at
+      submitted_at: QUOTATION.submitted_at
+      spec_summary: QUOTATION.spec_summary
+      target_price: QUOTATION.target_price
+      quoted_price: QUOTATION.quoted_price
+      currency: QUOTATION.currency
+      fx_assumption: QUOTATION.fx_assumption
+      result: QUOTATION.result
+    notes: >-
+      Excel 报价历史导入:excel-suggest 建议列映射 → 人工确认映射文件(一次)
+      → excel-import 落地(列名 = 对象属性,值原样)→ apply 物化;
+      工厂取值与对象模型不同时(如 中标→成交)在此加 (map 源值→对象值)
+  - source: digiwin_e10
+    tables: [QUOTATION, CURRENCY]
+    status: draft
+    key_map: { quote_no: QUOTATION.DOC_NO }
+    field_map:
+      quote_no: QUOTATION.DOC_NO
+      customer: CUSTOMER.CUSTOMER_CODE (join QUOTATION.CUSTOMER_ID)
+      quote_date: QUOTATION.DOC_DATE
+      inquiry_at: QUOTATION.INQUIRY_DATE
+      submitted_at: QUOTATION.SUBMIT_DATE
+      spec_summary: QUOTATION.SPEC_SUMMARY
+      target_price: QUOTATION.TARGET_PRICE
+      quoted_price: QUOTATION.QUOTE_PRICE
+      currency: CURRENCY.CURRENCY_CODE (join QUOTATION.CURRENCY_ID)
+      fx_assumption: QUOTATION.EXCHANGE_RATE
+      result: QUOTATION.RESULT_STATE (map W→成交 / L→未成交 / P→待定 / D→待定)
+    watermark: QUOTATION.LAST_MODIFIED_DATE
+    notes: E10-like 参考表形,简化为单头 + 主要品号(真实 E10 报价单含单身);INQUIRY_DATE / SUBMIT_DATE 支撑报价响应时长指标
+knowledge_refs: [报价与毛利政策, 出口合规要点(加州65/REACH)]

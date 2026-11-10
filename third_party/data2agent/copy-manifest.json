@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "data2agent/shared/metamodel/schema.py",
+      "destination_path": "backend/src/ai_hub_platform/modules/semantic/metamodel.py",
+      "source_sha256": "7d0dbe45a584fbba69304449384163c7fcd55e1356605a1381c4242ca328c7f7",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "data2agent/shared/metamodel/versioning.py",
+      "destination_path": "backend/src/ai_hub_platform/modules/semantic/versioning.py",
+      "source_sha256": "5c5ceb792adc9078195e1616eb2d689155925c3d3b06cc7c7fe8e68ba4448323",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "data2agent/shared/metamodel/loader.py",
+      "destination_path": "backend/src/ai_hub_platform/modules/semantic/loader.py",
+      "source_sha256": "4650337c9b10cebd8d2c6ac89844ee4420ebec273b9560444a81bdb652c71c1c",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "data2agent/shared/metamodel/validate.py",
+      "destination_path": "backend/src/ai_hub_platform/modules/semantic/validator.py",
+      "source_sha256": "d386ac5326f8a24f0ac4984f8337af95b8e25de20f8a351284986d4ae122dcc7",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/pack.yaml",
+      "destination_path": "semantic-models/manufacturing/package.yaml",
+      "source_sha256": "ae4d849862de31ca250b78bacbfe9e83800fe6ed97c55e67d9d09b2b6729fd0a",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/metrics/core.yaml",
+      "destination_path": "semantic-models/manufacturing/metrics/core.yaml",
+      "source_sha256": "86e8f428cddb2260380a621ac5c2604c5f2c92cc6bdd4b65f28ae2a7a12d639d",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "LICENSE",
+      "destination_path": "third_party/data2agent/LICENSE",
+      "source_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "NOTICE",
+      "destination_path": "third_party/data2agent/NOTICE",
+      "source_sha256": "976879b61ce5df893117164d70fa00073f4a3d33ec928dbb1751ab5c568d93be",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/objects/material.yaml",
+      "destination_path": "semantic-models/manufacturing/objects/material.yaml",
+      "source_sha256": "7915a0ad3a9bf2b749d31a8987fd489273b0e1c50051226af6ffac133ddba84f",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/objects/customer.yaml",
+      "destination_path": "semantic-models/manufacturing/objects/customer.yaml",
+      "source_sha256": "bc517ff3a10cc7882ce68c0d2791c7d0d9c7874fe1c00b7ffbc82d3dae86fb8f",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/objects/sales_order.yaml",
+      "destination_path": "semantic-models/manufacturing/objects/sales_order.yaml",
+      "source_sha256": "7a8b83e17806730ed0361fbb8739780e4afee1dce63b331e2f73aecfc44c9477",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/objects/sales_order_line.yaml",
+      "destination_path": "semantic-models/manufacturing/objects/sales_order_line.yaml",
+      "source_sha256": "fea5993ce602f4c54953cd169d23b5b48a47c15ebe0494743b8624340cc60c94",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    },
+    {
+      "source_repository": "xingyekuo-spec/data2agent",
+      "source_commit": "60bcbe22f0db6457d81d24a0d9924723e085cdae",
+      "source_path": "templates/objects/quotation.yaml",
+      "destination_path": "semantic-models/manufacturing/objects/quotation.yaml",
+      "source_sha256": "cb1ae093f029e6716d4388c2b9a63fc51629677a79fd3be96e4b443c7284a426",
+      "license": "Apache-2.0",
+      "copied_at": "2026-11-10",
+      "modified": false,
+      "modification_summary": ""
+    }
+  ]
+}
