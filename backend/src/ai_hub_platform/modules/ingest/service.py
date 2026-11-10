@@ -543,6 +543,20 @@ class IngestService:
             int(existing_version) if existing_version is not None else None,
         ):
             return "skipped"
+        if (
+            not bypass_version_check
+            and existing_version is None
+            and await self._superseded_in_change_log(
+                session,
+                source_application_id=source_application_id,
+                object_type=object_type,
+                record=record,
+            )
+        ):
+            # A delete drops the current-state row and with it the version the
+            # object had reached. The change log still remembers it, so a stale
+            # record cannot bring a deleted object back.
+            return "skipped"
 
         if record.operation == "delete":
             await session.execute(
@@ -591,6 +605,37 @@ class IngestService:
             },
         )
         return "upsert"
+
+    async def _superseded_in_change_log(
+        self,
+        session: AsyncSession,
+        *,
+        source_application_id: str,
+        object_type: str,
+        record: IngestRecord,
+    ) -> bool:
+        """Whether the production log already holds a newer version of the object."""
+        result = await session.execute(
+            text(
+                """
+                SELECT 1
+                FROM platform_raw.raw_change_record
+                WHERE source_application_id = :source_application_id
+                  AND object_type = :object_type
+                  AND object_id = :object_id
+                  AND version > :version
+                  AND COALESCE(purpose, 'production') = 'production'
+                LIMIT 1
+                """
+            ),
+            {
+                "source_application_id": source_application_id,
+                "object_type": object_type,
+                "object_id": record.object_id,
+                "version": record.version,
+            },
+        )
+        return result.scalar_one_or_none() is not None
 
     async def _synthesize_full_tombstones(
         self,
