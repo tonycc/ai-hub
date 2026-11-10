@@ -9,6 +9,10 @@ const props = defineProps({
 
 const map = {
   DRAFT: ['info', '草稿'],
+  REVIEWED: ['warning', '已评审'],
+  VERIFIED: ['primary', '已确认'],
+  PUBLISHED: ['success', '已发布'],
+  CERTIFIED: ['success', '已认证'],
   ACTIVE: ['success', '启用'],
   APPROVED: ['success', '已批准'],
   REJECTED: ['danger', '已拒绝'],

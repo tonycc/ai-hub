@@ -36,6 +36,7 @@ const navGroups = [
     items: [
       { label: '运维中心', path: '/platform/operations', icon: 'Monitor' },
       { label: '数据接入', path: '/platform/ingest', icon: 'Coin' },
+      { label: '语义中心', path: '/platform/semantics', icon: 'Share' },
     ],
   },
 ]
@@ -46,6 +47,7 @@ const routePermissions = {
   '/platform/audit': 'platform.audit.read',
   '/platform/operations': 'platform.operations.read',
   '/platform/ingest': 'platform.ingest.read',
+  '/platform/semantics': 'platform.semantic.read',
 }
 
 const visibleNavGroups = computed(() => navGroups.map((group) => ({

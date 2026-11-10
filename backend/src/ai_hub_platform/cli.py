@@ -151,6 +151,45 @@ def run_ingest_seed_cli() -> None:
     asyncio.run(_run_ingest_seed(sources_path))
 
 
+async def _run_semantic_seed(package_dir: str) -> None:
+    from ai_hub_platform.modules.semantic.loader import load_package_dir
+    from ai_hub_platform.modules.semantic.service import SemanticService, SemanticServiceError
+
+    package = load_package_dir(package_dir)
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with sessions() as session:
+            try:
+                row = await SemanticService().import_package(
+                    session, package, actor="system:semantic_seed", origin="SEED"
+                )
+                await session.commit()
+                outcome = {"seeded": True, "status": row.state.status}
+            except SemanticServiceError as error:
+                await session.rollback()
+                if error.error_code != "semantic_version_exists":
+                    raise
+                outcome = {"seeded": False, "reason": "version already exists"}
+        print(
+            json.dumps(
+                {"package_id": package.package_id, "version": package.version, **outcome},
+                sort_keys=True,
+            )
+        )
+    finally:
+        await engine.dispose()
+
+
+def run_semantic_seed_cli() -> None:
+    """Import a seed package directory as a DRAFT version (idempotent per version)."""
+    logging.config.dictConfig(json_log_config())
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: ai-hub-semantic-seed <package directory>")
+    asyncio.run(_run_semantic_seed(sys.argv[1]))
+
+
 class RuntimeEvidenceProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
