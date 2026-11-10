@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
+from uuid import uuid4
 
 import pytest
 from ai_hub_platform.modules.ingest.service import (
     IngestRecord,
+    IngestService,
     IngestValidationError,
     payload_content_hash,
     should_apply_version,
@@ -328,3 +331,67 @@ def test_change_record_conflict_compares_operation_and_content_hash() -> None:
     assert "already exists with a different purpose" not in insert
     assert "IngestRecordConflictError" in insert
     assert IngestRecordConflictError.error_code == "record_version_conflict"
+
+
+class _TombstoneResult:
+    def __init__(self, rows: list[tuple[str, int]] | None = None) -> None:
+        self._rows = rows or []
+
+    def all(self) -> list[tuple[str, int]]:
+        return self._rows
+
+    def scalar_one_or_none(self) -> int:
+        return 1
+
+
+class _TombstoneSession:
+    """Serves current-state rows and records which objects get deleted."""
+
+    def __init__(self, rows: list[tuple[str, int]]) -> None:
+        self.rows = rows
+        self.deleted: list[str] = []
+        self.logged: list[tuple[str, int]] = []
+
+    async def execute(self, statement: object, params: dict[str, Any]) -> _TombstoneResult:
+        sql = str(statement)
+        if "SELECT object_id, version" in sql:
+            return _TombstoneResult(self.rows)
+        if "INSERT INTO platform_raw.raw_change_record" in sql:
+            self.logged.append((params["object_id"], params["version"]))
+        elif "DELETE FROM platform_raw.raw_current_state" in sql:
+            self.deleted.append(params["object_id"])
+        return _TombstoneResult()
+
+
+async def _synthesize(session: _TombstoneSession, *, max_version: int | None) -> int:
+    return await IngestService()._synthesize_full_tombstones(  # pyright: ignore[reportPrivateUsage]
+        cast(Any, session),
+        batch_id=uuid4(),
+        source_application_id="app-a",
+        object_type="device",
+        exported_object_ids={"E-keep"},
+        high_watermark=95,
+        payload_contract_version="device.v1",
+        purpose="production",
+        max_version=max_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_full_tombstones_skip_rows_written_after_the_snapshot_fetch_began() -> None:
+    # Before the fetch, current state topped out at version 100. E-new@120 was
+    # ingested by another worker while the snapshot was being fetched.
+    session = _TombstoneSession([("E-keep", 50), ("E-gone", 100), ("E-new", 120)])
+    tombstones = await _synthesize(session, max_version=100)
+    assert tombstones == 1
+    assert session.deleted == ["E-gone"]
+    # Absence stays authoritative for known rows even when hw (95) is lower.
+    assert session.logged == [("E-gone", 101)]
+
+
+@pytest.mark.asyncio
+async def test_full_tombstones_without_a_ceiling_cover_every_absent_row() -> None:
+    session = _TombstoneSession([("E-keep", 50), ("E-gone", 100), ("E-new", 120)])
+    tombstones = await _synthesize(session, max_version=None)
+    assert tombstones == 2
+    assert session.deleted == ["E-gone", "E-new"]

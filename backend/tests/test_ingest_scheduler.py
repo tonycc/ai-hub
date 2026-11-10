@@ -177,6 +177,18 @@ class _InMemoryIngestStore:
     batches: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     records: list[IngestRecord] = field(default_factory=list[IngestRecord])
     fail_next_load: bool = False
+    fail_load_on_call: int | None = None
+    load_calls: int = 0
+    state_max_version: int = 0
+
+    async def get_current_state_max_version(
+        self,
+        session: object,
+        *,
+        source_application_id: str,
+        object_type: str,
+    ) -> int:
+        return self.state_max_version
 
     async def get_cursor(
         self,
@@ -215,7 +227,8 @@ class _InMemoryIngestStore:
         from_version: int | None = None,
         **kwargs: object,
     ) -> Any:
-        if self.fail_next_load:
+        self.load_calls += 1
+        if self.fail_next_load or self.load_calls == self.fail_load_on_call:
             self.fail_next_load = False
             raise RuntimeError("simulated load failure")
         if high_watermark < max((r.version for r in records), default=0):
@@ -234,6 +247,7 @@ class _InMemoryIngestStore:
                 "object_type": object_type,
                 "schema_fingerprint": kwargs.get("schema_fingerprint"),
                 "audit_summary": kwargs.get("audit_summary"),
+                "tombstone_max_version": kwargs.get("tombstone_max_version"),
             }
         )
 
@@ -860,3 +874,124 @@ def test_policy_update_allows_omitting_push_staging_retention() -> None:
         }
     )
     assert payload.push_staging_retention_hours is None
+
+
+def _stream_handler(stream_high_watermark: int) -> Any:
+    """Export one object per version and report the stream high watermark."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        since = int(request.url.params["since_version"])
+        limit = int(request.url.params["limit"])
+        versions = [v for v in range(1, stream_high_watermark + 1) if v > since]
+        return httpx.Response(
+            200,
+            json={
+                "object_type": "device",
+                "payload_contract_version": "device.v1",
+                "records": [
+                    {
+                        "object_id": f"E-{version}",
+                        "operation": "upsert",
+                        "version": version,
+                        "payload": {"n": version},
+                    }
+                    for version in versions[:limit]
+                ],
+                "has_more": len(versions) > limit,
+                "high_watermark": stream_high_watermark,
+            },
+        )
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_incremental_failure_mid_pagination_does_not_skip_unloaded_pages() -> None:
+    key = ("standalone-example", "device")
+    store = _InMemoryIngestStore()
+    store.cursor[key] = 10
+    store.fail_load_on_call = 2
+    source = _source(lookback_versions=10, page_limit=5)
+
+    async def token_provider() -> str:
+        return "tok"
+
+    export_client = ExportClient(
+        token_provider=token_provider,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(_stream_handler(50))),
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[source],
+        sessions=_SessionFactory(store, source),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+    )
+    with pytest.raises(RuntimeError, match="simulated load failure"):
+        await scheduler.sync_source(source)
+    # Page 1 (versions 1..5) loaded, page 2 failed: the cursor must not jump to
+    # the stream high watermark the page reported.
+    assert store.cursor[key] == 10
+    assert store.cursor_status[key] == "failed"
+
+    result = await scheduler.sync_source(source)
+    assert result["high_watermark"] == 50
+    assert store.cursor[key] == 50
+    assert store.cursor_status[key] == "ok"
+    assert {record.version for record in store.records} == set(range(1, 51))
+    await export_client.close()
+
+
+@pytest.mark.asyncio
+async def test_incremental_cursor_tracks_loaded_pages_until_the_last_page() -> None:
+    key = ("standalone-example", "device")
+    store = _InMemoryIngestStore()
+    store.cursor[key] = 10
+    store.fail_load_on_call = 4
+    source = _source(lookback_versions=0, page_limit=5)
+
+    async def token_provider() -> str:
+        return "tok"
+
+    export_client = ExportClient(
+        token_provider=token_provider,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(_stream_handler(50))),
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[source],
+        sessions=_SessionFactory(store, source),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+    )
+    with pytest.raises(RuntimeError, match="simulated load failure"):
+        await scheduler.sync_source(source)
+    # Three pages (11..25) are durable; progress is kept, nothing beyond it claimed.
+    assert store.cursor[key] == 25
+    await export_client.close()
+
+
+@pytest.mark.asyncio
+async def test_full_sync_bounds_tombstones_to_state_seen_before_the_fetch() -> None:
+    store = _InMemoryIngestStore()
+    store.state_max_version = 42
+    source = _source(page_limit=5)
+
+    async def token_provider() -> str:
+        return "tok"
+
+    export_client = ExportClient(
+        token_provider=token_provider,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(_stream_handler(7))),
+    )
+    scheduler = IngestScheduler(
+        RawWorkerSettings(),
+        sources=[source],
+        sessions=_SessionFactory(store, source),  # type: ignore[arg-type]
+        export_client=export_client,
+        service=store,  # type: ignore[arg-type]
+    )
+    await scheduler.sync_source(source, force_full=True)
+    assert store.batches[-1]["sync_mode"] == "full"
+    assert store.batches[-1]["tombstone_max_version"] == 42
+    await export_client.close()
