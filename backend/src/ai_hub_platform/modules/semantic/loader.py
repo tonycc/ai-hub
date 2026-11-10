@@ -1,90 +1,119 @@
-"""模板包加载与校验:templates/ 目录 -> TemplatePack。"""
+# SPDX-License-Identifier: Apache-2.0
+# Derived from data2agent (xingyekuo-spec/data2agent @ 60bcbe2),
+# data2agent/shared/metamodel/loader.py. Modified by AI Hub; see
+# third_party/data2agent/copy-manifest.json for the change summary.
+"""Load a semantic package from a document or from a package directory.
+
+A document is one JSON/YAML mapping in the ``SemanticPackage`` shape; it is
+what the management API imports and exports. A directory splits the same
+content into files so seed packages stay reviewable::
+
+    package.yaml            package_id, display_name, version, owner
+    objects/*.yaml          one object per file
+    relations.yaml          relations: [...]
+    metrics/*.yaml          metrics: [...]
+    bindings/*.yaml         bindings: [...]
+"""
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import ValidationError
 
-from .schema import MetricDef, ObjectTemplate, TemplatePack
+from ai_hub_platform.modules.semantic.metamodel import SemanticPackage
+
+DocumentFormat = Literal["json", "yaml"]
 
 
-class TemplateLoadError(Exception):
-    def __init__(self, errors: list[str]):
+class PackageLoadError(ValueError):
+    def __init__(self, errors: list[str]) -> None:
         self.errors = errors
         super().__init__("\n".join(errors))
 
 
-def _read_yaml_file(path: Path) -> dict:
-    """读取 YAML 文件;编码/语法错误时点名文件并给出修复指引。"""
+def _validation_messages(prefix: str, error: ValidationError) -> list[str]:
+    messages: list[str] = []
+    for item in error.errors():
+        location = ".".join(str(part) for part in item["loc"])
+        where = f"{prefix}{location}" if location else prefix.rstrip(": ")
+        messages.append(f"{where}: {item['msg']}")
+    return messages
+
+
+def load_package_document(document: Mapping[str, Any]) -> SemanticPackage:
+    """Build and cross-validate a package from an already parsed mapping."""
+    try:
+        package = SemanticPackage.model_validate(dict(document))
+    except ValidationError as error:
+        raise PackageLoadError(_validation_messages("", error)) from error
+    cross = package.cross_validate()
+    if cross:
+        raise PackageLoadError(cross)
+    return package
+
+
+def _parse_mapping(text: str, document_format: DocumentFormat, name: str) -> dict[str, Any]:
+    try:
+        parsed: object = json.loads(text) if document_format == "json" else yaml.safe_load(text)
+    except (json.JSONDecodeError, yaml.YAMLError) as error:
+        raise PackageLoadError([f"{name}: invalid {document_format.upper()}: {error}"]) from error
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise PackageLoadError([f"{name}: top level must be a mapping"])
+    return cast(dict[str, Any], parsed)
+
+
+def load_package_text(text: str, document_format: DocumentFormat) -> SemanticPackage:
+    return load_package_document(_parse_mapping(text, document_format, "document"))
+
+
+def _read_yaml_file(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as e:
-        raise TemplateLoadError([
-            f"{path.name}: 文件不是 UTF-8 编码(疑似 GBK/ANSI)——"
-            f"用记事本「另存为 → 编码选 UTF-8」或从便携包 zip 还原该文件"
-            f"(解码失败位置:{e})",
-        ]) from e
-    try:
-        return yaml.safe_load(text) or {}
-    except yaml.YAMLError as e:
-        raise TemplateLoadError([
-            f"{path.name}: YAML 语法错误——{e}",
-        ]) from e
+    except UnicodeDecodeError as error:
+        raise PackageLoadError([f"{path.name}: file is not UTF-8 encoded ({error})"]) from error
+    return _parse_mapping(text, "yaml", path.name)
 
 
-def _template_yaml_files(directory: Path) -> list[Path]:
-    """列出模板 YAML;跳过 macOS AppleDouble(._*)与隐藏文件。
+def _yaml_files(directory: Path) -> list[Path]:
+    """YAML files in name order, skipping hidden and macOS AppleDouble (``._*``) files."""
+    if not directory.is_dir():
+        return []
+    return [path for path in sorted(directory.glob("*.yaml")) if not path.name.startswith(".")]
 
-    Mac 解压后拷 U 盘(FAT32/exFAT)会为每个文件生成 ._ 伴随文件,
-    其二进制内容被 *.yaml 匹配读取会导致 UTF-8 解码崩溃。
-    """
-    return [
-        f for f in sorted(directory.glob("*.yaml"))
-        if not f.name.startswith(("._", "."))
+
+def _listed(path: Path, key: str) -> list[Any]:
+    items = _read_yaml_file(path).get(key, [])
+    if not isinstance(items, list):
+        raise PackageLoadError([f"{path.name}: '{key}' must be a list"])
+    return cast(list[Any], items)
+
+
+def load_package_dir(root: str | Path) -> SemanticPackage:
+    base = Path(root)
+    package_file = base / "package.yaml"
+    if not package_file.is_file():
+        raise PackageLoadError([f"{base}: package.yaml not found"])
+    document = _read_yaml_file(package_file)
+    for reserved in ("objects", "relations", "metrics", "bindings"):
+        if reserved in document:
+            raise PackageLoadError(
+                [f"package.yaml: '{reserved}' belongs in its own file or directory"]
+            )
+
+    document["objects"] = [_read_yaml_file(path) for path in _yaml_files(base / "objects")]
+    relations_file = base / "relations.yaml"
+    document["relations"] = _listed(relations_file, "relations") if relations_file.is_file() else []
+    document["metrics"] = [
+        item for path in _yaml_files(base / "metrics") for item in _listed(path, "metrics")
     ]
-
-
-def load_pack(root: str | Path) -> TemplatePack:
-    root = Path(root)
-    errors: list[str] = []
-    objects: list[ObjectTemplate] = []
-    metrics: list[MetricDef] = []
-
-    pack_meta: dict = {}
-    pack_file = root / "pack.yaml"
-    if pack_file.exists():
-        pack_meta = _read_yaml_file(pack_file)
-
-    obj_dir = root / "objects"
-    if obj_dir.is_dir():
-        for f in _template_yaml_files(obj_dir):
-            data = _read_yaml_file(f)
-            try:
-                objects.append(ObjectTemplate(**data))
-            except ValidationError as e:
-                errors.append(f"{f.name}: {e}")
-
-    metric_dir = root / "metrics"
-    if metric_dir.is_dir():
-        for f in _template_yaml_files(metric_dir):
-            data = _read_yaml_file(f)
-            for m in data.get("metrics", []):
-                try:
-                    metrics.append(MetricDef(**m))
-                except ValidationError as e:
-                    errors.append(f"{f.name}: {e}")
-
-    if errors:
-        raise TemplateLoadError(errors)
-
-    pack = TemplatePack(
-        version=str(pack_meta.get("version", "0.0.0")),
-        objects=objects,
-        metrics=metrics,
-    )
-    cross = pack.cross_validate()
-    if cross:
-        raise TemplateLoadError(cross)
-    return pack
+    document["bindings"] = [
+        item for path in _yaml_files(base / "bindings") for item in _listed(path, "bindings")
+    ]
+    return load_package_document(document)

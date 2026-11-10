@@ -1,56 +1,53 @@
-object: SalesOrder
+semantic_id: manufacturing.sales_order
 display_name: 销售订单
 description: 外销订单;接单评审链的历史弹药(成交价与实际结果)
 domain: 销售
-source_of_truth: 鼎捷 ERP 订单单头 / 单身
-keys: [order_no]
+authoritative_source_system: 鼎捷 ERP 订单单头 / 单身
+keys:
+- order_no
 properties:
-  - { name: order_no, type: string, desc: 订单号 }
-  - { name: customer, type: ref, ref: Customer, desc: 客户 }
-  - { name: order_date, type: date, desc: 订单日期 }
-  - { name: currency, type: string, desc: 币别 }
-  - { name: total_amount, type: money, desc: 订单总额 }
-  - { name: fx_rate, type: decimal, desc: 订单汇率(交易币别→CNY;CNY 口径指标的折算依据) }
-  - { name: trade_term, type: string, desc: 贸易条款(FOB / EXW 等) }
-  - { name: promised_ship_date, type: date, desc: 承诺船期 / 交期 }
-  - name: state
-    type: enum
-    enum_values: [草稿, 已接单, 生产中, 部分出货, 完全出货, 已结案, 已作废]
-    desc: 业务状态(源系统无现成状态列,由 binding derived 决策表派生)
-states: [草稿, 已接单, 生产中, 部分出货, 完全出货, 已结案, 已作废]
-relations:
-  - { name: lines, target: SalesOrderLine, cardinality: "1..n", desc: 订单明细 }
-actions:
-  - { name: delivery_risk_review, desc: 交期风险评估并生成建议卡, tier: 说 }
-bindings:
-  - source: digiwin_yifei
-    tables: [COPTC, COPTD]
-    status: draft
-    watermark: 待核对(单据修改 / 审核日期)
-  - source: digiwin_e10
-    tables: [SALES_ORDER, CURRENCY]
-    status: draft
-    key_map: { order_no: SALES_ORDER.DOC_NO }
-    field_map:
-      order_no: SALES_ORDER.DOC_NO
-      customer: CUSTOMER.CUSTOMER_CODE (join SALES_ORDER.CUSTOMER_ID)
-      order_date: SALES_ORDER.DOC_DATE
-      currency: CURRENCY.CURRENCY_CODE (join SALES_ORDER.CURRENCY_ID)
-      total_amount: SALES_ORDER.TOTAL_AMOUNT
-      fx_rate: SALES_ORDER.EXCHANGE_RATE
-      trade_term: SALES_ORDER.TRADE_TERM
-      promised_ship_date: SALES_ORDER.PROMISED_SHIP_DATE
-    derived:
-      state:
-        rules:  # 有序,首个匹配生效;无匹配 → 隔离区
-          - { when: { INVALID_STATE: "Y" }, value: 已作废 }
-          - { when: { APPROVE_DATE: null }, value: 草稿 }
-          - { when: { CLOSE_STATE: "C" }, value: 已结案 }
-          - { when: { CLOSE_STATE: "F" }, value: 完全出货 }
-          - { when: { CLOSE_STATE: "P" }, value: 部分出货 }
-          - { when: { CLOSE_STATE: "N" }, value: 已接单 }
-    watermark: SALES_ORDER.LAST_MODIFIED_DATE
-    notes: >-
-      E10-like 参考表形;已接单与生产中的区分需关联工单(首批对象未覆盖),
-      暂合并为已接单,工单对象就位后在决策表细分
-knowledge_refs: [出口贸易条款口径, 船期与钓季档期常识]
+- name: order_no
+  type: string
+  description: 订单号
+  required: true
+- name: customer
+  type: ref
+  description: 客户
+  ref: manufacturing.customer
+- name: order_date
+  type: date
+  description: 订单日期
+- name: currency
+  type: string
+  description: 币别
+- name: total_amount
+  type: money
+  description: 订单总额
+- name: fx_rate
+  type: decimal
+  description: 订单汇率(交易币别→CNY;CNY 口径指标的折算依据)
+- name: trade_term
+  type: string
+  description: 贸易条款(FOB / EXW 等)
+- name: promised_ship_date
+  type: date
+  description: 承诺船期 / 交期
+- name: state
+  type: enum
+  description: 业务状态(源系统无现成状态列,由 binding derived 决策表派生)
+  enum_values:
+  - 草稿
+  - 已接单
+  - 生产中
+  - 部分出货
+  - 完全出货
+  - 已结案
+  - 已作废
+states:
+- 草稿
+- 已接单
+- 生产中
+- 部分出货
+- 完全出货
+- 已结案
+- 已作废
