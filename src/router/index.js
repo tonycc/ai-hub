@@ -43,6 +43,12 @@ const routes = [
         meta: { title: '数据接入', breadcrumb: ['运行与研发', '数据接入'] },
       },
       {
+        path: 'platform/semantics',
+        name: 'semantics',
+        component: () => import('../views/SemanticView.vue'),
+        meta: { title: '语义中心', breadcrumb: ['运行与研发', '语义中心'] },
+      },
+      {
         path: 'platform',
         redirect: '/applications',
       },

@@ -26,6 +26,7 @@ from ai_hub_platform.api.operations import internal_router as internal_operation
 from ai_hub_platform.api.operations import router as operations_router
 from ai_hub_platform.api.platform import router as platform_router
 from ai_hub_platform.api.portal_auth import auth_router, session_router
+from ai_hub_platform.api.semantics import router as semantics_router
 from ai_hub_platform.config import Settings, get_settings
 from ai_hub_platform.modules.app_management.authentik import AuthentikAdminClient
 from ai_hub_platform.modules.ingest.generation_sql import start_push_lease_reaper
@@ -132,6 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(ingest_router)
     application.include_router(ingest_contracts_router)
     application.include_router(ingest_push_router)
+    application.include_router(semantics_router)
     return application
 
 

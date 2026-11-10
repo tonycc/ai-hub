@@ -102,6 +102,7 @@ const platformEntries = [
   { name: '用户与组织', description: '管理身份映射、组织和账号状态', path: '/platform/identity', icon: 'UserFilled', color: '#527a64', permission: 'platform.identity.read' },
   { name: '运维中心', description: '应用入口、数据来源和同步新鲜度诊断', path: '/platform/operations', icon: 'Monitor', color: '#4a7a8c', permission: 'platform.operations.read' },
   { name: '数据接入', description: '来源、契约、认证与推送接入', path: '/platform/ingest', icon: 'Coin', color: '#416f86', permission: 'platform.ingest.read' },
+  { name: '语义中心', description: '语义包的生成、审核与发布', path: '/platform/semantics', icon: 'Share', color: '#527a64', permission: 'platform.semantic.read' },
 ]
 const visiblePlatformEntries = computed(() => platformEntries.filter((entry) => session.hasPermission(entry.permission)))
 
