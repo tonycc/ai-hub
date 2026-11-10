@@ -120,7 +120,14 @@ class IngestService:
         audit_summary: Mapping[str, Any] | None = None,
         apply_current_state: bool = True,
         purpose: Literal["production", "certification"] = "production",
+        tombstone_max_version: int | None = None,
     ) -> LoadBatchResult:
+        """Load one batch.
+
+        ``tombstone_max_version`` bounds full-sync absence tombstones to rows whose
+        version was already in current state before the snapshot was fetched
+        (see ``get_current_state_max_version``). ``None`` tombstones every absent row.
+        """
         if not source_application_id.strip():
             raise IngestValidationError("source_application_id cannot be empty")
         if not object_type.strip():
@@ -152,6 +159,7 @@ class IngestService:
                 audit_summary=audit_summary,
                 apply_current_state=apply_current_state,
                 purpose=purpose,
+                tombstone_max_version=tombstone_max_version,
             )
 
     async def _commit_loaded_batch(
@@ -173,6 +181,7 @@ class IngestService:
         audit_summary: Mapping[str, Any] | None,
         apply_current_state: bool,
         purpose: Literal["production", "certification"],
+        tombstone_max_version: int | None,
     ) -> LoadBatchResult:
         batch_id = uuid4()
         started_at = datetime.now(UTC)
@@ -258,6 +267,7 @@ class IngestService:
                 high_watermark=high_watermark,
                 payload_contract_version=payload_contract_version,
                 purpose=purpose,
+                max_version=tombstone_max_version,
             )
             deletes += tombstones
 
@@ -341,6 +351,35 @@ class IngestService:
                 """
                 SELECT last_version
                 FROM platform_raw.raw_sync_cursor
+                WHERE source_application_id = :source_application_id
+                  AND object_type = :object_type
+                """
+            ),
+            {
+                "source_application_id": source_application_id,
+                "object_type": object_type,
+            },
+        )
+        value = result.scalar_one_or_none()
+        return int(value) if value is not None else 0
+
+    async def get_current_state_max_version(
+        self,
+        session: AsyncSession,
+        *,
+        source_application_id: str,
+        object_type: str,
+    ) -> int:
+        """Highest version in current state, or 0 when the source has no rows.
+
+        Read this before fetching a full snapshot outside the source lock and pass
+        it to ``load_batch(tombstone_max_version=...)``.
+        """
+        result = await session.execute(
+            text(
+                """
+                SELECT MAX(version)
+                FROM platform_raw.raw_current_state
                 WHERE source_application_id = :source_application_id
                   AND object_type = :object_type
                 """
@@ -564,6 +603,7 @@ class IngestService:
         high_watermark: int,
         payload_contract_version: str,
         purpose: Literal["production", "certification"],
+        max_version: int | None = None,
     ) -> int:
         result = await session.execute(
             text(
@@ -584,6 +624,10 @@ class IngestService:
         tombstones = 0
         for object_id, current_version in rows:
             if object_id in exported_object_ids:
+                continue
+            if max_version is not None and int(current_version) > max_version:
+                # Written after the snapshot fetch began: the snapshot cannot
+                # speak for this row, so its absence is not a delete.
                 continue
             version = tombstone_version(int(current_version), high_watermark)
             record = IngestRecord(
