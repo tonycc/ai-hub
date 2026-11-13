@@ -51,11 +51,18 @@ const activeStep = computed(() => {
 })
 const bindingDefinitions = computed(() => {
   const states = Object.fromEntries((detail.value?.bindings || []).map((item) => [item.binding_id, item]))
-  return (detail.value?.content.bindings || []).map((binding) => ({
-    ...binding,
-    state: states[binding.binding_id] || null,
-    mapped: Object.entries(binding.field_map).map(([name, mapping]) => `${name} ← ${mapping.source_field}`),
-  }))
+  const objects = Object.fromEntries((detail.value?.content.objects || []).map((item) => [item.semantic_id, item]))
+  return (detail.value?.content.bindings || []).map((binding) => {
+    const order = (objects[binding.semantic_object]?.properties || []).map((prop) => prop.name)
+    const rank = (name) => (order.includes(name) ? order.indexOf(name) : order.length)
+    return {
+      ...binding,
+      state: states[binding.binding_id] || null,
+      mapped: Object.entries(binding.field_map)
+        .sort(([left], [right]) => rank(left) - rank(right))
+        .map(([name, mapping]) => `${name} ← ${mapping.source_field}`),
+    }
+  })
 })
 const pendingBindings = computed(() => (detail.value?.bindings || []).filter((item) => item.status !== 'VERIFIED'))
 
@@ -64,6 +71,51 @@ function formatTime(value) {
     ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
     : '—'
 }
+function attribution(actor, at) {
+  return actor ? `${actor} · ${formatTime(at)}` : '—'
+}
+
+// Backend issue and change messages are English diagnostics; show reviewers a
+// Chinese explanation by code and keep the original text as a fallback.
+const warningLabels = {
+  naming_unreviewed: '显示名称沿用契约字段名；对象含义、权威来源和数据负责人需审核人确认',
+  business_key_unconfirmed: '未指定业务键，暂以来源对象编号作为主键，需确认',
+  type_unresolved: '无法从契约推断类型，已按文本保留，请确认类型',
+  reference_unresolved: '契约声明引用的对象不在本次生成范围内，已按普通属性保留',
+  sensitivity_suggested: '字段名疑似敏感数据，已标记为脱敏，待数据负责人确认',
+  property_renamed: '字段名规范化后与已有属性重名，已临时改名，待审核',
+}
+const issueLabels = {
+  contract_missing: '找不到绑定引用的数据契约',
+  contract_not_active: '绑定引用的数据契约未生效',
+  contract_fingerprint_mismatch: '契约指纹与已登记契约不一致',
+  source_field_missing: '映射的字段在契约中不存在',
+  source_type_unknown: '契约未声明该字段类型',
+  type_incompatible: '属性类型与契约字段类型不兼容',
+  required_source_optional: '必填属性映射到契约中的可选字段，缺值的行会进入隔离区',
+  object_unbound: '对象没有生效的来源绑定，无法构建数据集',
+  reference_invalid: '语义包内引用不一致',
+}
+const changeLabels = {
+  key_changed: '主键变化',
+  property_removed: '属性被删除',
+  property_type_changed: '属性类型变化',
+  enum_value_removed: '枚举值被删除',
+  sensitivity_lowered: '属性不再脱敏',
+  property_added: '新增属性',
+  object_removed: '对象被删除',
+  object_added: '新增对象',
+  relation_removed: '关系被删除',
+  relation_endpoint_changed: '关系两端对象变化',
+  relation_cardinality_changed: '关系基数变化',
+  metric_removed: '指标被删除',
+  authoritative_source_changed: '权威来源变化',
+  source_contract_changed: '来源契约版本变化',
+}
+function labelled(labels, item) {
+  return labels[item.code] || item.message
+}
+
 function errorText(caught) {
   const listed = caught?.details?.errors
   if (Array.isArray(listed) && listed.length) return `${caught.message}：${listed.slice(0, 3).join('；')}`
@@ -156,7 +208,8 @@ async function publish() {
       ElMessage.error(errorText(caught))
       return
     }
-    const lines = breaking.map((item) => `${item.subject}：${item.message}`).join('\n')
+    busy.value = false
+    const lines = breaking.map((item) => `${item.subject}：${labelled(changeLabels, item)}`).join('\n')
     try {
       await ElMessageBox.confirm(
         `相对当前已发布版本存在 ${breaking.length} 项破坏性变化，已依赖旧版本的查询可能失效：\n\n${lines}`,
@@ -374,16 +427,16 @@ onMounted(load)
           <el-button v-if="detail.status === 'DEPRECATED' && canPublish" type="danger" plain :loading="busy" @click="retireOrDeprecate('retire')">退役</el-button>
         </div>
 
-        <el-steps v-if="lifecycleSteps.includes(detail.status)" :active="activeStep" finish-status="success" align-center class="lifecycle">
+        <el-steps v-if="lifecycleSteps.includes(detail.status)" :active="activeStep" finish-status="success" process-status="wait" align-center class="lifecycle">
           <el-step v-for="step in lifecycleSteps" :key="step" :title="lifecycleLabels[step]" />
         </el-steps>
         <p v-if="detail.status === 'REVIEWED' && pendingBindings.length" class="form-hint">
           还有 {{ pendingBindings.length }} 个来源绑定待数据负责人确认，全部确认后才能确认语义包。
         </p>
         <dl class="facts">
-          <div><dt>评审</dt><dd>{{ detail.reviewed_by || '—' }} · {{ formatTime(detail.reviewed_at) }}</dd></div>
-          <div><dt>确认</dt><dd>{{ detail.verified_by || '—' }} · {{ formatTime(detail.verified_at) }}</dd></div>
-          <div><dt>发布</dt><dd>{{ detail.published_by || '—' }} · {{ formatTime(detail.published_at) }}</dd></div>
+          <div><dt>评审</dt><dd>{{ attribution(detail.reviewed_by, detail.reviewed_at) }}</dd></div>
+          <div><dt>确认</dt><dd>{{ attribution(detail.verified_by, detail.verified_at) }}</dd></div>
+          <div><dt>发布</dt><dd>{{ attribution(detail.published_by, detail.published_at) }}</dd></div>
         </dl>
 
         <el-tabs v-model="detailTab">
@@ -482,7 +535,12 @@ onMounted(load)
               <el-table-column prop="subject" label="对象" min-width="260">
                 <template #default="scope"><span class="mono">{{ scope.row.subject }}</span></template>
               </el-table-column>
-              <el-table-column prop="message" label="需审核人确认" min-width="420" />
+              <el-table-column label="需审核人确认" min-width="420">
+                <template #default="scope">
+                  {{ labelled(warningLabels, scope.row) }}
+                  <small class="subline">{{ scope.row.message }}</small>
+                </template>
+              </el-table-column>
             </el-table>
           </el-tab-pane>
 
@@ -491,14 +549,19 @@ onMounted(load)
             <template v-else>
               <el-alert
                 :type="validation.valid ? 'success' : 'error'" :closable="false" show-icon
-                :title="validation.valid ? '通过：绑定与已登记契约一致' : '未通过：存在必须修复的问题'"
+                :title="validation.valid ? '通过：没有必须修复的问题' : '未通过：存在必须修复的问题'"
               />
               <el-table v-if="validation.issues.length" :data="validation.issues" size="small" class="page-section">
                 <el-table-column label="级别" width="90">
                   <template #default="scope"><el-tag :type="scope.row.severity === 'error' ? 'danger' : 'warning'" size="small">{{ scope.row.severity === 'error' ? '错误' : '提示' }}</el-tag></template>
                 </el-table-column>
                 <el-table-column prop="subject" label="对象" min-width="240" />
-                <el-table-column prop="message" label="说明" min-width="420" />
+                <el-table-column label="说明" min-width="420">
+                  <template #default="scope">
+                    {{ labelled(issueLabels, scope.row) }}
+                    <small class="subline">{{ scope.row.message }}</small>
+                  </template>
+                </el-table-column>
               </el-table>
               <template v-if="validation.compared_to_version">
                 <h4 class="panel-title">相对已发布版本 {{ validation.compared_to_version }} 的变化</h4>
@@ -507,7 +570,12 @@ onMounted(load)
                     <template #default="scope"><el-tag :type="scope.row.breaking ? 'danger' : 'info'" size="small">{{ scope.row.breaking ? '破坏性' : '兼容' }}</el-tag></template>
                   </el-table-column>
                   <el-table-column prop="subject" label="对象" min-width="260" />
-                  <el-table-column prop="message" label="变化" min-width="380" />
+                  <el-table-column label="变化" min-width="380">
+                    <template #default="scope">
+                      {{ labelled(changeLabels, scope.row) }}
+                      <small class="subline">{{ scope.row.message }}</small>
+                    </template>
+                  </el-table-column>
                 </el-table>
               </template>
             </template>
@@ -530,8 +598,10 @@ onMounted(load)
           </el-select>
           <span v-if="!canReadContracts" class="form-hint">需要数据接入的读取权限才能列出契约。</span>
         </el-form-item>
-        <el-form-item v-for="key in generateForm.selected" :key="key" :label="key.split('/')[1]">
-          <el-input v-model="generateForm.keys[key]" placeholder="业务键字段，逗号分隔；留空则使用来源对象编号" />
+        <el-form-item v-for="key in generateForm.selected" :key="key" label="业务键">
+          <el-input v-model="generateForm.keys[key]" placeholder="字段名，逗号分隔；留空则使用来源对象编号">
+            <template #prepend><span class="mono">{{ key.split('/')[1] }}</span></template>
+          </el-input>
         </el-form-item>
         <p class="form-hint">生成结果为草稿：属性名称、业务键、敏感等级和对象关系都需要审核人确认，不会自动发布。</p>
       </el-form>
