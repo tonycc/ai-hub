@@ -385,6 +385,75 @@ BEGIN
 END
 $$;
 
+-- Semantic center (ADR-035). The schema is migrated by the core chain; the
+-- platform runtime may read, insert and advance lifecycle state, but never
+-- delete, and the raw worker has no access at all.
+DO $$
+BEGIN
+    IF to_regclass('semantic.package_version') IS NOT NULL THEN
+        IF NOT has_schema_privilege('ai_hub_platform', 'semantic', 'USAGE')
+           OR has_schema_privilege('ai_hub_platform', 'semantic', 'CREATE')
+           OR NOT has_table_privilege(
+               'ai_hub_platform', 'semantic.package_version', 'SELECT'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_platform', 'semantic.package_version', 'INSERT'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_platform', 'semantic.package_version', 'UPDATE'
+           )
+           OR has_table_privilege(
+               'ai_hub_platform', 'semantic.package_version', 'DELETE,TRUNCATE'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_platform', 'semantic.binding_verification', 'SELECT'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_platform', 'semantic.binding_verification', 'INSERT'
+           )
+           OR NOT has_table_privilege(
+               'ai_hub_platform', 'semantic.binding_verification', 'UPDATE'
+           )
+           OR has_table_privilege(
+               'ai_hub_platform', 'semantic.binding_verification', 'DELETE,TRUNCATE'
+           ) THEN
+            RAISE EXCEPTION 'platform runtime semantic privilege is invalid';
+        END IF;
+
+        IF (
+            SELECT tableowner
+            FROM pg_tables
+            WHERE schemaname = 'semantic'
+              AND tablename = 'package_version'
+        ) IS DISTINCT FROM 'ai_hub_platform_migrator' THEN
+            RAISE EXCEPTION 'semantic table owner is invalid';
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_hub_raw')
+           AND (
+               has_schema_privilege('ai_hub_raw', 'semantic', 'USAGE')
+               OR has_table_privilege(
+                   'ai_hub_raw',
+                   'semantic.package_version',
+                   'SELECT,INSERT,UPDATE,DELETE'
+               )
+           ) THEN
+            RAISE EXCEPTION 'raw runtime can access the semantic schema';
+        END IF;
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_trigger
+            WHERE tgrelid = 'semantic.package_version'::regclass
+              AND tgname = 'package_version_guard'
+              AND tgenabled <> 'D'
+        ) THEN
+            RAISE EXCEPTION 'semantic package immutability guard is missing';
+        END IF;
+    END IF;
+END
+$$;
+
 \connect standalone_app_db
 
 DO $$

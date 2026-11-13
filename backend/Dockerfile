@@ -57,6 +57,7 @@ COPY backend/migrations ./backend/migrations
 COPY contracts ./public-assets/contracts
 COPY deploy/operations/production-targets.json ./deploy/operations/production-targets.json
 COPY deploy/operations/ingest-sources.json ./deploy/operations/ingest-sources.json
+COPY semantic-models ./semantic-models
 COPY docs/developer-integration-guide.md ./public-assets/docs/developer-integration-guide.md
 COPY docs/adr/ADR-034-identity-provider-application-owned-authorization.md ./public-assets/docs/adr/ADR-034-identity-provider-application-owned-authorization.md
 COPY docs/agent-integration.md ./public-assets/docs/agent-integration.md

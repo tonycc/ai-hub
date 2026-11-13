@@ -1,0 +1,29 @@
+semantic_id: manufacturing.material
+display_name: 物料(品号)
+description: 原材料、半成品与成品品号;渔具变体(长度 / 颜色等)由品号编码规则表达,相似检索按型谱聚合
+domain: 产品
+authoritative_source_system: 鼎捷 ERP 品号主档
+keys:
+- item_code
+properties:
+- name: item_code
+  type: string
+  description: 品号
+  required: true
+- name: name
+  type: string
+  description: 品名
+- name: spec
+  type: text
+  description: 规格描述
+- name: category
+  type: string
+  description: 大类(竿 / 轮 / 饵 / 配件 / 原料)
+- name: unit
+  type: string
+  description: 计量单位
+- name: standard_cost
+  type: money
+  description: 标准成本
+  sensitive: true
+  classification: confidential
