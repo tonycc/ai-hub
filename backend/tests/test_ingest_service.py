@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
+from uuid import uuid4
 
 import pytest
 from ai_hub_platform.modules.ingest.service import (
     IngestRecord,
+    IngestService,
     IngestValidationError,
     payload_content_hash,
     should_apply_version,
@@ -181,6 +184,14 @@ class InMemoryRawStore:
             existing.version if existing else None,
         ):
             return "skipped"
+        if (
+            not bypass
+            and existing is None
+            and any(
+                logged[:3] == key and logged[3] > record.version for logged in self.changes
+            )
+        ):
+            return "skipped"
         if record.operation == "delete":
             self.current.pop(key, None)
             return "delete"
@@ -328,3 +339,150 @@ def test_change_record_conflict_compares_operation_and_content_hash() -> None:
     assert "already exists with a different purpose" not in insert
     assert "IngestRecordConflictError" in insert
     assert IngestRecordConflictError.error_code == "record_version_conflict"
+
+
+class _TombstoneResult:
+    def __init__(self, rows: list[tuple[str, int]] | None = None) -> None:
+        self._rows = rows or []
+
+    def all(self) -> list[tuple[str, int]]:
+        return self._rows
+
+    def scalar_one_or_none(self) -> int:
+        return 1
+
+
+class _TombstoneSession:
+    """Serves current-state rows and records which objects get deleted."""
+
+    def __init__(self, rows: list[tuple[str, int]]) -> None:
+        self.rows = rows
+        self.deleted: list[str] = []
+        self.logged: list[tuple[str, int]] = []
+
+    async def execute(self, statement: object, params: dict[str, Any]) -> _TombstoneResult:
+        sql = str(statement)
+        if "SELECT object_id, version" in sql:
+            return _TombstoneResult(self.rows)
+        if "INSERT INTO platform_raw.raw_change_record" in sql:
+            self.logged.append((params["object_id"], params["version"]))
+        elif "DELETE FROM platform_raw.raw_current_state" in sql:
+            self.deleted.append(params["object_id"])
+        return _TombstoneResult()
+
+
+async def _synthesize(session: _TombstoneSession, *, max_version: int | None) -> int:
+    return await IngestService()._synthesize_full_tombstones(  # pyright: ignore[reportPrivateUsage]
+        cast(Any, session),
+        batch_id=uuid4(),
+        source_application_id="app-a",
+        object_type="device",
+        exported_object_ids={"E-keep"},
+        high_watermark=95,
+        payload_contract_version="device.v1",
+        purpose="production",
+        max_version=max_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_full_tombstones_skip_rows_written_after_the_snapshot_fetch_began() -> None:
+    # Before the fetch, current state topped out at version 100. E-new@120 was
+    # ingested by another worker while the snapshot was being fetched.
+    session = _TombstoneSession([("E-keep", 50), ("E-gone", 100), ("E-new", 120)])
+    tombstones = await _synthesize(session, max_version=100)
+    assert tombstones == 1
+    assert session.deleted == ["E-gone"]
+    # Absence stays authoritative for known rows even when hw (95) is lower.
+    assert session.logged == [("E-gone", 101)]
+
+
+@pytest.mark.asyncio
+async def test_full_tombstones_without_a_ceiling_cover_every_absent_row() -> None:
+    session = _TombstoneSession([("E-keep", 50), ("E-gone", 100), ("E-new", 120)])
+    tombstones = await _synthesize(session, max_version=None)
+    assert tombstones == 2
+    assert session.deleted == ["E-gone", "E-new"]
+
+
+class _ScalarResult:
+    def __init__(self, value: object | None) -> None:
+        self._value = value
+
+    def scalar_one_or_none(self) -> object | None:
+        return self._value
+
+
+class _ApplySession:
+    """Current-state row and change-log lookups for ``_apply_current_state``."""
+
+    def __init__(self, *, current_version: int | None, newer_logged: bool) -> None:
+        self.current_version = current_version
+        self.newer_logged = newer_logged
+        self.writes: list[str] = []
+
+    async def execute(self, statement: object, params: dict[str, Any]) -> _ScalarResult:
+        del params
+        sql = str(statement)
+        if "FROM platform_raw.raw_change_record" in sql:
+            return _ScalarResult(1 if self.newer_logged else None)
+        if "SELECT version" in sql:
+            return _ScalarResult(self.current_version)
+        self.writes.append(sql.split()[0])
+        return _ScalarResult(None)
+
+
+async def _apply(session: _ApplySession, record: IngestRecord, *, bypass: bool = False) -> str:
+    return await IngestService()._apply_current_state(  # pyright: ignore[reportPrivateUsage]
+        cast(Any, session),
+        source_application_id="app-a",
+        object_type="device",
+        record=record,
+        payload_contract_version="device.v1",
+        bypass_version_check=bypass,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_upsert_cannot_resurrect_an_object_deleted_at_a_newer_version() -> None:
+    # E-1 was deleted at version 180: no current-state row, but the log has it.
+    session = _ApplySession(current_version=None, newer_logged=True)
+    applied = await _apply(session, IngestRecord("E-1", "upsert", 150, {"name": "old"}))
+    assert applied == "skipped"
+    assert session.writes == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_after_delete_applies_when_it_is_the_newest_logged_version() -> None:
+    session = _ApplySession(current_version=None, newer_logged=False)
+    applied = await _apply(session, IngestRecord("E-1", "upsert", 200, {"name": "back"}))
+    assert applied == "upsert"
+    assert session.writes == ["INSERT"]
+
+
+@pytest.mark.asyncio
+async def test_full_tombstone_still_bypasses_version_and_log_checks() -> None:
+    session = _ApplySession(current_version=100, newer_logged=True)
+    applied = await _apply(session, IngestRecord("E-1", "delete", 101, None), bypass=True)
+    assert applied == "delete"
+    assert session.writes == ["DELETE"]
+
+
+def test_stale_upsert_after_delete_stays_deleted_in_reference_store() -> None:
+    store = InMemoryRawStore()
+
+    def load(record: IngestRecord, high_watermark: int) -> dict[str, int]:
+        return store.load_batch(
+            source_application_id="app-a",
+            object_type="device",
+            sync_mode="incremental",
+            records=[record],
+            high_watermark=high_watermark,
+            payload_contract_version="device.v1",
+        )
+
+    load(IngestRecord("E-1", "upsert", 150, {"name": "a"}), 150)
+    load(IngestRecord("E-1", "delete", 180, None), 180)
+    replayed = load(IngestRecord("E-1", "upsert", 150, {"name": "a"}), 180)
+    assert replayed["upserts"] == 0
+    assert ("app-a", "device", "E-1") not in store.current

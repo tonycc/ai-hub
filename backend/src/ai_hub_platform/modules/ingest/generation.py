@@ -606,6 +606,13 @@ class InMemoryGenerationStore:
                 record.version, existing.version if existing is not None else None
             ):
                 continue
+            if existing is None and any(
+                key[:3] == state_key and key[3] > record.version and key[4] == "production"
+                for key in self.changes
+            ):
+                # Mirrors IngestService: the log outlives a deleted row, so a
+                # stale record cannot bring a deleted object back.
+                continue
             if record.operation == "delete":
                 self.current.pop(state_key, None)
             else:
