@@ -13,12 +13,6 @@ const routes = [
         meta: { title: '平台首页', breadcrumb: ['平台门户', '平台首页'] },
       },
       {
-        path: 'platform/notifications',
-        name: 'notifications',
-        component: () => import('../views/MessageCenterView.vue'),
-        meta: { title: '通知中心', breadcrumb: ['平台治理', '通知中心'] },
-      },
-      {
         path: 'applications',
         name: 'applications',
         component: () => import('../views/ApplicationsView.vue'),
@@ -31,28 +25,10 @@ const routes = [
         meta: { title: '用户与组织', breadcrumb: ['平台治理', '用户与组织'] },
       },
       {
-        path: 'platform/permissions',
-        name: 'permissions',
-        component: () => import('../views/PermissionManagementView.vue'),
-        meta: { title: '权限与安全', breadcrumb: ['平台治理', '权限与安全'] },
-      },
-      {
         path: 'platform/audit',
         name: 'audit',
         component: () => import('../views/AuditCenterView.vue'),
         meta: { title: '审计中心', breadcrumb: ['平台治理', '审计中心'] },
-      },
-      {
-        path: 'platform/developer',
-        name: 'developer',
-        component: () => import('../views/DeveloperCenterView.vue'),
-        meta: { title: '开发者中心', breadcrumb: ['运行与研发', '开发者中心'] },
-      },
-      {
-        path: 'platform/platform-users',
-        name: 'platform-users',
-        component: () => import('../views/PlatformUsersView.vue'),
-        meta: { title: '平台用户', breadcrumb: ['运行与研发', '平台用户'] },
       },
       {
         path: 'platform/operations',
@@ -67,32 +43,8 @@ const routes = [
         meta: { title: '数据接入', breadcrumb: ['运行与研发', '数据接入'] },
       },
       {
-        path: 'platform/settings',
-        name: 'platform-settings',
-        component: () => import('../views/PlatformSettingsView.vue'),
-        meta: { title: '平台配置', breadcrumb: ['运行与研发', '平台配置'] },
-      },
-      {
-        path: 'platform/integrations',
-        name: 'integrations',
-        component: () => import('../views/CollaborationView.vue'),
-        meta: { title: '接入治理', breadcrumb: ['平台治理', '接入治理'] },
-      },
-      {
         path: 'platform',
-        redirect: '/platform/developer',
-      },
-      {
-        path: 'semantics',
-        name: 'semantics',
-        component: () => import('../views/PlannedCapabilityView.vue'),
-        meta: { title: '企业语义中心', breadcrumb: ['平台能力', '企业语义中心'] },
-      },
-      {
-        path: 'ai-center',
-        name: 'ai-center',
-        component: () => import('../views/PlannedCapabilityView.vue'),
-        meta: { title: 'AI 治理中心', breadcrumb: ['平台能力', 'AI 治理中心'] },
+        redirect: '/applications',
       },
     ],
   },

@@ -50,8 +50,6 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.read]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.bootstrap]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.directory.read]]
-        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.authorization.decide]]
-        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.export]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.push]]
@@ -75,8 +73,7 @@ entries:
       email: demo-user@ai-hub.local
       type: internal
       password: !Env AI_HUB_DEMO_USER_PASSWORD
-      attributes:
-        authorization_version: 1
+      attributes: {}
 
   - model: authentik_core.user
     state: created
@@ -87,8 +84,7 @@ entries:
       email: app-developer@ai-hub.local
       type: internal
       password: !Env AI_HUB_UAT_USER_PASSWORD
-      attributes:
-        authorization_version: 1
+      attributes: {}
 
   - model: authentik_core.user
     state: created
@@ -99,5 +95,4 @@ entries:
       email: platform-ingest-operator@ai-hub.local
       type: internal
       password: !Env AI_HUB_INGEST_OPERATOR_PASSWORD
-      attributes:
-        authorization_version: 1
+      attributes: {}

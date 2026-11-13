@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import PlatformAccounts from '../components/PlatformAccounts.vue'
 import ApiState from '../components/ApiState.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -9,6 +10,7 @@ import { usePortalSession } from '../stores/session'
 
 const session = usePortalSession()
 const activeTab = ref('users')
+const platformAccountsVisible = ref(false)
 const loading = ref(false)
 const error = ref(null)
 const users = ref([])
@@ -62,8 +64,6 @@ function validateUserForm() {
   return null
 }
 
-// 业务用户 = 无平台角色的用户
-const businessUsers = computed(() => users.value.filter((user) => user.platform_roles.length === 0))
 
 // 用户职位列表
 const userPositions = ref([])
@@ -168,7 +168,7 @@ async function saveUser() {
           { method: 'DELETE' }
         )
       }
-      ElMessage.success('业务用户已更新')
+      ElMessage.success('用户已更新')
     } else {
       const body = {
         login_account: userForm.login_account,
@@ -179,7 +179,7 @@ async function saveUser() {
       }
       if (userForm.email) body.email = userForm.email
       await apiRequest('unified-users', { method: 'POST', body })
-      ElMessage.success('业务用户已创建')
+      ElMessage.success('用户已创建')
     }
     userVisible.value = false
     await loadAll()
@@ -318,16 +318,17 @@ onMounted(loadAll)
 
 <template>
   <div class="page-shell">
-    <PageHeader title="用户与组织" description="管理业务用户和组织架构；业务用户仅用于登录业务应用，无平台管理权限。">
+    <el-drawer v-model="platformAccountsVisible" destroy-on-close title="平台管理权限" size="min(1100px, 96vw)" @closed="loadAll"><PlatformAccounts /></el-drawer>
+    <PageHeader title="用户与组织" description="统一管理用户、组织、职位与平台管理权限。">
       <template #tabs>
         <div class="management-tabs">
-          <button v-for="item in [['users','业务用户'],['organizations','组织'],['positions','职位']]" :key="item[0]" :class="{ active: activeTab === item[0] }" @click="activeTab = item[0]">{{ item[1] }}</button>
+          <button v-for="item in [['users','用户'],['organizations','组织'],['positions','职位']]" :key="item[0]" :class="{ active: activeTab === item[0] }" @click="activeTab = item[0]">{{ item[1] }}</button>
         </div>
       </template>
       <el-input v-model="keyword" clearable prefix-icon="Search" placeholder="搜索名称或编号" style="width: 280px" @keyup.enter="loadAll" @clear="loadAll" />
-      <template #actions>
+      <template #actions><el-button v-if="session.hasPermission('platform.identity.read')" @click="platformAccountsVisible = true">平台管理权限</el-button>
         <el-button @click="loadAll"><el-icon><Refresh /></el-icon>刷新</el-button>
-        <el-button v-if="canWrite && activeTab === 'users'" type="primary" @click="openUser()"><el-icon><Plus /></el-icon>新增业务用户</el-button>
+        <el-button v-if="canWrite && activeTab === 'users'" type="primary" @click="openUser()"><el-icon><Plus /></el-icon>新增用户</el-button>
         <el-button v-if="canWrite && activeTab === 'organizations'" type="primary" @click="openOrg()"><el-icon><Plus /></el-icon>新增组织</el-button>
         <el-button v-if="canWrite && activeTab === 'positions'" type="primary" @click="openPosition()"><el-icon><Plus /></el-icon>新增职位</el-button>
       </template>
@@ -335,8 +336,8 @@ onMounted(loadAll)
 
     <section class="surface-panel page-section list-panel">
       <ApiState :loading="loading" :error="error" @retry="loadAll">
-        <!-- 业务用户表格 -->
-        <el-table v-if="activeTab === 'users'" :data="businessUsers" style="width: 100%">
+        <!-- 统一用户目录 -->
+        <el-table v-if="activeTab === 'users'" :data="users" style="width: 100%">
           <el-table-column prop="display_name" label="用户姓名" min-width="150" />
           <el-table-column prop="subject" label="登录账号" min-width="180">
             <template #default="scope"><code>{{ scope.row.subject }}</code></template>
@@ -352,9 +353,10 @@ onMounted(loadAll)
                   <el-icon v-if="pos.is_primary" class="primary-icon"><Star /></el-icon>
                 </el-tag>
               </div>
-              <span v-else>—</span>
+              <span v-else>{{ scope.row.organization_name || scope.row.primary_organization_id || '—' }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="平台角色" min-width="120"><template #default="scope">{{ scope.row.platform_roles?.map(role => ({ PLATFORM_ADMIN: '平台管理员', APPLICATION_DEVELOPER: '应用开发者' }[role] || role)).join('、') || '无' }}</template></el-table-column>
           <el-table-column prop="status" label="状态" width="90">
             <template #default="scope"><StatusTag :status="scope.row.status" /></template>
           </el-table-column>
@@ -409,8 +411,8 @@ onMounted(loadAll)
       </ApiState>
     </section>
 
-    <!-- 新增/编辑业务用户 -->
-    <el-drawer v-model="userVisible" :title="editingUser ? '编辑业务用户' : '新增业务用户'" size="min(560px, 96vw)">
+    <!-- 新增/编辑用户 -->
+    <el-drawer v-model="userVisible" :title="editingUser ? '编辑用户' : '新增用户'" size="min(560px, 96vw)">
       <el-form label-position="top">
         <el-form-item v-if="!editingUser" label="登录账号" required>
           <el-input v-model="userForm.login_account" placeholder="手机号或邮箱" />
@@ -546,10 +548,6 @@ onMounted(loadAll)
 </template>
 
 <style scoped>
-.management-tabs { display: flex; gap: 24px; }
-.management-tabs button { position: relative; height: 46px; padding: 0 1px; border: 0; color: var(--ink-500); background: transparent; font-size: 15px; cursor: pointer; }
-.management-tabs button.active { color: var(--ink-900); font-weight: 650; }
-.management-tabs button.active::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-500); content: ''; }
 .list-panel { min-height: 520px; overflow: hidden; }
 .inline-tag { margin: 2px 4px 2px 0; }
 .primary-icon { margin-left: 2px; color: var(--warning); }

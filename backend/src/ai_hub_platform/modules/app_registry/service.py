@@ -53,7 +53,7 @@ class AppRegistryService:
                     SELECT a.application_id, a.name, a.description, a.owner_id,
                            COALESCE(
                                u.display_name || COALESCE(' <' || u.email || '>', ''),
-                               a.owner
+                               ''
                            ) AS owner,
                            a.status, a.capabilities
                     FROM platform_core.application AS a

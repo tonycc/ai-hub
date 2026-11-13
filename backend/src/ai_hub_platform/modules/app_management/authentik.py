@@ -430,27 +430,6 @@ class AuthentikAdminClient:
         )
         return updated
 
-    async def set_authorization_version(self, *, username: str, version: int) -> None:
-        # The ai_hub.identity scope reads attributes.authorization_version into
-        # the token claims; the SDK rejects a snapshot whose version differs
-        # from the claim, so every local version bump must be mirrored here.
-        user = await self._user_by_username(username)
-        if user is None:
-            raise AuthentikManagementError(f"authentik user '{username}' was not found")
-        user_id = user.get("pk")
-        if not isinstance(user_id, int):
-            raise AuthentikManagementError("authentik user identifier is invalid")
-        attributes = user.get("attributes")
-        merged: dict[str, Any] = (
-            dict(cast(dict[str, Any], attributes)) if isinstance(attributes, dict) else {}
-        )
-        merged["authorization_version"] = version
-        await self._json_request(
-            "PATCH",
-            f"/core/users/{user_id}/",
-            json={"attributes": merged},
-        )
-
     async def delete_user(self, *, username: str) -> None:
         user = await self._user_by_username(username)
         if user is None:

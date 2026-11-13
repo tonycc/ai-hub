@@ -224,7 +224,7 @@ def test_release_manifest_requires_every_runtime_gate_and_clean_production_sourc
 def test_m4_credential_migration_is_expand_only_and_old_schema_compatible() -> None:
     target_heads = migration_heads(PROJECT_ROOT)
     assert target_heads["raw"] == "20260831_raw_0007"
-    expand_target_heads = {**target_heads, "raw": "20260830_raw_0006"}
+    expand_target_heads = {"core": "20260905_core_0028", "raw": "20260830_raw_0006"}
     transitions = validate_migration_transition(
         PROJECT_ROOT,
         {

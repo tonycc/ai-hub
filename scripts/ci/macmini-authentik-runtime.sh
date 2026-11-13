@@ -119,8 +119,8 @@ assert [
     (uri.matching_mode.value, uri.url, uri.redirect_uri_type.value)
     for uri in provider.redirect_uris
 ] == [
-    ("strict", os.environ["AI_HUB_PORTAL_OIDC_REDIRECT_URI"], "authorization"),
-    ("strict", os.environ["AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI"], "logout"),
+    ("strict", os.environ["AI_HUB_PORTAL_OIDC_REDIRECT_URIS"], "authorization"),
+    ("strict", os.environ["AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS"], "logout"),
 ], "portal callback/logout URLs did not converge"
 assert Application.objects.get(slug="ai-hub-portal").meta_launch_url == os.environ["AI_HUB_PORTAL_EXTERNAL_URL"]
 brand = Brand.objects.get(domain=os.environ["AI_HUB_AUTHENTIK_BRAND_DOMAIN"])

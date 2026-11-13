@@ -81,7 +81,6 @@
       "additionalProperties": { "type": "integer", "minimum": 1 },
       "required": [
         "audit_days",
-        "notification_days",
         "portal_session_days_after_expiry",
         "conformance_days_after_expiry",
         "backup_hourly_count",

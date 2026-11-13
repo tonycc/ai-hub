@@ -40,20 +40,6 @@ class DeveloperCatalogResponse(ApiModel):
     total: int
 
 
-class SandboxResponse(ApiModel):
-    available: bool
-    message: str | None = None
-    application_id: str | None
-    platform_base_url: str
-    oidc_issuer: str | None
-    oidc_discovery_url: str | None
-    oidc_audience: str | None
-    user_subject: str | None
-    default_capabilities: list[str]
-    optional_capabilities: list[str]
-    client_secret_included: bool
-
-
 def _catalog(request: Request) -> DeveloperCatalogService:
     return DeveloperCatalogService(request.app.state.settings.public_asset_root)
 
@@ -113,58 +99,4 @@ async def download_developer_asset(
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "private, max-age=300",
         },
-    )
-
-
-@router.get("/sandbox", response_model=SandboxResponse)
-async def sandbox_configuration(
-    request: Request,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.developer.read",
-                application_parameter=None,
-            )
-        ),
-    ],
-) -> SandboxResponse:
-    settings = request.app.state.settings
-    if not settings.reference_application_enabled:
-        return SandboxResponse(
-            available=False,
-            message=(
-                "The neutral reference sandbox is disabled in this deployment; "
-                "register a real application environment to obtain credentials."
-            ),
-            application_id=None,
-            platform_base_url=settings.public_platform_base_url,
-            oidc_issuer=None,
-            oidc_discovery_url=None,
-            oidc_audience=None,
-            user_subject=None,
-            default_capabilities=[],
-            optional_capabilities=[],
-            client_secret_included=False,
-        )
-    # The sandbox developer copies these values into their app's environment,
-    # so they must describe the sandbox application's own dedicated provider,
-    # not the shared platform issuer/audience.
-    issuer = (
-        f"{settings.public_identity_base_url.rstrip('/')}"
-        f"/application/o/{settings.sandbox_application_id}/"
-    )
-    return SandboxResponse(
-        available=True,
-        application_id=settings.sandbox_application_id,
-        platform_base_url=settings.public_platform_base_url,
-        oidc_issuer=issuer,
-        oidc_discovery_url=f"{issuer}.well-known/openid-configuration",
-        oidc_audience=settings.sandbox_application_id,
-        user_subject=settings.sandbox_user_subject,
-        default_capabilities=["API_CLIENT"],
-        optional_capabilities=[
-            "DATA_INGEST",
-        ],
-        client_secret_included=False,
     )

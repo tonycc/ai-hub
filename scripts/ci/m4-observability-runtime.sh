@@ -32,7 +32,7 @@ m4_obs_compose() {
     --project-name "${M4_OBS_PROJECT_NAME}" \
     --env-file "${M4_OBS_ENV_FILE}" \
     -f "${M4_OBS_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 

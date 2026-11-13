@@ -57,8 +57,15 @@ def test_openapi_contract_has_unique_operations_and_resolvable_local_refs() -> N
     bootstrap = contract["components"]["schemas"]["AdminBootstrapClaim"]
     assert "initial_admin_user_id" in bootstrap["required"]
     assert "owner_user_id" not in bootstrap["properties"]
-    assert "business_user" in contract["components"]["schemas"]["CurrentUser"]["required"]
-    assert "business_user" in contract["components"]["schemas"]["DirectoryUser"]["required"]
+    for schema_name in ("CurrentUser", "DirectoryUser"):
+        schema = contract["components"]["schemas"][schema_name]
+        assert "business_user" not in schema["required"]
+        assert "business_user" not in schema["properties"]
+        assert "platform_roles" not in schema["properties"]
+    tombstone_description = contract["components"]["schemas"]["DirectoryUser"]["properties"][
+        "tombstone"
+    ]["description"]
+    assert "not a business user" not in tombstone_description
 
 
 def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
@@ -67,14 +74,10 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
         "/health/live",
         "/health/ready",
         "/platform-api/v1/me",
-        "/platform-api/v1/me/permissions",
-        "/platform-api/v1/authorization/decisions",
         "/platform-api/v1/applications/{application_id}",
         "/platform-api/v1/applications/{application_id}/environments/{environment}/admin-bootstrap",
         "/platform-api/v1/applications/{application_id}/environments/{environment}/health-check",
         "/platform-api/v1/directory/users",
-        "/platform-api/v1/notifications",
-        "/platform-api/v1/notifications/{notification_id}",
         "/platform-api/v1/data/objects",
         "/platform-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}",
         "/platform-api/v1/data/objects/{source_application_id}/{object_type}/{object_id}/history",
@@ -95,14 +98,6 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
 
     expected_scopes = {
         "/platform-api/v1/me": ["ai_hub.identity", "platform.me.read"],
-        "/platform-api/v1/me/permissions": [
-            "ai_hub.identity",
-            "platform.me.read",
-        ],
-        "/platform-api/v1/authorization/decisions": [
-            "ai_hub.identity",
-            "platform.authorization.decide",
-        ],
         "/platform-api/v1/applications/{application_id}": [
             "ai_hub.identity",
             "platform.application.read",
@@ -121,14 +116,6 @@ def test_m1_openapi_covers_every_public_identity_and_api_operation() -> None:
         "/platform-api/v1/directory/users": [
             "ai_hub.identity",
             "platform.directory.read",
-        ],
-        "/platform-api/v1/notifications": [
-            "ai_hub.identity",
-            "platform.notification.request",
-        ],
-        "/platform-api/v1/notifications/{notification_id}": [
-            "ai_hub.identity",
-            "platform.notification.request",
         ],
         "/platform-api/v1/data/objects": [
             "ai_hub.identity",
@@ -193,25 +180,23 @@ def test_push_openapi_lists_runtime_error_statuses() -> None:
     paths = cast(dict[str, Any], contract["paths"])
     create = paths["/platform-api/v1/ingest/push/generations"]["post"]["responses"]
     assert {"400", "404", "409", "422", "503"} <= set(create)
-    heartbeat = paths[
-        "/platform-api/v1/ingest/push/generations/{generation_id}/heartbeat"
-    ]["post"]["responses"]
-    assert {"400", "404", "409", "422"} <= set(heartbeat)
-    batch = paths["/platform-api/v1/ingest/push/generations/{generation_id}/batches"][
-        "post"
-    ]["responses"]
-    assert {"400", "404", "409", "422"} <= set(batch)
-    complete = paths[
-        "/platform-api/v1/ingest/push/generations/{generation_id}/complete"
-    ]["post"]["responses"]
-    assert {"400", "404", "409", "422"} <= set(complete)
-    abort = paths["/platform-api/v1/ingest/push/generations/{generation_id}/abort"][
-        "post"
-    ]["responses"]
-    assert {"400", "404", "409", "422"} <= set(abort)
-    records = contract["components"]["schemas"]["SubmitPushBatchRequest"]["properties"][
-        "records"
+    heartbeat = paths["/platform-api/v1/ingest/push/generations/{generation_id}/heartbeat"]["post"][
+        "responses"
     ]
+    assert {"400", "404", "409", "422"} <= set(heartbeat)
+    batch = paths["/platform-api/v1/ingest/push/generations/{generation_id}/batches"]["post"][
+        "responses"
+    ]
+    assert {"400", "404", "409", "422"} <= set(batch)
+    complete = paths["/platform-api/v1/ingest/push/generations/{generation_id}/complete"]["post"][
+        "responses"
+    ]
+    assert {"400", "404", "409", "422"} <= set(complete)
+    abort = paths["/platform-api/v1/ingest/push/generations/{generation_id}/abort"]["post"][
+        "responses"
+    ]
+    assert {"400", "404", "409", "422"} <= set(abort)
+    records = contract["components"]["schemas"]["SubmitPushBatchRequest"]["properties"]["records"]
     assert records["maxItems"] == 50000
     assert "UnprocessableEntity" in contract["components"]["responses"]
     generation = contract["components"]["schemas"]["PushGeneration"]

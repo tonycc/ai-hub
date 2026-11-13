@@ -1129,7 +1129,7 @@ def _assert_no_enforce_pull_ingest_sources(target: ReleaseTarget) -> None:
     if enforce_count:
         raise ReleaseError(
             "Image rollback is forbidden while Pull ENFORCE ingest sources exist "
-            "(including disabled rows); revert them to AUDIT_ONLY, or use a forward fix"
+            "(including disabled rows); use a forward fix"
         )
 
 

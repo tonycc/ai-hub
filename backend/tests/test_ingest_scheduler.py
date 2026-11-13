@@ -173,9 +173,7 @@ class _SessionFactory:
 @dataclass
 class _InMemoryIngestStore:
     cursor: dict[tuple[str, str], int] = field(default_factory=dict[tuple[str, str], int])
-    cursor_status: dict[tuple[str, str], str] = field(
-        default_factory=dict[tuple[str, str], str]
-    )
+    cursor_status: dict[tuple[str, str], str] = field(default_factory=dict[tuple[str, str], str])
     batches: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     records: list[IngestRecord] = field(default_factory=list[IngestRecord])
     fail_next_load: bool = False
@@ -554,17 +552,15 @@ async def test_full_enforce_aborts_before_load_when_a_page_fails_contract() -> N
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     scheduler = IngestScheduler(
-        RawWorkerSettings(ingest_pull_contract_enforcement_enabled=True),
+        RawWorkerSettings(),
         sources=[_source(contract_validation_mode="ENFORCE")],
-        sessions=_SessionFactory(
-            store, source=_source(contract_validation_mode="ENFORCE")
-        ),  # type: ignore[arg-type]
+        sessions=_SessionFactory(store, source=_source(contract_validation_mode="ENFORCE")),  # type: ignore[arg-type]
         export_client=export_client,
         service=store,  # type: ignore[arg-type]
         contract_validator=IngestContractValidator(),
         contract_lookup=lambda source, version: contract,
     )
-    with pytest.raises(Exception, match="ENFORCE"):
+    with pytest.raises(Exception, match="contract validation"):
         await scheduler.sync_source(_source(contract_validation_mode="ENFORCE"), force_full=True)
     assert store.records == []
     await export_client.close()
@@ -606,7 +602,7 @@ async def test_scheduler_persists_active_contract_fingerprint_on_pull_batches() 
                         "object_id": "E-1",
                         "operation": "upsert",
                         "version": 1,
-                        "payload": {"name": "a", "extra": True},
+                        "payload": {"name": "a"},
                     }
                 ],
                 "has_more": False,
@@ -630,9 +626,7 @@ async def test_scheduler_persists_active_contract_fingerprint_on_pull_batches() 
     await scheduler.sync_source(_source(), force_full=True)
     assert store.batches[0]["schema_fingerprint"] == fingerprint
     summary = store.batches[0]["audit_summary"]
-    assert isinstance(summary, dict)
-    assert summary["mode"] == "AUDIT_ONLY"
-    assert scheduler.metrics.contract_audit_issues >= 1
+    assert summary is None
     await scheduler.sync_source(_source(), force_full=False)
     assert store.batches[-1]["schema_fingerprint"] == fingerprint
     await export_client.close()
@@ -645,9 +639,7 @@ def test_runtime_constructors_wire_contract_validator() -> None:
     from ai_hub_platform.modules.ingest.scheduler import run_ingest_scheduler
 
     assert "create_runtime_scheduler" in inspect_mod.getsource(run_ingest_scheduler)
-    assert "create_runtime_scheduler" in inspect_mod.getsource(
-        rebuild_mod.sync_configured_source
-    )
+    assert "create_runtime_scheduler" in inspect_mod.getsource(rebuild_mod.sync_configured_source)
 
 
 @pytest.mark.asyncio
@@ -832,28 +824,18 @@ def test_pull_revalidates_contract_after_source_lock() -> None:
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[1]
-        / "src/ai_hub_platform/modules/ingest/scheduler.py"
+        Path(__file__).resolve().parents[1] / "src/ai_hub_platform/modules/ingest/scheduler.py"
     ).read_text(encoding="utf-8")
-    incremental = source.split("async def _run_incremental_sync", 1)[1].split(
-        "async def _run_", 2
-    )[0]
+    incremental = source.split("async def _run_incremental_sync", 1)[1].split("async def _run_", 2)[
+        0
+    ]
     full = source.split("async def _run_full_sync", 1)[1].split(
         "async def _run_incremental_sync", 1
     )[0]
-    assert incremental.index("lock_ingest_source") < incremental.index(
-        "_validate_locked_records"
-    )
+    assert incremental.index("lock_ingest_source") < incremental.index("_validate_locked_records")
     assert full.index("lock_ingest_source") < full.index("_validate_locked_records")
-    assert incremental.index("_audit_pull_page") < incremental.index(
-        "lock_ingest_source"
-    )
-    assert full.index("_audit_pull_page") < full.index("lock_ingest_source")
-    audit = source.split("async def _audit_pull_page", 1)[1].split("async def ", 1)[0]
-    assert "AUDIT_ONLY" in audit
-    locked = source.split("async def _validate_locked_records", 1)[1].split(
-        "async def ", 1
-    )[0]
+    assert "_audit_pull_page" not in source
+    locked = source.split("async def _validate_locked_records", 1)[1].split("async def ", 1)[0]
     assert "session=session" in locked
     assert "self.sessions()" not in locked
     lookup = source.split("async def _lookup_contract", 1)[1].split("async def ", 1)[0]

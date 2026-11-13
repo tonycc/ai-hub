@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import OperationsSettings from '../components/OperationsSettings.vue'
 import ApiState from '../components/ApiState.vue'
 import MetricCard from '../components/MetricCard.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -10,11 +11,17 @@ const loading = ref(false)
 const error = ref(null)
 const summary = ref(null)
 const activeTab = ref('applications')
+const settingsVisible = ref(false)
 const tabs = [
   ['applications', '应用入口'],
   ['sources', '数据来源'],
   ['freshness', '同步新鲜度'],
 ]
+const unknownCount = computed(() => {
+  if (!summary.value) return 0
+  return [...summary.value.application_entries, ...summary.value.data_source_entries, ...summary.value.sync_freshness_entries]
+    .filter((item) => item.status === 'UNKNOWN').length
+})
 const warningCount = computed(() => {
   if (!summary.value) return 0
   return [
@@ -53,7 +60,7 @@ onMounted(load)
   <div class="page-shell">
     <PageHeader
       title="运维中心"
-      description="用只读指标查看应用入口、数据来源状态与同步新鲜度；此页面不提供配置写操作。"
+      description="查看应用入口、数据来源和同步状态，以及平台配置。"
     >
       <template #tabs>
         <div class="management-tabs">
@@ -69,23 +76,24 @@ onMounted(load)
         </div>
       </template>
       <template #actions>
-        <el-button @click="$router.push('/platform/developer')">
-          <el-icon><Document /></el-icon>运行手册
+        <el-button @click="settingsVisible = true">
+          <el-icon><Document /></el-icon>运行配置
         </el-button>
         <el-button type="primary" @click="load">
           <el-icon><Refresh /></el-icon>刷新诊断
         </el-button>
       </template>
     </PageHeader>
+    <el-drawer v-model="settingsVisible" title="运行配置" size="min(1100px, 96vw)"><OperationsSettings /></el-drawer>
     <ApiState :loading="loading" :error="error" :empty="!summary" @retry="load">
       <template v-if="summary">
         <div class="metric-grid page-section">
           <MetricCard
             label="整体状态"
-            :value="summary.overall_status === 'HEALTHY' ? '健康' : '降级'"
-            hint="平台只读诊断"
+            :value="summary.overall_status === 'DEGRADED' ? '降级' : unknownCount ? '待确认' : '健康'"
+            :hint="unknownCount ? `${unknownCount} 项状态未知` : '平台只读诊断'"
             icon="Monitor"
-            :tone="summary.overall_status === 'HEALTHY' ? 'green' : 'amber'"
+            :tone="summary.overall_status === 'HEALTHY' && !unknownCount ? 'green' : 'amber'"
           />
           <MetricCard
             label="异常对象"

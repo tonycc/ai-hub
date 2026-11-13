@@ -19,18 +19,13 @@ def test_local_runtime_defaults_are_valid(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.oidc_issuer.startswith("http://localhost:")
 
 
-def test_portal_supports_multiple_exact_origins_with_legacy_compatibility() -> None:
+def test_portal_supports_multiple_exact_origins() -> None:
     settings = Settings(
         _env_file=None,  # pyright: ignore[reportCallIssue]
-        portal_oidc_redirect_uri="http://192.168.33.20:8088/auth/callback",
-        portal_oidc_logout_redirect_uri="http://192.168.33.20:8088/",
-        platform_origins=(
-            "http://192.168.33.20:8088,http://platform.example.com:8088"
-        ),
+        platform_origins=("http://192.168.33.20:8088,http://platform.example.com:8088"),
         platform_default_origin="http://platform.example.com:8088",
         portal_oidc_redirect_uris=(
-            "http://192.168.33.20:8088/auth/callback,"
-            "http://platform.example.com:8088/auth/callback"
+            "http://192.168.33.20:8088/auth/callback,http://platform.example.com:8088/auth/callback"
         ),
         portal_oidc_logout_redirect_uris=(
             "http://192.168.33.20:8088/,http://platform.example.com:8088/"
@@ -59,16 +54,14 @@ def test_portal_rejects_public_ip_duplicate_and_conflicting_origins() -> None:
     with pytest.raises(ValidationError, match="duplicate Origins"):
         Settings(
             _env_file=None,  # pyright: ignore[reportCallIssue]
-            portal_oidc_redirect_uri="http://192.168.33.20:8088/auth/callback",
-            portal_oidc_logout_redirect_uri="http://192.168.33.20:8088/",
-            platform_origins=(
-                "http://192.168.33.20:8088,http://192.168.33.20:8088"
-            ),
+            portal_oidc_logout_redirect_uris="http://192.168.33.20:8088/",
+            platform_origins=("http://192.168.33.20:8088,http://192.168.33.20:8088"),
         )
-    with pytest.raises(ValidationError, match="conflict with legacy"):
+    with pytest.raises(ValidationError, match="platform_default_origin"):
         Settings(
             _env_file=None,  # pyright: ignore[reportCallIssue]
             platform_origins="http://192.168.33.20:8088",
+            platform_default_origin="http://other.localhost:8088",
         )
 
 
@@ -86,7 +79,7 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
         ),
         oidc_issuer="https://identity.example.org/application/o/ai-hub/",
         portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-        portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+        platform_origins="https://platform.example.org",
         portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
         authentik_api_url="https://identity.example.org/api/v3",
         authentik_external_url="https://identity.example.org",
@@ -100,10 +93,6 @@ def test_production_runtime_accepts_secure_non_local_configuration() -> None:
         ),
         oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
         credential_rotation_overlap_seconds=300,
-        standalone_portal_url="https://app.example.org/",
-        standalone_api_base_url="https://app.example.org",
-        standalone_health_url="https://app.example.org/health",
-        standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
     )
 
     assert settings.environment == "production"
@@ -118,7 +107,7 @@ def test_production_accepts_cluster_internal_http_authentik_api_url() -> None:
         ),
         oidc_issuer="https://identity.example.org/application/o/ai-hub/",
         portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-        portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+        platform_origins="https://platform.example.org",
         portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
         authentik_api_url="http://authentik-server:9000/api/v3",
         authentik_external_url="https://identity.example.org",
@@ -132,10 +121,6 @@ def test_production_accepts_cluster_internal_http_authentik_api_url() -> None:
         ),
         oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
         credential_rotation_overlap_seconds=300,
-        standalone_portal_url="https://app.example.org/",
-        standalone_api_base_url="https://app.example.org",
-        standalone_health_url="https://app.example.org/health",
-        standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
     )
     assert settings.authentik_api_url == "http://authentik-server:9000/api/v3"
 
@@ -150,7 +135,7 @@ def test_production_rejects_public_http_authentik_api_url() -> None:
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
             authentik_api_url="http://identity.example.org/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -164,10 +149,6 @@ def test_production_rejects_public_http_authentik_api_url() -> None:
             ),
             oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
             credential_rotation_overlap_seconds=300,
-            standalone_portal_url="https://app.example.org/",
-            standalone_api_base_url="https://app.example.org",
-            standalone_health_url="https://app.example.org/health",
-            standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
         )
 
 
@@ -181,7 +162,7 @@ def test_production_rejects_prefix_spoofed_internal_hostname() -> None:
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
             authentik_api_url="http://authentik-server.evil.example/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -195,10 +176,6 @@ def test_production_rejects_prefix_spoofed_internal_hostname() -> None:
             ),
             oidc_client_secret=SecretStr("ProdOidcClientSecret-1123"),
             credential_rotation_overlap_seconds=300,
-            standalone_portal_url="https://app.example.org/",
-            standalone_api_base_url="https://app.example.org",
-            standalone_health_url="https://app.example.org/health",
-            standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
         )
 
 
@@ -222,7 +199,7 @@ def test_production_requires_https_oidc_issuer() -> None:
             ),
             oidc_issuer="http://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
             authentik_api_url="https://identity.example.org/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -242,7 +219,7 @@ def test_validation_error_does_not_expose_database_password() -> None:
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
             authentik_api_url="https://identity.example.org/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -265,7 +242,7 @@ def test_production_rejects_placeholder_portal_client_secret() -> None:
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("local-only-portal-secret"),
             authentik_api_url="https://identity.example.org/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -286,7 +263,7 @@ def test_production_rejects_placeholder_authentik_api_token() -> None:
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer=("https://identity.example.org/application/o/ai-hub-portal/"),
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
             authentik_api_url="https://identity.example.org/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -304,7 +281,7 @@ def test_production_rejects_placeholder_monitor_token() -> None:
             ),
             oidc_issuer="https://identity.example.org/application/o/ai-hub/",
             portal_oidc_issuer="https://identity.example.org/application/o/ai-hub-portal/",
-            portal_oidc_redirect_uri="https://platform.example.org/auth/callback",
+            platform_origins="https://platform.example.org",
             portal_oidc_client_secret=SecretStr("ProdPortalSecret-9482"),
             authentik_api_url="https://identity.example.org/api/v3",
             authentik_external_url="https://identity.example.org",
@@ -313,10 +290,6 @@ def test_production_rejects_placeholder_monitor_token() -> None:
             public_platform_base_url="https://platform.example.org",
             public_identity_base_url="https://identity.example.org",
             credential_rotation_overlap_seconds=300,
-            standalone_portal_url="https://app.example.org/",
-            standalone_api_base_url="https://app.example.org",
-            standalone_health_url="https://app.example.org/health",
-            standalone_oidc_redirect_uri="https://app.example.org/auth/callback",
         )
 
 

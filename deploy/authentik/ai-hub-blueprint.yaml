@@ -248,7 +248,6 @@ entries:
         actor_type = "service" if request.user.type == "service_account" else "user"
         claims = {
             "actor_type": actor_type,
-            "authorization_version": request.user.attributes.get("authorization_version", 1),
         }
         if actor_type == "service":
             # Prefer the explicit application_id attribute set by credential
@@ -308,24 +307,6 @@ entries:
       expression: "return {}"
 
   - model: authentik_providers_oauth2.scopemapping
-    id: platform-authorization-decide-scope
-    identifiers:
-      name: AI Hub platform.authorization.decide
-    attrs:
-      scope_name: platform.authorization.decide
-      description: Request a registered platform authorization decision.
-      expression: "return {}"
-
-  - model: authentik_providers_oauth2.scopemapping
-    id: platform-notification-request-scope
-    identifiers:
-      name: AI Hub platform.notification.request
-    attrs:
-      scope_name: platform.notification.request
-      description: Request and query notifications for the calling application.
-      expression: "return {}"
-
-  - model: authentik_providers_oauth2.scopemapping
     id: platform-application-health-scope
     identifiers:
       name: AI Hub platform.application.health.write
@@ -382,7 +363,7 @@ entries:
         - refresh_token
       redirect_uris:
         - matching_mode: strict
-          url: !Env [AI_HUB_PORTAL_OIDC_REDIRECT_URI, http://platform.localhost:8088/auth/callback]
+          url: !Format ["%s/auth/callback", !Env [AI_HUB_PLATFORM_DEFAULT_ORIGIN, http://platform.localhost:8088]]
           redirect_uri_type: authorization
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -394,8 +375,6 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.read]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.bootstrap]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.directory.read]]
-        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.authorization.decide]]
-        - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.notification.request]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub platform.application.health.write]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.export]]
         - !Find [authentik_providers_oauth2.scopemapping, [name, AI Hub ai_hub.ingest.push]]
@@ -430,10 +409,10 @@ entries:
         - authorization_code
       redirect_uris:
         - matching_mode: strict
-          url: !Env [AI_HUB_PORTAL_OIDC_REDIRECT_URI, http://platform.localhost:8088/auth/callback]
+          url: !Format ["%s/auth/callback", !Env [AI_HUB_PLATFORM_DEFAULT_ORIGIN, http://platform.localhost:8088]]
           redirect_uri_type: authorization
         - matching_mode: strict
-          url: !Env [AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI, http://platform.localhost:8088/]
+          url: !Format ["%s/", !Env [AI_HUB_PLATFORM_DEFAULT_ORIGIN, http://platform.localhost:8088]]
           redirect_uri_type: logout
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -501,5 +480,4 @@ entries:
       email: platform-admin@ai-hub.local
       type: internal
       password: !Env AI_HUB_UAT_USER_PASSWORD
-      attributes:
-        authorization_version: 1
+      attributes: {}

@@ -175,12 +175,12 @@ async def test_consumed_environment_allows_metadata_update_after_admin_becomes_i
     ) -> dict[str, Any]:
         return {"application_id": application_id}
 
-    async def active_business_user(*_args: object, **_kwargs: object) -> None:
+    async def active_user(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("consumed bootstrap must not revalidate historical eligibility")
 
     monkeypatch.setattr(service, "_lock_application", lock_application)
     monkeypatch.setattr(service, "get_application", get_application)
-    monkeypatch.setattr(service, "_active_business_user", active_business_user)
+    monkeypatch.setattr(service, "_active_user", active_user)
 
     updated = await service.upsert_environment(
         cast(AsyncSession, session),
@@ -201,7 +201,7 @@ async def test_consumed_environment_allows_metadata_update_after_admin_becomes_i
 
 
 @pytest.mark.asyncio
-async def test_application_candidates_exclude_platform_role_assignments() -> None:
+async def test_application_candidates_include_all_active_identities() -> None:
     user_id = UUID("11000000-0000-4000-8000-000000000003")
     session = SessionStub(
         execute_results=[
@@ -227,12 +227,12 @@ async def test_application_candidates_exclude_platform_role_assignments() -> Non
     assert rows[0]["user_id"] == user_id
     statement = session.statements[0]
     assert "u.status = 'ACTIVE'" in statement
-    assert "NOT EXISTS" in statement
-    assert "platform_core.platform_role_assignment" in statement
+    assert "NOT EXISTS" not in statement
+    assert "platform_core.platform_role_assignment" not in statement
 
 
 @pytest.mark.asyncio
-async def test_create_application_rejects_platform_user_as_owner() -> None:
+async def test_create_application_rejects_inactive_or_missing_owner() -> None:
     session = SessionStub(
         execute_results=[ResultStub()],
         scalar_results=[False],
@@ -240,7 +240,7 @@ async def test_create_application_rejects_platform_user_as_owner() -> None:
 
     with pytest.raises(
         ApplicationManagementValidationError,
-        match="active business user",
+        match="active user",
     ):
         await ApplicationManagementService().create_application(
             cast(AsyncSession, session),
@@ -253,16 +253,16 @@ async def test_create_application_rejects_platform_user_as_owner() -> None:
         )
 
     assert len(session.statements) == 2
-    assert "platform_core.platform_role_assignment" in session.statements[1]
+    assert "platform_core.platform_role_assignment" not in session.statements[1]
 
 
 @pytest.mark.asyncio
-async def test_update_application_rejects_platform_user_as_owner() -> None:
+async def test_update_application_rejects_inactive_or_missing_owner() -> None:
     session = SessionStub(execute_results=[ResultStub()])
 
     with pytest.raises(
         ApplicationManagementValidationError,
-        match="active business user",
+        match="active user",
     ):
         await ApplicationManagementService().update_application(
             cast(AsyncSession, session),
@@ -275,11 +275,11 @@ async def test_update_application_rejects_platform_user_as_owner() -> None:
         )
 
     assert len(session.statements) == 1
-    assert "platform_core.platform_role_assignment" in session.statements[0]
+    assert "platform_core.platform_role_assignment" not in session.statements[0]
 
 
 @pytest.mark.asyncio
-async def test_environment_rejects_platform_user_as_initial_admin(
+async def test_environment_rejects_inactive_or_missing_initial_admin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = ApplicationManagementService()
@@ -292,7 +292,7 @@ async def test_environment_rejects_platform_user_as_initial_admin(
 
     with pytest.raises(
         ApplicationManagementValidationError,
-        match="active business user",
+        match="active user",
     ):
         await service.upsert_environment(
             cast(AsyncSession, session),
@@ -309,4 +309,70 @@ async def test_environment_rejects_platform_user_as_initial_admin(
         )
 
     assert len(session.statements) == 2
-    assert "platform_core.platform_role_assignment" in session.statements[1]
+    assert "platform_core.platform_role_assignment" not in session.statements[1]
+
+
+@pytest.mark.asyncio
+async def test_environment_without_bootstrap_preserves_application_owned_administration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ApplicationManagementService()
+    session = SessionStub(execute_results=[ResultStub(), ResultStub()])
+
+    async def lock_application(_session: AsyncSession, application_id: str) -> None:
+        assert application_id == "sample-app"
+
+    async def get_application(_session: AsyncSession, *, application_id: str) -> dict[str, Any]:
+        return {"application_id": application_id}
+
+    monkeypatch.setattr(service, "_lock_application", lock_application)
+    monkeypatch.setattr(service, "get_application", get_application)
+    await service.upsert_environment(
+        cast(AsyncSession, session),
+        cast(AuthentikAdminClient, object()),
+        application_id="sample-app",
+        environment="local",
+        portal_url="http://localhost:4174",
+        api_base_url="http://localhost:3000/api",
+        health_url="http://localhost:3000/health",
+        redirect_uris=["http://localhost:4174/auth/callback"],
+        version="0.1.0",
+        status="ACTIVE",
+    )
+    assert any("INSERT INTO platform_core.application_environment" in s for s in session.statements)
+    assert all("application_admin_bootstrap" not in s for s in session.statements)
+
+
+@pytest.mark.asyncio
+async def test_explicit_clear_only_removes_pending_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ApplicationManagementService()
+    session = SessionStub(execute_results=[ResultStub(), ResultStub(), ResultStub()])
+
+    async def lock_application(_session: AsyncSession, application_id: str) -> None:
+        assert application_id == "sample-app"
+
+    async def get_application(_session: AsyncSession, *, application_id: str) -> dict[str, Any]:
+        return {"application_id": application_id}
+
+    monkeypatch.setattr(service, "_lock_application", lock_application)
+    monkeypatch.setattr(service, "get_application", get_application)
+    await service.upsert_environment(
+        cast(AsyncSession, session),
+        cast(AuthentikAdminClient, object()),
+        application_id="sample-app",
+        environment="local",
+        portal_url="http://localhost:4174",
+        api_base_url="http://localhost:3000/api",
+        health_url="http://localhost:3000/health",
+        redirect_uris=["http://localhost:4174/auth/callback"],
+        version="0.1.0",
+        status="ACTIVE",
+        clear_pending_bootstrap=True,
+    )
+    assert any("INSERT INTO platform_core.application_environment" in s for s in session.statements)
+    deletes = [s for s in session.statements if "DELETE FROM" in s]
+    assert len(deletes) == 1
+    assert "application_admin_bootstrap" in deletes[0]
+    assert "status = 'PENDING'" in deletes[0]

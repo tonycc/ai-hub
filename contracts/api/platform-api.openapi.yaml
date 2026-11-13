@@ -3,7 +3,7 @@ info:
   title: AI Hub Platform API
   version: 0.4.0
   description: |
-    Versioned public identity, employee directory, application bootstrap, authorization, notification, aggregated data, DATA_INGEST Push, and health API.
+    Versioned public identity, employee directory, application bootstrap, aggregated data, DATA_INGEST Push, and health API.
 
     **Authentication:** Bearer access token from authentik OIDC. Every protected operation requires scope `ai_hub.identity` plus the operation-specific scopes listed on each path. Push ingest additionally requires `ai_hub.ingest.push` on a DATA_INGEST service token.
 
@@ -48,7 +48,7 @@ paths:
       operationId: getCurrentPlatformUser
       summary: Current platform user
       description: |
-        Resolve the caller's platform user id, organization, and authorization version.
+        Resolve the caller's platform user id, and organization.
         Call after locally validating the user JWT (issuer, audience, signature, expiry, scopes).
         Optional `X-Application-ID` ties the request to a registered application for audit context.
       tags: [identity]
@@ -62,51 +62,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CurrentUser"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /platform-api/v1/me/permissions:
-    get:
-      operationId: getCurrentUserPermissions
-      summary: Authorization snapshot
-      description: |
-        Short-lived, versioned permission and data-scope snapshot for the caller within one application.
-        Requires `X-Application-ID`. Cache only until `expires_at`; re-fetch when `authorization_version` changes.
-        Use for low-risk reads when online re-validation is acceptable within the expiry window.
-      tags: [authorization]
-      security:
-        - oidcAuth: [ai_hub.identity, platform.me.read]
-      parameters:
-        - {$ref: "#/components/parameters/RequiredApplicationId"}
-      responses:
-        "200":
-          description: Versioned, short-lived authorization snapshot for an application.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PermissionSnapshot"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /platform-api/v1/authorization/decisions:
-    post:
-      operationId: createAuthorizationDecision
-      summary: Online authorization decision
-      description: |
-        Synchronous allow/deny decision for a registered high-risk permission.
-        Prefer this over cached snapshots for mutating or sensitive operations.
-        Default `risk` is `high`; set `low` only when the permission is registered as low risk.
-      tags: [authorization]
-      security:
-        - oidcAuth: [ai_hub.identity, platform.authorization.decide]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/AuthorizationDecisionRequest"}
-      responses:
-        "200":
-          description: Online decision for a registered high-risk permission.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/AuthorizationDecision"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
   /platform-api/v1/applications/{application_id}:
@@ -203,10 +158,10 @@ paths:
       description: |
         Returns employee identity/profile changes using an opaque, commit-ordered directory revision.
         Only a service identity bound to the calling application may use this endpoint.
-        `business_user=false` identifies an AI Hub platform account rather than a business
-        employee. `tombstone=true` means the identity is inactive or is not a business user;
-        consumers must disable local login and sessions but must not overwrite locally managed
-        role history.
+        Platform roles do not exclude identities from this directory or grant business permissions.
+        `tombstone=true` means the identity is inactive; consumers must disable local login
+        and sessions but must not overwrite locally managed role history.
+        New identities have no local business roles by default.
       tags: [identity]
       security:
         - oidcAuth: [ai_hub.identity, platform.directory.read]
@@ -231,53 +186,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-  /platform-api/v1/notifications:
-    post:
-      operationId: createNotification
-      summary: Create notification (idempotent)
-      description: |
-        Request a local IN_APP test notification. **Idempotent on `idempotency_key`** within the application scope—retries must reuse the same key.
-        `DELIVERED` means accepted by the local test channel only; external email/SMS providers are not used.
-        Requires service token with `platform.notification.request`.
-      tags: [notifications]
-      security:
-        - oidcAuth: [ai_hub.identity, platform.notification.request]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/NotificationRequest"}
-      responses:
-        "201":
-          description: Idempotent local IN_APP test notification result. DELIVERED does not represent delivery by an external email, SMS, or collaboration provider.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/NotificationResult"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /platform-api/v1/notifications/{notification_id}:
-    get:
-      operationId: getNotification
-      summary: Get notification status
-      description: Poll delivery status for a notification created by the same application. Cross-application access is denied.
-      tags: [notifications]
-      security:
-        - oidcAuth: [ai_hub.identity, platform.notification.request]
-      parameters:
-        - name: notification_id
-          in: path
-          required: true
-          description: Notification uuid returned by `createNotification`.
-          schema: {type: string, format: uuid}
-      responses:
-        "200":
-          description: Local IN_APP test-channel result visible only to its calling application.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/NotificationResult"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
   /platform-api/v1/data/objects:
     get:
       operationId: listAggregatedObjects
@@ -661,7 +569,7 @@ components:
     CurrentUser:
       type: object
       additionalProperties: false
-      required: [user_id, subject, display_name, status, organization_id, organization_name, business_user, authorization_version]
+      required: [user_id, subject, display_name, status, organization_id, organization_name]
       properties:
         user_id: {type: string, format: uuid, description: Stable platform user uuid.}
         subject: {type: string, description: OIDC subject (`sub`) claim.}
@@ -670,51 +578,6 @@ components:
         status: {type: string, description: Platform account status (for example ACTIVE).}
         organization_id: {type: string, description: Organization slug or id.}
         organization_name: {type: string, description: Organization display name.}
-        business_user: {type: boolean, description: True only when the identity has no AI Hub platform-role assignment and may enter business applications.}
-        authorization_version: {type: integer, minimum: 1, description: Monotonic version; invalidate cached permissions when it increases.}
-    DataScope:
-      type: object
-      additionalProperties: false
-      required: [scope_type, value]
-      properties:
-        scope_type: {type: string, description: Data scope discriminator understood by the application.}
-        value: {type: object, additionalProperties: true, description: Opaque scope payload (structure depends on scope_type).}
-    PermissionSnapshot:
-      type: object
-      additionalProperties: false
-      required: [application_id, user_id, permissions, data_scopes, authorization_version, expires_at]
-      properties:
-        application_id: {type: string, description: Application this snapshot applies to.}
-        user_id: {type: string, format: uuid, description: Platform user uuid.}
-        permissions:
-          type: array
-          uniqueItems: true
-          description: Granted permission strings for this user within the application.
-          items: {type: string}
-        data_scopes:
-          type: array
-          description: Row-level or domain scopes limiting data access.
-          items: {$ref: "#/components/schemas/DataScope"}
-        authorization_version: {type: integer, minimum: 1, description: Snapshot version; compare with CurrentUser.authorization_version.}
-        expires_at: {type: string, format: date-time, description: Do not use the snapshot after this instant.}
-    AuthorizationDecisionRequest:
-      type: object
-      additionalProperties: false
-      required: [application_id, permission]
-      properties:
-        application_id: {type: string, description: Application context for the decision.}
-        permission: {type: string, description: Registered permission key to evaluate.}
-        risk: {type: string, enum: [low, high], default: high, description: Risk tier; high triggers stricter online checks.}
-    AuthorizationDecision:
-      type: object
-      additionalProperties: false
-      required: [allowed, permission, authorization_version, reason_code, expires_at]
-      properties:
-        allowed: {type: boolean, description: Whether the permission is granted for this request.}
-        permission: {type: string, description: Evaluated permission key.}
-        authorization_version: {type: integer, minimum: 1, description: Authorization version at decision time.}
-        reason_code: {type: string, description: Stable machine-readable reason (for example ALLOWED, DENIED_SCOPE).}
-        expires_at: {type: string, format: date-time, description: Decision validity window for allowed results.}
     ApplicationEnvironment:
       type: object
       additionalProperties: false
@@ -765,7 +628,7 @@ components:
     DirectoryUser:
       type: object
       additionalProperties: false
-      required: [user_id, subject, display_name, status, organization_id, organization_name, business_user, updated_at, tombstone]
+      required: [user_id, subject, display_name, status, organization_id, organization_name, updated_at, tombstone]
       properties:
         user_id: {type: string, format: uuid, description: Stable AI Hub user id used as the external identity key.}
         subject: {type: string, description: OIDC subject currently mapped to the user.}
@@ -774,9 +637,8 @@ components:
         status: {type: string, description: Current AI Hub identity status.}
         organization_id: {type: string, description: Current primary organization id.}
         organization_name: {type: string, description: Current primary organization name.}
-        business_user: {type: boolean, description: True only for identities eligible for business-application employee directories.}
         updated_at: {type: string, format: date-time, description: Last identity/profile update timestamp.}
-        tombstone: {type: boolean, description: True when the identity is inactive or not a business user and local access must be disabled.}
+        tombstone: {type: boolean, description: True only when the identity is inactive and local access must be disabled; platform roles do not affect this value.}
     DirectoryPage:
       type: object
       additionalProperties: false
@@ -788,31 +650,6 @@ components:
         next_cursor: {type: [string, "null"], description: Persist this opaque cursor for the next incremental synchronization.}
         has_more: {type: boolean, description: Whether another page is immediately available.}
         synchronized_at: {type: string, format: date-time, description: AI Hub response time.}
-    NotificationRequest:
-      type: object
-      additionalProperties: false
-      required: [recipient_user_id, subject, body, idempotency_key]
-      properties:
-        recipient_user_id: {type: string, format: uuid, description: Platform user uuid to receive the notification.}
-        subject: {type: string, minLength: 1, maxLength: 200, description: Notification title.}
-        body: {type: string, minLength: 1, maxLength: 4000, description: Plain-text body for the IN_APP test channel.}
-        idempotency_key: {type: string, minLength: 8, maxLength: 128, description: Unique per logical send; duplicate keys return the original result.}
-        payload: {type: object, additionalProperties: true, default: {}, description: Optional structured metadata stored with the notification.}
-    NotificationResult:
-      type: object
-      description: Current delivery results are produced only by the local IN_APP test channel; external providers are not enabled.
-      additionalProperties: false
-      required: [notification_id, application_id, recipient_user_id, subject, status, requested_at]
-      properties:
-        notification_id: {type: string, format: uuid, description: Notification id for status polling.}
-        application_id: {type: string, description: Calling application id.}
-        recipient_user_id: {type: string, format: uuid, description: Target user uuid.}
-        subject: {type: string, description: Notification title.}
-        status: {type: string, enum: [PENDING, DELIVERED, FAILED], description: Local channel status; not external delivery proof.}
-        requested_at: {type: string, format: date-time, description: Creation timestamp.}
-        delivered_at: {type: [string, "null"], format: date-time, description: Local delivery timestamp when status is DELIVERED.}
-        delivery_reference: {type: [string, "null"], description: Optional internal reference id.}
-        failure_reason: {type: [string, "null"], description: Failure detail when status is FAILED.}
     AggregatedObject:
       type: object
       additionalProperties: false

@@ -1,5 +1,7 @@
 # Agent 接入索引
 
+> 2026-10-16 简化基线：平台保留统一身份、应用登记与凭据、数据接入、审计和运维。平台托管业务授权及测试通知已退役，相关旧接口、SDK 方法和菜单不再提供；业务授权全部由应用执行。初始管理员领取与员工目录同步为可选能力。数据接入仅支持 ENFORCE，已移除推断草稿与 AUDIT_ONLY。本文后续涉及旧功能或阶段性兼容的内容仅作历史记录，当前接入以 开发者指南 `docs/developer-integration-guide.md` 和 API 契约为准。
+
 面向 coding agent / LLM 的**固定阅读顺序**与机器可读入口。人类开发者请同时阅读 [独立应用接入指南](./developer-integration-guide.md)。
 
 ## 1. 先决条件（人工步骤）
@@ -8,7 +10,7 @@
 
 1. 在**应用中心**登记应用、环境 URL、OAuth 回调 URI、所需 scope。
 2. 创建环境凭据并**一次性保存** `client_secret`（平台不存明文）。
-3. 上线前在**接入治理**运行 `OIDC_ONLY` / `API_ONLY` / `DATA_INGEST` 中与应用架构一致的认证。
+3. 上线前在应用详情的**接入检查**运行 `OIDC_ONLY` / `API_ONLY` / `DATA_INGEST` 中与应用架构一致的认证。
 
 Agent 应生成应用侧代码与配置模板，并明确列出需人工填写的密钥与登记项。
 
@@ -18,7 +20,7 @@ Agent 应生成应用侧代码与配置模板，并明确列出需人工填写�
 只需要统一登录和员工基本资料？
 ├─ 是 → 能力 API_CLIENT；认证 OIDC_ONLY
 │        读：integration-guide §1 + ADR-034 + platform-openapi
-│        实现：用户 PKCE → /me → 本地授权；服务身份 → 增量目录同步
+│        实现：用户 PKCE → /me → 本地授权；按需服务身份 → 增量目录同步
 └─ 否 → 是否需要把业务对象同步到平台供治理/AI 消费？
          ├─ 否 → 能力 API_CLIENT；按实际公共 API 运行 API_ONLY
          └─ 是 → 能力 API_CLIENT + DATA_INGEST
@@ -33,7 +35,7 @@ Agent 应生成应用侧代码与配置模板，并明确列出需人工填写�
 | 1 | `agent-integration` | `docs/agent-integration.md` | 本索引 |
 | 2 | `integration-guide` | `docs/developer-integration-guide.md` | 接入流程、安全边界、认证 |
 | 3 | `platform-openapi` | `contracts/api/platform-api.openapi.yaml` | 平台公开 API 契约 |
-| 4 | `api-only-python` | `examples/sdk/api_only.py` | 最小连通性：health + 通知 |
+| 4 | `api-only-python` | `examples/sdk/api_only.py` | 最小连通性：health + 应用登记 |
 | 5 | `data-read-python` | `examples/sdk/data_read.py` | 读取汇聚数据（消费方） |
 | 6 | `data-ingest-evidence` | `examples/sdk/data_ingest_evidence.py` | DATA_INGEST 认证证据模板 |
 
@@ -60,9 +62,8 @@ GET {PLATFORM_BASE_URL}/portal-api/v1/developer/catalog
 | `AI_HUB_CLIENT_ID` | 应用 client id |
 | `AI_HUB_CLIENT_SECRET` | 应用 client secret（仅服务身份示例） |
 | `AI_HUB_APPLICATION_ID` | 登记的应用 slug |
-| `AI_HUB_RECIPIENT_USER_ID` | `api-only-python` 通知收件人 uuid |
 
-门户开发者中心沙箱片段提供 `PLATFORM_BASE_URL`、`OIDC_ISSUER` 等占位值。
+环境地址和凭据从应用中心登记信息取得；示例中的密钥通过环境变量注入。
 
 ## 5. OAuth 与 scope 要点
 
@@ -75,13 +76,11 @@ GET {PLATFORM_BASE_URL}/portal-api/v1/developer/catalog
 
 | Scope | 用途 |
 | --- | --- |
-| `platform.me.read` | `/me`、`/me/permissions` |
+| `platform.me.read` | `/me` |
 | `platform.application.bootstrap` | 环境中明确指定的员工领取一次性初始管理员 |
 | `platform.directory.read` | 应用绑定的服务身份增量读取员工基本资料和状态 |
-| `platform.authorization.decide` | 在线授权决策 |
 | `platform.application.read` | 读取应用登记 |
 | `platform.application.health.write` | 上报环境健康 |
-| `platform.notification.request` | 创建/查询通知 |
 | `platform.data.read` | 查询汇聚对象 |
 
 ## 6. 应用侧导出契约（不在 platform-openapi 内）
@@ -124,12 +123,12 @@ Authorization: Bearer <platform service token>
 ## 7. API-only 最小检查清单
 
 - [ ] 应用已在应用中心登记，回调 URI 与环境匹配。
-- [ ] 应用负责人已从员工目录指定；每个环境另有明确的初始管理员，并存在 `PENDING` 或 `CONSUMED` Bootstrap。
+- [ ] 应用负责人已从员工目录指定；若采用平台初始管理员领取，则按环境指定员工；也可在应用本地自行初始化。
 - [ ] 凭据与 scope 已配置；`client_secret` 已安全存储。
 - [ ] 用户流：PKCE 换 token → 本地 JWT 验证 → `GET /platform-api/v1/me`。
-- [ ] 身份型应用：环境初始管理员领取 Bootstrap；业务角色/权限/数据范围全部保存在应用本地。
-- [ ] 目录同步：持久化 `next_cursor`；仅展示 `business_user=true` 的业务员工；新员工默认无角色；tombstone 只停用访问，不覆盖本地角色历史。
-- [ ] 服务流：Client Credentials → `GET /health/live` → 业务 API（如通知带 `idempotency_key`）。
+- [ ] 可选管理员领取：已指定的环境初始管理员领取 Bootstrap；业务角色/权限/数据范围全部保存在应用本地。
+- [ ] 若采用目录同步：持久化 `next_cursor`；活动身份均可作为业务用户，包括平台管理员；新用户默认无业务角色，平台角色不参与业务授权；tombstone 只停用访问，不覆盖本地角色历史。
+- [ ] 服务流：Client Credentials → `GET /health/live` → `GET /platform-api/v1/applications/{application_id}`。
 - [ ] 错误处理：解析 `ErrorResponse.error_code`，记录 `request_id`，不记录 token/secret。
 - [ ] 请求头：按需传 `X-Application-ID`；传播 `X-Request-ID` / `X-Trace-ID`。
 
@@ -138,11 +137,11 @@ Authorization: Bearer <platform service token>
 - [ ] 应用 capability 含 `DATA_INGEST`；对象类型与 payload 契约已登记。
 - [ ] 实现 `/ai-hub/export` 并校验 `ai_hub.ingest.export`。
 - [ ] version 单调、删除可捕获、payload 契约化（非裸表行）。
-- [ ] 接入治理运行 `DATA_INGEST` 认证；可用 `data-ingest-evidence` 生成证据摘要。
+- [ ] 应用详情的接入检查运行 `DATA_INGEST` 认证；可用 `data-ingest-evidence` 生成证据摘要。
 
 ## 9. 仍超出 agent 自动化范围
 
-- 门户 UI：应用登记、凭据发放、接入治理认证触发。
+- 门户 UI：应用登记、凭据发放、接入检查认证触发。
 - 生产密钥与 authentik 配置变更。
 - 跨环境凭据共享（**禁止**）。
 
