@@ -347,6 +347,21 @@ class IngestScheduler:
         *,
         since_version: int,
     ) -> dict[str, Any]:
+        # The snapshot is fetched outside the source lock, so another worker can
+        # ingest newer objects meanwhile. Remember what current state held before
+        # the fetch: absence from this snapshot is only authoritative for those rows.
+        async with self.sessions() as session:
+            async with session.begin():
+                await lock_ingest_source(
+                    session,
+                    source.source_application_id,
+                    source.object_type,
+                )
+                tombstone_ceiling = await self.service.get_current_state_max_version(
+                    session,
+                    source_application_id=source.source_application_id,
+                    object_type=source.object_type,
+                )
         # Collect every page before load so absence tombstones see the full snapshot.
         records, high_watermark, contract = await self.export_client.fetch_all_pages(
             export_base_url=self._pull_url(source),
@@ -378,6 +393,7 @@ class IngestScheduler:
                     payload_contract_version=contract,
                     from_version=since_version,
                     schema_fingerprint=fingerprint,
+                    tombstone_max_version=tombstone_ceiling,
                 )
                 await self.service.advance_cursor(
                     session,
@@ -424,6 +440,20 @@ class IngestScheduler:
                     f"export object_type mismatch: expected {source.object_type}, "
                     f"got {page.object_type}"
                 )
+            next_since: int | None = None
+            if page.has_more:
+                if not page.records:
+                    raise ExportClientError(
+                        "export page claimed has_more without returning records"
+                    )
+                next_since = max(record.version for record in page.records)
+                if next_since <= cursor:
+                    raise ExportClientError("export pagination did not advance since_version")
+            # page.high_watermark may be the stream high watermark rather than this
+            # page's maximum. While more pages remain, only what this page delivered
+            # is durable, so a failure on a later page resumes from here instead of
+            # skipping the pages that were never loaded.
+            committed_version = page.high_watermark if next_since is None else next_since
             ingest_records = records_to_ingest(page.records)
             async with self.sessions() as session:
                 async with session.begin():
@@ -451,20 +481,15 @@ class IngestScheduler:
                         session,
                         source_application_id=source.source_application_id,
                         object_type=source.object_type,
-                        last_version=page.high_watermark,
+                        last_version=committed_version,
                         status="ok",
                     )
             total_records += len(ingest_records)
             self.metrics.records_loaded += len(ingest_records)
             final_hw = page.high_watermark
             last_batch_id = str(loaded.batch_id)
-            if not page.has_more:
+            if next_since is None:
                 break
-            if not page.records:
-                raise ExportClientError("export page claimed has_more without returning records")
-            next_since = max(record.version for record in page.records)
-            if next_since <= cursor:
-                raise ExportClientError("export pagination did not advance since_version")
             cursor = next_since
         return {
             "source_application_id": source.source_application_id,

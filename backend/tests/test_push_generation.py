@@ -2464,3 +2464,29 @@ async def test_sql_lease_candidates_include_absolute_lifetime() -> None:
     query = inspect.getsource(generation_sql.SqlGenerationStore.list_lease_candidates)
     assert "lifetime_cutoff" in query
     assert "created_at <=" in query
+
+
+async def test_in_memory_store_does_not_resurrect_deleted_objects_from_stale_batches() -> None:
+    store = InMemoryGenerationStore()
+    key = ("e10-adapter", "erp.item", "I-1")
+
+    async def load(record: IngestRecord, high_watermark: int) -> None:
+        await store.load_incremental(
+            source_application_id="e10-adapter",
+            object_type="erp.item",
+            records=[record],
+            high_watermark=high_watermark,
+            payload_contract_version="item.v1",
+        )
+
+    await load(IngestRecord("I-1", "upsert", 150, {"name": "a"}), 150)
+    await load(IngestRecord("I-1", "delete", 180, None), 180)
+    assert key not in store.current
+
+    # A re-sent older upsert must not bring the deleted object back.
+    await load(IngestRecord("I-1", "upsert", 150, {"name": "a"}), 180)
+    await load(IngestRecord("I-1", "upsert", 170, {"name": "late"}), 180)
+    assert key not in store.current
+
+    await load(IngestRecord("I-1", "upsert", 200, {"name": "back"}), 200)
+    assert store.current[key].version == 200
