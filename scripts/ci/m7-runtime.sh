@@ -42,8 +42,6 @@ export AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS=1
 export AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS=3600
 export STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS=1
 export STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS=3600
-export AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS=1
-export STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS=10
 export AI_HUB_EDGE_PORT="${M7_EDGE_PORT}"
 export AI_HUB_POSTGRES_PORT="${M7_POSTGRES_PORT}"
 export AI_HUB_INTERNAL_API_PORT="${M7_INTERNAL_API_PORT}"
@@ -56,7 +54,7 @@ m7_compose() {
     --project-name "${M7_PROJECT_NAME}" \
     --env-file "${M7_ENV_FILE}" \
     -f "${M7_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 
@@ -302,7 +300,7 @@ m7_login() {
     --output "${m7_session_json}" \
     "${m7_callback_url}"
   jq --exit-status \
-    '.authenticated == true and .subject == "ai-hub-demo-user" and .authorization_version == 1' \
+    '.authenticated == true and .subject == "ai-hub-demo-user"' \
     "${m7_session_json}" >/dev/null
 }
 
@@ -662,6 +660,7 @@ m7_wait_url "${M7_PLATFORM_BASE}/health/ready"
 m7_wait_url "${M7_APP_BASE}/health/live"
 m7_wait_url "${M7_AUTH_BASE}/-/health/ready/"
 m7_wait_url "${M7_AUTH_BASE}/application/o/ai-hub/.well-known/openid-configuration"
+m7_compose exec -T platform-api python - <"${M7_PROJECT_ROOT}/scripts/ci/reference-fixture.py"
 m7_wait_attempt=0
 until m7_compose ps authentik-worker 2>/dev/null | grep -Eq 'healthy|Healthy'; do
   m7_wait_attempt=$((m7_wait_attempt + 1))

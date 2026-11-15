@@ -7,7 +7,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -285,100 +285,6 @@ class PlatformRoleAssignmentListResponse(ApiModel):
     total: int
 
 
-class PermissionDefinitionCreate(ApiModel):
-    permission_code: str = Field(
-        min_length=3,
-        max_length=160,
-        pattern=PERMISSION_PATTERN,
-    )
-    name: str = Field(min_length=1, max_length=200)
-    description: str = Field(min_length=1, max_length=2000)
-    risk_level: RiskLevel
-
-
-class PermissionDefinitionUpdate(ApiModel):
-    name: str = Field(min_length=1, max_length=200)
-    description: str = Field(min_length=1, max_length=2000)
-    risk_level: RiskLevel
-    status: PermissionStatus
-
-
-class PermissionDefinitionResponse(ApiModel):
-    permission_code: str
-    application_id: str
-    name: str
-    description: str
-    risk_level: RiskLevel
-    status: PermissionStatus
-    created_at: datetime
-    updated_at: datetime
-
-
-class PermissionDefinitionListResponse(ApiModel):
-    items: list[PermissionDefinitionResponse]
-    total: int
-
-
-class AuthorizationRoleCreate(ApiModel):
-    name: str = Field(min_length=1, max_length=120)
-    description: str = Field(min_length=1, max_length=2000)
-    permission_codes: list[str] = Field(min_length=1, max_length=200)
-
-
-class AuthorizationRoleUpdate(AuthorizationRoleCreate):
-    status: ActiveStatus
-
-
-class AuthorizationRoleResponse(ApiModel):
-    role_id: UUID
-    application_id: str
-    name: str
-    description: str
-    status: ActiveStatus
-    permissions: list[str]
-    assignment_count: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class AuthorizationRoleListResponse(ApiModel):
-    items: list[AuthorizationRoleResponse]
-    total: int
-
-
-class AuthorizationRoleAssignmentCreate(ApiModel):
-    user_id: UUID
-    role_id: UUID
-    data_scope_type: DataScopeType
-    data_scope: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def validate_scope(self) -> AuthorizationRoleAssignmentCreate:
-        if self.data_scope_type == "GLOBAL" and self.data_scope:
-            raise ValueError("GLOBAL data scope must not include parameters")
-        if self.data_scope_type != "GLOBAL" and not self.data_scope:
-            raise ValueError("Non-global data scope requires parameters")
-        return self
-
-
-class AuthorizationRoleAssignmentResponse(ApiModel):
-    assignment_id: UUID
-    user_id: UUID
-    subject: str | None = None
-    display_name: str | None = None
-    role_id: UUID
-    role_name: str | None = None
-    application_id: str
-    data_scope_type: DataScopeType
-    data_scope: dict[str, Any]
-    created_at: datetime | None = None
-
-
-class AuthorizationRoleAssignmentListResponse(ApiModel):
-    items: list[AuthorizationRoleAssignmentResponse]
-    total: int
-
-
 def _raise_governance_error(error: Exception) -> NoReturn:
     if isinstance(error, GovernanceNotFoundError):
         raise ApiError(404, "governance_resource_not_found", str(error)) from error
@@ -414,7 +320,7 @@ def _raise_authentik_error(error: Exception) -> NoReturn:
     raise ApiError(400, "authentik_error", str(error)) from error
 
 
-class MyApplicationResponse(ApiModel):
+class ApplicationEntryResponse(ApiModel):
     application_id: str
     name: str
     description: str
@@ -426,25 +332,24 @@ class MyApplicationResponse(ApiModel):
     updated_at: datetime
 
 
-class MyApplicationListResponse(ApiModel):
-    items: list[MyApplicationResponse]
+class ApplicationEntryListResponse(ApiModel):
+    items: list[ApplicationEntryResponse]
     total: int
 
 
-@router.get("/my-applications", response_model=MyApplicationListResponse)
-async def list_my_applications(
+@router.get("/application-entries", response_model=ApplicationEntryListResponse)
+async def list_application_entries(
     request: Request,
     session: SessionDependency,
     principal: PortalPrincipalDependency,
-) -> MyApplicationListResponse:
+) -> ApplicationEntryListResponse:
     settings = request.app.state.settings
-    rows = await GovernanceService().list_accessible_applications(
+    rows = await GovernanceService().list_application_entries(
         session,
-        user_id=principal.user_id,
         preferred_environment=settings.environment,
     )
-    items = [MyApplicationResponse.model_validate(row) for row in rows]
-    return MyApplicationListResponse(items=items, total=len(items))
+    items = [ApplicationEntryResponse.model_validate(row) for row in rows]
+    return ApplicationEntryListResponse(items=items, total=len(items))
 
 
 @router.get("/organizations", response_model=OrganizationListResponse)
@@ -675,9 +580,6 @@ async def create_unified_user(
         await session.rollback()
         await _compensate_authentik_user(authentik, login_account)
         raise
-    # The version bump performed by create_platform_role_assignment already
-    # enqueued an outbox row in this transaction; the background reconciler
-    # pushes it to Authentik, so no inline (best-effort) sync is needed.
     # Reuse the object returned by the initial creation instead of querying
     # again: if a follow-up GET failed after the local transaction rolled back,
     # the orphaned Authentik account would block every retry with a 409.
@@ -744,9 +646,7 @@ async def update_unified_user(
     email_provided = payload.field_provided("email")
     clear_email = email_provided and payload.email is None
     resolved_email = (
-        None
-        if clear_email
-        else payload.email if payload.email is not None else existing["email"]
+        None if clear_email else payload.email if payload.email is not None else existing["email"]
     )
     # Derive one unified target state; reject contradictory combinations.
     if payload.status is not None and payload.is_active is not None:
@@ -821,8 +721,7 @@ async def update_unified_user(
     except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
         _raise_governance_error(error)
     if disabling:
-        # update_user already bumped the version and enqueued the outbox row;
-        # only the fail-closed session revocation remains here.
+        # Revoke portal sessions in the same local transaction.
         await session.execute(
             sa.text(
                 """
@@ -851,8 +750,6 @@ async def update_unified_user(
             )
         except Exception as error:
             _raise_authentik_error(error)
-        # The version bump (inside update_user) enqueued an outbox row in the
-        # committed transaction; the reconciler pushes it to Authentik.
     if payload.password:
         try:
             await authentik.set_user_password(
@@ -921,8 +818,6 @@ async def list_unified_users(
             )
         )
     return results
-
-
 
 
 @router.put("/users/{user_id}", response_model=UserResponse)
@@ -1375,271 +1270,8 @@ async def delete_platform_role_assignment(
     return Response(status_code=204)
 
 
-@router.get(
-    "/applications/{application_id}/permissions",
-    response_model=PermissionDefinitionListResponse,
-)
-async def list_permission_definitions(
-    application_id: str,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(portal_permission_dependency("platform.authorization.read")),
-    ],
-) -> PermissionDefinitionListResponse:
-    try:
-        rows = await GovernanceService().list_permission_definitions(
-            session,
-            application_id=application_id,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    items = [PermissionDefinitionResponse.model_validate(row) for row in rows]
-    return PermissionDefinitionListResponse(items=items, total=len(items))
-
-
-@router.post(
-    "/applications/{application_id}/permissions",
-    response_model=PermissionDefinitionResponse,
-    status_code=201,
-)
-async def create_permission_definition(
-    application_id: str,
-    payload: PermissionDefinitionCreate,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.authorization.write",
-                require_csrf=True,
-            )
-        ),
-    ],
-) -> PermissionDefinitionResponse:
-    try:
-        row = await GovernanceService().create_permission_definition(
-            session,
-            application_id=application_id,
-            permission_code=payload.permission_code,
-            name=payload.name,
-            description=payload.description,
-            risk_level=payload.risk_level,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    return PermissionDefinitionResponse.model_validate(row)
-
-
-@router.put(
-    "/applications/{application_id}/permissions/{permission_code}",
-    response_model=PermissionDefinitionResponse,
-)
-async def update_permission_definition(
-    application_id: str,
-    permission_code: str,
-    payload: PermissionDefinitionUpdate,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.authorization.write",
-                require_csrf=True,
-            )
-        ),
-    ],
-) -> PermissionDefinitionResponse:
-    try:
-        row = await GovernanceService().update_permission_definition(
-            session,
-            application_id=application_id,
-            permission_code=permission_code,
-            name=payload.name,
-            description=payload.description,
-            risk_level=payload.risk_level,
-            status=payload.status,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    return PermissionDefinitionResponse.model_validate(row)
-
-
-@router.get(
-    "/applications/{application_id}/authorization-roles",
-    response_model=AuthorizationRoleListResponse,
-)
-async def list_authorization_roles(
-    application_id: str,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(portal_permission_dependency("platform.authorization.read")),
-    ],
-) -> AuthorizationRoleListResponse:
-    try:
-        rows = await GovernanceService().list_authorization_roles(
-            session,
-            application_id=application_id,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    items = [AuthorizationRoleResponse.model_validate(row) for row in rows]
-    return AuthorizationRoleListResponse(items=items, total=len(items))
-
-
-@router.post(
-    "/applications/{application_id}/authorization-roles",
-    response_model=AuthorizationRoleResponse,
-    status_code=201,
-)
-async def create_authorization_role(
-    application_id: str,
-    payload: AuthorizationRoleCreate,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.authorization.write",
-                require_csrf=True,
-            )
-        ),
-    ],
-) -> AuthorizationRoleResponse:
-    try:
-        row = await GovernanceService().create_authorization_role(
-            session,
-            application_id=application_id,
-            name=payload.name,
-            description=payload.description,
-            permission_codes=payload.permission_codes,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    return AuthorizationRoleResponse.model_validate(row)
-
-
-@router.put(
-    "/applications/{application_id}/authorization-roles/{role_id}",
-    response_model=AuthorizationRoleResponse,
-)
-async def update_authorization_role(
-    application_id: str,
-    role_id: UUID,
-    payload: AuthorizationRoleUpdate,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.authorization.write",
-                require_csrf=True,
-            )
-        ),
-    ],
-) -> AuthorizationRoleResponse:
-    try:
-        row = await GovernanceService().update_authorization_role(
-            session,
-            application_id=application_id,
-            role_id=role_id,
-            name=payload.name,
-            description=payload.description,
-            status=payload.status,
-            permission_codes=payload.permission_codes,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    return AuthorizationRoleResponse.model_validate(row)
-
-
-@router.get(
-    "/applications/{application_id}/authorization-role-assignments",
-    response_model=AuthorizationRoleAssignmentListResponse,
-)
-async def list_authorization_role_assignments(
-    application_id: str,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(portal_permission_dependency("platform.authorization.read")),
-    ],
-) -> AuthorizationRoleAssignmentListResponse:
-    try:
-        rows = await GovernanceService().list_authorization_role_assignments(
-            session,
-            application_id=application_id,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    items = [AuthorizationRoleAssignmentResponse.model_validate(row) for row in rows]
-    return AuthorizationRoleAssignmentListResponse(items=items, total=len(items))
-
-
-@router.post(
-    "/applications/{application_id}/authorization-role-assignments",
-    response_model=AuthorizationRoleAssignmentResponse,
-    status_code=201,
-)
-async def create_authorization_role_assignment(
-    application_id: str,
-    payload: AuthorizationRoleAssignmentCreate,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.authorization.write",
-                require_csrf=True,
-            )
-        ),
-    ],
-) -> AuthorizationRoleAssignmentResponse:
-    try:
-        row = await GovernanceService().create_authorization_role_assignment(
-            session,
-            application_id=application_id,
-            user_id=payload.user_id,
-            role_id=payload.role_id,
-            data_scope_type=payload.data_scope_type,
-            data_scope=payload.data_scope,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    return AuthorizationRoleAssignmentResponse.model_validate(row)
-
-
-@router.delete(
-    "/applications/{application_id}/authorization-role-assignments/{assignment_id}",
-    status_code=204,
-)
-async def delete_authorization_role_assignment(
-    application_id: str,
-    assignment_id: UUID,
-    session: SessionDependency,
-    _principal: Annotated[
-        PortalPrincipal,
-        Depends(
-            portal_permission_dependency(
-                "platform.authorization.write",
-                require_csrf=True,
-            )
-        ),
-    ],
-) -> Response:
-    try:
-        await GovernanceService().delete_authorization_role_assignment(
-            session,
-            application_id=application_id,
-            assignment_id=assignment_id,
-        )
-    except (GovernanceNotFoundError, GovernanceConflictError, GovernanceValidationError) as error:
-        _raise_governance_error(error)
-    return Response(status_code=204)
-
-
 # ==================== 职位管理 API ====================
+
 
 @router.get("/positions", response_model=PositionDefinitionListResponse)
 async def list_positions(
@@ -1748,6 +1380,7 @@ async def delete_position(
 
 
 # ==================== 用户职位分配 API ====================
+
 
 @router.get("/users/{user_id}/positions", response_model=list[dict[str, Any]])
 async def list_user_positions(

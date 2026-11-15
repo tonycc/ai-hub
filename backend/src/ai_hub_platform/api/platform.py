@@ -1,23 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Literal, cast
-from uuid import UUID
+from typing import Annotated, cast
 
 import httpx
 from ai_hub_sdk import (
     AdminBootstrapClaim,
     ApplicationEnvironment,
     ApplicationRegistration,
-    AuthorizationDecision,
-    AuthorizationDecisionRequest,
     CurrentUser,
-    DataScope,
     DirectoryPage,
     DirectoryUser,
-    NotificationRequest,
-    NotificationResult,
-    PermissionSnapshot,
 )
 from fastapi import APIRouter, Depends, Query, Request
 
@@ -41,17 +34,6 @@ from ai_hub_platform.modules.identity.service import (
     IdentityNotFoundError,
     IdentityService,
     IdentityUser,
-)
-from ai_hub_platform.modules.notification.service import (
-    NotificationConfigurationDisabledError,
-    NotificationNotFoundError,
-    NotificationRecipientNotFoundError,
-    NotificationRecord,
-    NotificationService,
-)
-from ai_hub_platform.modules.permission.service import (
-    ApplicationAccessDeniedError,
-    PermissionService,
 )
 from ai_hub_platform.shared.database import Database
 
@@ -146,151 +128,6 @@ async def me(
         status=user.status,
         organization_id=user.organization_id,
         organization_name=user.organization_name,
-        business_user=user.business_user,
-        authorization_version=user.authorization_version,
-    )
-
-
-@router.get("/me/permissions", response_model=PermissionSnapshot)
-async def permissions(
-    request: Request,
-    session: SessionDependency,
-    principal: Annotated[
-        Principal,
-        Depends(principal_dependency("platform.me.read", actor_types=("user",))),
-    ],
-) -> PermissionSnapshot:
-    if not principal.application_id:
-        await append_denial_audit(
-            request,
-            AuditRecord(
-                request_id=request_id(request),
-                trace_id=getattr(request.state, "trace_id", None),
-                action="platform.permissions.read",
-                result="DENIED",
-                actor_type="user",
-                actor_id=principal.token.subject,
-                error_code="application_id_required",
-            ),
-        )
-        raise ApiError(400, "application_id_required", "X-Application-ID is required")
-    user = await resolve_user_or_error(
-        request, session, principal, action="platform.permissions.read"
-    )
-    service: PermissionService = request.app.state.permission_service
-    try:
-        snapshot = await service.snapshot(
-            session,
-            application_id=principal.application_id,
-            user_id=user.user_id,
-            authorization_version=user.authorization_version,
-        )
-    except ApplicationAccessDeniedError as error:
-        await append_denial_audit(
-            request,
-            AuditRecord(
-                request_id=request_id(request),
-                trace_id=getattr(request.state, "trace_id", None),
-                action="platform.permissions.read",
-                result="DENIED",
-                actor_type="user",
-                actor_id=user.subject,
-                application_id=principal.application_id,
-                error_code="application_access_denied",
-                authorization_version=user.authorization_version,
-            ),
-        )
-        raise ApiError(403, "application_access_denied", str(error)) from error
-    await AuditService().append(
-        session,
-        AuditRecord(
-            request_id=request_id(request),
-            trace_id=getattr(request.state, "trace_id", None),
-            action="platform.permissions.read",
-            result="SUCCESS",
-            actor_type="user",
-            actor_id=user.subject,
-            application_id=principal.application_id,
-            authorization_version=user.authorization_version,
-        ),
-    )
-    return PermissionSnapshot(
-        application_id=snapshot.application_id,
-        user_id=snapshot.user_id,
-        permissions=list(snapshot.permissions),
-        data_scopes=[
-            DataScope(scope_type=scope.scope_type, value=scope.value)
-            for scope in snapshot.data_scopes
-        ],
-        authorization_version=snapshot.authorization_version,
-        expires_at=snapshot.expires_at,
-    )
-
-
-@router.post("/authorization/decisions", response_model=AuthorizationDecision)
-async def authorization_decision(
-    payload: AuthorizationDecisionRequest,
-    request: Request,
-    session: SessionDependency,
-    principal: Annotated[
-        Principal,
-        Depends(principal_dependency("platform.authorization.decide", actor_types=("user",))),
-    ],
-) -> AuthorizationDecision:
-    user = await resolve_user_or_error(
-        request, session, principal, action="platform.authorization.decide"
-    )
-    service: PermissionService = request.app.state.permission_service
-    try:
-        allowed, reason_code, expires_at = await service.decision(
-            session,
-            application_id=payload.application_id,
-            user_id=user.user_id,
-            authorization_version=user.authorization_version,
-            permission=payload.permission,
-        )
-    except ApplicationAccessDeniedError as error:
-        await append_denial_audit(
-            request,
-            AuditRecord(
-                request_id=request_id(request),
-                trace_id=getattr(request.state, "trace_id", None),
-                action="platform.authorization.decide",
-                result="DENIED",
-                actor_type="user",
-                actor_id=user.subject,
-                application_id=payload.application_id,
-                target_type="permission",
-                target_id=payload.permission,
-                error_code="application_access_denied",
-                authorization_version=user.authorization_version,
-                metadata={"risk": payload.risk},
-            ),
-        )
-        raise ApiError(403, "application_access_denied", str(error)) from error
-    await AuditService().append(
-        session,
-        AuditRecord(
-            request_id=request_id(request),
-            trace_id=getattr(request.state, "trace_id", None),
-            action="platform.authorization.decide",
-            result="SUCCESS" if allowed else "DENIED",
-            actor_type="user",
-            actor_id=user.subject,
-            application_id=payload.application_id,
-            target_type="permission",
-            target_id=payload.permission,
-            error_code=None if allowed else reason_code,
-            authorization_version=user.authorization_version,
-            metadata={"risk": payload.risk},
-        ),
-    )
-    return AuthorizationDecision(
-        allowed=allowed,
-        permission=payload.permission,
-        authorization_version=user.authorization_version,
-        reason_code=reason_code,
-        expires_at=expires_at,
     )
 
 
@@ -386,9 +223,7 @@ async def claim_application_admin_bootstrap(
     session: SessionDependency,
     principal: Annotated[
         Principal,
-        Depends(
-            principal_dependency("platform.application.bootstrap", actor_types=("user",))
-        ),
+        Depends(principal_dependency("platform.application.bootstrap", actor_types=("user",))),
     ],
 ) -> AdminBootstrapClaim:
     if principal.application_id != application_id:
@@ -522,7 +357,6 @@ async def directory_users(
                 status=item.status,
                 organization_id=item.organization_id,
                 organization_name=item.organization_name,
-                business_user=item.business_user,
                 updated_at=item.updated_at,
                 tombstone=item.tombstone,
             )
@@ -627,20 +461,6 @@ async def application_health_check(
     return {"status": status}
 
 
-def notification_result(record: NotificationRecord) -> NotificationResult:
-    return NotificationResult(
-        notification_id=record.notification_id,
-        application_id=record.application_id,
-        recipient_user_id=record.recipient_user_id,
-        subject=record.subject,
-        status=cast(Literal["PENDING", "DELIVERED", "FAILED"], record.status),
-        requested_at=record.requested_at,
-        delivered_at=record.delivered_at,
-        delivery_reference=record.delivery_reference,
-        failure_reason=record.failure_reason,
-    )
-
-
 async def require_service_binding(
     request: Request,
     session: SessionDependency,
@@ -683,91 +503,3 @@ async def require_service_binding(
         )
         raise ApiError(403, "service_identity_revoked", str(error)) from error
     return application_id
-
-
-@router.post("/notifications", response_model=NotificationResult, status_code=201)
-async def create_notification(
-    payload: NotificationRequest,
-    request: Request,
-    session: SessionDependency,
-    principal: Annotated[
-        Principal,
-        Depends(principal_dependency("platform.notification.request", actor_types=("service",))),
-    ],
-) -> NotificationResult:
-    application_id = await require_service_binding(
-        request,
-        session,
-        principal,
-        action="platform.notification.request",
-    )
-    try:
-        record = await NotificationService().create(
-            session,
-            application_id=application_id,
-            recipient_user_id=payload.recipient_user_id,
-            subject=payload.subject,
-            body=payload.body,
-            payload=payload.payload,
-            idempotency_key=payload.idempotency_key,
-        )
-    except NotificationConfigurationDisabledError as error:
-        raise ApiError(409, "notification_channel_disabled", str(error)) from error
-    except NotificationRecipientNotFoundError as error:
-        raise ApiError(404, "notification_recipient_not_found", str(error)) from error
-    await AuditService().append(
-        session,
-        AuditRecord(
-            request_id=request_id(request),
-            trace_id=getattr(request.state, "trace_id", None),
-            action="platform.notification.request",
-            result="SUCCESS",
-            actor_type="service",
-            actor_id=principal.token.subject,
-            application_id=application_id,
-            target_type="notification",
-            target_id=str(record.notification_id),
-        ),
-    )
-    return notification_result(record)
-
-
-@router.get("/notifications/{notification_id}", response_model=NotificationResult)
-async def get_notification(
-    notification_id: UUID,
-    request: Request,
-    session: SessionDependency,
-    principal: Annotated[
-        Principal,
-        Depends(principal_dependency("platform.notification.request", actor_types=("service",))),
-    ],
-) -> NotificationResult:
-    application_id = await require_service_binding(
-        request,
-        session,
-        principal,
-        action="platform.notification.read",
-    )
-    try:
-        record = await NotificationService().get(
-            session,
-            application_id=application_id,
-            notification_id=notification_id,
-        )
-    except NotificationNotFoundError as error:
-        raise ApiError(404, "notification_not_found", str(error)) from error
-    await AuditService().append(
-        session,
-        AuditRecord(
-            request_id=request_id(request),
-            trace_id=getattr(request.state, "trace_id", None),
-            action="platform.notification.read",
-            result="SUCCESS",
-            actor_type="service",
-            actor_id=principal.token.subject,
-            application_id=application_id,
-            target_type="notification",
-            target_id=str(record.notification_id),
-        ),
-    )
-    return notification_result(record)

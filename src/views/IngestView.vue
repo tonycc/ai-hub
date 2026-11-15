@@ -11,7 +11,6 @@ import {
   ingestApproveCertification,
   ingestCreateCertification,
   ingestGetConfig,
-  ingestInferContract,
   ingestListCertifications,
   ingestListContracts,
   ingestListOperations,
@@ -51,7 +50,6 @@ const contractForm = reactive({
   contract_version: '',
   json_schema_text: '{\n  "type": "object",\n  "properties": {}\n}',
   field_classifications_text: '{}',
-  compatibility_mode: 'BACKWARD',
 })
 
 const certEvidence = reactive({
@@ -93,7 +91,7 @@ const sourceForm = reactive({
   page_limit: 200,
   enabled: false,
   push_protocol_version: '',
-  contract_validation_mode: 'AUDIT_ONLY',
+  contract_validation_mode: 'ENFORCE',
   allow_empty_full: false,
 })
 
@@ -220,7 +218,7 @@ function openSourceDialog(mode, row) {
       page_limit: policyForm.page_limit_default,
       enabled: false,
       push_protocol_version: '',
-      contract_validation_mode: 'AUDIT_ONLY',
+      contract_validation_mode: 'ENFORCE',
       allow_empty_full: false,
     })
     sourceOriginallyEnabled.value = false
@@ -280,7 +278,7 @@ function sourcePayload(row) {
     page_limit: row.page_limit,
     enabled: row.enabled,
     push_protocol_version: row.push_protocol_version || null,
-    contract_validation_mode: row.contract_validation_mode || 'AUDIT_ONLY',
+    contract_validation_mode: row.contract_validation_mode || 'ENFORCE',
     allow_empty_full: Boolean(row.allow_empty_full),
   }
 }
@@ -320,7 +318,6 @@ function fillContractForm(row) {
     contract_version: row.contract_version,
     json_schema_text: JSON.stringify(row.json_schema, null, 2),
     field_classifications_text: JSON.stringify(row.field_classifications || {}, null, 2),
-    compatibility_mode: row.compatibility_mode || 'BACKWARD',
   })
 }
 
@@ -341,7 +338,6 @@ async function saveContractDraft() {
       contract_version: contractForm.contract_version,
       json_schema,
       field_classifications,
-      compatibility_mode: contractForm.compatibility_mode,
     })
   } catch (caught) {
     ElMessage.error(errorText(caught))
@@ -351,28 +347,6 @@ async function saveContractDraft() {
   await loadAll()
 }
 
-async function inferContractDraft() {
-  if (
-    !contractForm.source_application_id
-    || !contractForm.object_type
-    || !contractForm.contract_version
-  ) {
-    ElMessage.warning('请先填写应用、数据类型和契约版本')
-    return
-  }
-  try {
-    const saved = await ingestInferContract({
-      source_application_id: contractForm.source_application_id,
-      object_type: contractForm.object_type,
-      contract_version: contractForm.contract_version,
-    })
-    fillContractForm(saved)
-    ElMessage.success('已从 Raw 推导草稿')
-    await loadAll()
-  } catch (caught) {
-    ElMessage.error(errorText(caught))
-  }
-}
 
 async function activateContract(row) {
   const replaced = contracts.value.find(
@@ -815,17 +789,9 @@ onMounted(loadAll)
               class="mono"
             />
           </el-form-item>
-          <el-form-item label="兼容模式">
-            <el-select v-model="contractForm.compatibility_mode" style="width: 100%">
-              <el-option label="BACKWARD" value="BACKWARD" />
-              <el-option label="FORWARD" value="FORWARD" />
-              <el-option label="FULL" value="FULL" />
-              <el-option label="NONE" value="NONE" />
-            </el-select>
-          </el-form-item>
+
           <el-form-item v-if="canWrite">
             <el-button type="primary" @click="saveContractDraft">保存草稿</el-button>
-            <el-button @click="inferContractDraft">从 Raw 推导草稿</el-button>
           </el-form-item>
         </el-form>
         <el-table :data="contracts" style="width: 100%">
@@ -840,11 +806,6 @@ onMounted(loadAll)
           <el-table-column label="指纹" min-width="140">
             <template #default="scope">
               <span class="mono">{{ scope.row.schema_fingerprint.slice(0, 12) }}…</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="推导证据" min-width="140">
-            <template #default="scope">
-              <span class="mono cert-evidence">{{ scope.row.inference_evidence_ref ? '已记录' : '—' }}</span>
             </template>
           </el-table-column>
           <el-table-column v-if="canWrite" label="操作" width="280" fixed="right">
@@ -871,7 +832,7 @@ onMounted(loadAll)
             </template>
           </el-table-column>
         </el-table>
-        <el-divider content-position="left">认证（ENFORCE 前置）</el-divider>
+        <el-divider content-position="left">接入认证（Push 启用前置）</el-divider>
         <p class="form-hint">数据负责人与平台运维必须是不同的人，且角色由服务端权限推导，不能在请求里自报。批准前必须有观察批次窗口、空的未豁免违规，以及可追溯的回归/回滚证据。</p>
         <el-form v-if="canWrite" label-width="180px" label-position="left">
           <el-form-item label="校验行数">
@@ -1146,12 +1107,7 @@ onMounted(loadAll)
         <el-form-item v-else label="推送协议版本" required>
           <el-input v-model="sourceForm.push_protocol_version" placeholder="1" />
         </el-form-item>
-        <el-form-item v-if="sourceForm.transport_mode !== 'PUSH_AGENT'" label="契约校验">
-          <el-select v-model="sourceForm.contract_validation_mode">
-            <el-option label="只审计，不拒绝（AUDIT_ONLY）" value="AUDIT_ONLY" />
-            <el-option label="强制拒绝（ENFORCE）" value="ENFORCE" />
-          </el-select>
-        </el-form-item>
+        <p class="form-hint">所有来源均强制校验契约。Pull 激活已审核契约后即可启用；Push 需先完成认证。</p>
         <el-form-item v-if="sourceForm.transport_mode === 'PUSH_AGENT'" label="允许空全量">
           <el-switch v-model="sourceForm.allow_empty_full" />
         </el-form-item>
@@ -1177,10 +1133,6 @@ onMounted(loadAll)
 </template>
 
 <style scoped>
-.management-tabs { display: flex; gap: 24px; }
-.management-tabs button { position: relative; height: 46px; padding: 0; border: 0; color: var(--ink-500); background: transparent; font-size: 15px; cursor: pointer; }
-.management-tabs button.active { color: var(--ink-900); font-weight: 650; }
-.management-tabs button.active::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-500); content: ''; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .panel-toolbar {
   display: flex;
@@ -1224,5 +1176,5 @@ onMounted(loadAll)
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .action-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 650px) { .metric-grid { grid-template-columns: 1fr; } .management-tabs { gap: 16px; overflow-x: auto; } }
+@media (max-width: 650px) { .metric-grid { grid-template-columns: 1fr; } }
 </style>

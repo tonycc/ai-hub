@@ -1,5 +1,7 @@
 # AI Hub
 
+> 2026-10-16 简化基线：平台保留统一身份、应用登记与凭据、数据接入、审计和运维。平台托管业务授权及测试通知已退役，相关旧接口、SDK 方法和菜单不再提供；业务授权全部由应用执行。初始管理员领取与员工目录同步为可选能力。数据接入仅支持 ENFORCE，已移除推断草稿与 AUDIT_ONLY。本文后续涉及旧功能或阶段性兼容的内容仅作历史记录，当前接入以 开发者指南 `docs/developer-integration-guide.md` 和 API 契约为准。
+
 本目录用于建设企业内部轻应用与 AI 协同平台。
 
 当前研发基线：
@@ -38,7 +40,7 @@ bash scripts/ci/all.sh
 
 ## 本地启动
 
-本地开发使用唯一的 `base-access` 档位。后端、身份服务、数据库、数据接入调度器和参考应用由 Docker Compose 启动，Vue 前端由宿主机上的 Vite 单独启动，以获得热更新。
+本地开发使用唯一的 `base-access` 档位。后端、身份服务、数据库和数据接入调度器由 Docker Compose 启动；参考应用仅在显式启用 `reference-app` profile 时启动，Vue 前端由宿主机上的 Vite 单独启动，以获得热更新。
 
 ### 前置条件
 
@@ -60,7 +62,7 @@ bash scripts/local/start.sh --check
 bash scripts/local/start.sh
 ~~~
 
-首次运行时，脚本会在 `.env` 不存在时从 `.env.example` 自动创建本地配置，然后构建并启动 PostgreSQL、authentik、平台 API、Traefik、参考应用和数据接入调度器，执行数据库迁移，并等待所有服务就绪。平台 API 使用 Uvicorn `--reload` 和 debug 日志；脚本完成后服务继续在后台运行。
+首次运行时，脚本会在 `.env` 不存在时从 `.env.example` 自动创建本地配置，然后构建并启动 PostgreSQL、authentik、平台 API、Traefik 和数据接入调度器，执行数据库迁移，并等待所有服务就绪。平台 API 使用 Uvicorn `--reload` 和 debug 日志；脚本完成后服务继续在后台运行。
 
 已经构建过当前代码镜像时，可以复用现有镜像以缩短启动时间：
 
@@ -152,3 +154,11 @@ npm run dev
 ~~~bash
 npm run build
 ~~~
+
+## 2026-10-16 简化升级
+
+- 本次是 API 收缩，旧授权、通知接口直接移除；业务应用自行校验功能权限、对象归属和业务状态。平台自身的管理角色、CSRF、令牌校验和审计仍保留。
+- 页面收敛为首页、应用、身份、数据接入、审计、运维。接入规范/检查归应用中心，平台管理权限归用户与组织，设置归运维。
+- 使用 `AI_HUB_PLATFORM_ORIGINS` 和可选的复数 `AI_HUB_PORTAL_OIDC_REDIRECT_URIS` / `AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS`；删除了旧单值回调配置。升级前请从现有配置迁移实际地址，不能直接覆盖本地 `.env`。
+- 保留完整 Alembic 历史。新增 core 0029 撤销旧表运行权限，保留历史数据；旧 AUDIT_ONLY 数据源会禁用，Pull 完成人工审核并激活契约后可启用并收集认证证据，Push 仍须先完成认证。升级需停止旧版本写入者，按现有发布流程备份并迁移；不支持直接切回旧镜像。**不要重建卷或清空数据库。** 本次开发验证只在一次性隔离 PostgreSQL 中执行，没有迁移本地数据库。
+- 参考应用从默认栈移出。隔离 CI 使用 `--profile reference-app`，并显式运行 `scripts/ci/reference-fixture.py` 安装测试夹具；平台启动不再修补参考应用。

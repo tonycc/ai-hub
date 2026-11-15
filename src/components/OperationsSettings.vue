@@ -44,7 +44,6 @@ const sloRows = computed(() => targets.value ? [
 
 const retentionRows = computed(() => targets.value ? [
   { name: '平台审计', value: targets.value.retention.audit_days, unit: '天', owner: '安全与审计' },
-  { name: '站内测试通知', value: targets.value.retention.notification_days, unit: '天', owner: '平台运行' },
   { name: '到期门户会话', value: targets.value.retention.portal_session_days_after_expiry, unit: '天', owner: '身份与安全' },
   { name: '到期接入认证', value: targets.value.retention.conformance_days_after_expiry, unit: '天', owner: '接入治理' },
   { name: '小时备份保留', value: targets.value.retention.backup_hourly_count, unit: '份', owner: '数据恢复' },
@@ -185,15 +184,11 @@ onMounted(loadTargets)
 </template>
 
 <style scoped>
-.management-tabs { display: flex; gap: 24px; }
-.management-tabs button { position: relative; height: 46px; padding: 0; border: 0; color: var(--ink-500); background: transparent; font-size: 15px; cursor: pointer; }
-.management-tabs button.active { color: var(--ink-900); font-weight: 650; }
-.management-tabs button.active::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-500); content: ''; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .configuration-identity, .detail-panel, .table-panel, .ha-panel { padding: 18px; overflow: hidden; }
 .configuration-identity .section-heading, .detail-panel .section-heading, .table-panel .section-heading, .ha-panel .section-heading { align-items: center; }
 .target-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 code { color: #416c83; word-break: break-all; }
 @media (max-width: 1000px) { .metric-grid, .target-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .configuration-identity :deep(.el-descriptions__body) { overflow-x: auto; } }
-@media (max-width: 650px) { .metric-grid, .target-grid { grid-template-columns: 1fr; } .management-tabs { gap: 16px; overflow-x: auto; } }
+@media (max-width: 650px) { .metric-grid, .target-grid { grid-template-columns: 1fr; } }
 </style>

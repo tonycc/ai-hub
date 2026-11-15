@@ -138,12 +138,8 @@ def reconcile_portal_redirect_uris(provider_model):
         RedirectURIType,
     )
 
-    authorization = os.environ.get("AI_HUB_PORTAL_OIDC_REDIRECT_URIS") or os.environ.get(
-        "AI_HUB_PORTAL_OIDC_REDIRECT_URI", ""
-    )
-    logout = os.environ.get("AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS") or os.environ.get(
-        "AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI", ""
-    )
+    authorization = os.environ.get("AI_HUB_PORTAL_OIDC_REDIRECT_URIS", "")
+    logout = os.environ.get("AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS", "")
     desired = _redirect_entries(authorization, "authorization") + _redirect_entries(
         logout, "logout"
     )

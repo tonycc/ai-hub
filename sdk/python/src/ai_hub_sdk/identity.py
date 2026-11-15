@@ -43,7 +43,6 @@ class _TokenClaims(BaseModel):
     scope: str | list[str] = ""
     actor_type: ActorType
     application_id: str | None = None
-    authorization_version: int = Field(ge=1)
     preferred_username: str | None = None
     name: str | None = None
     email: str | None = None
@@ -66,7 +65,6 @@ class VerifiedToken:
     scopes: frozenset[str]
     actor_type: ActorType
     application_id: str | None
-    authorization_version: int
     preferred_username: str | None
     display_name: str | None
     email: str | None
@@ -118,9 +116,7 @@ class OidcTokenValidator:
         self.algorithms = tuple(algorithms)
         self._clock = clock
         self._owns_client = http_client is None
-        self._http = http_client or httpx.AsyncClient(
-            timeout=httpx.Timeout(5.0, connect=2.0)
-        )
+        self._http = http_client or httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0))
         self._discovery: _CacheEntry | None = None
         self._jwks: _CacheEntry | None = None
         self._discovery_lock = asyncio.Lock()
@@ -161,9 +157,7 @@ class OidcTokenValidator:
             if self._fresh(self._discovery):
                 return cast(_CacheEntry, self._discovery).value
             try:
-                payload = await self._fetch_json(
-                    f"{self.issuer}.well-known/openid-configuration"
-                )
+                payload = await self._fetch_json(f"{self.issuer}.well-known/openid-configuration")
             except TokenValidationError:
                 if self._stale_usable(self._discovery):
                     return cast(_CacheEntry, self._discovery).value
@@ -182,9 +176,7 @@ class OidcTokenValidator:
         if self._fresh(self._discovery):
             return cast(_CacheEntry, self._discovery).value
         try:
-            payload = await self._fetch_json(
-                f"{self.issuer}.well-known/openid-configuration"
-            )
+            payload = await self._fetch_json(f"{self.issuer}.well-known/openid-configuration")
         except TokenValidationError:
             if self._stale_usable(self._discovery):
                 return cast(_CacheEntry, self._discovery).value
@@ -284,9 +276,7 @@ class OidcTokenValidator:
         except (jwt.PyJWTError, ValidationError, ValueError) as error:
             raise TokenValidationError("invalid_token", "Bearer token validation failed") from error
 
-        scope_values = (
-            claims.scope.split() if isinstance(claims.scope, str) else list(claims.scope)
-        )
+        scope_values = claims.scope.split() if isinstance(claims.scope, str) else list(claims.scope)
         scopes = frozenset(scope for scope in scope_values if scope)
         missing_scopes = sorted(set(required_scopes) - scopes)
         if missing_scopes:
@@ -312,7 +302,6 @@ class OidcTokenValidator:
             scopes=scopes,
             actor_type=claims.actor_type,
             application_id=claims.application_id,
-            authorization_version=claims.authorization_version,
             preferred_username=claims.preferred_username,
             display_name=claims.name,
             email=claims.email,
@@ -343,9 +332,7 @@ class OidcClient:
         self.token_leeway_seconds = token_leeway_seconds
         self._clock = clock
         self._owns_client = http_client is None
-        self._http = http_client or httpx.AsyncClient(
-            timeout=httpx.Timeout(5.0, connect=2.0)
-        )
+        self._http = http_client or httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0))
         self._discovery: JsonObject | None = None
         self._service_tokens: dict[tuple[str, ...], tuple[OAuthToken, float]] = {}
         self._lock = asyncio.Lock()
@@ -354,9 +341,7 @@ class OidcClient:
         if self._discovery is not None:
             return self._discovery
         try:
-            response = await self._http.get(
-                f"{self.issuer}.well-known/openid-configuration"
-            )
+            response = await self._http.get(f"{self.issuer}.well-known/openid-configuration")
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as error:

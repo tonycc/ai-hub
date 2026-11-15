@@ -22,24 +22,13 @@ from ai_hub_platform.api.health import router as health_router
 from ai_hub_platform.api.ingest import router as ingest_router
 from ai_hub_platform.api.ingest_contracts import router as ingest_contracts_router
 from ai_hub_platform.api.ingest_push import router as ingest_push_router
-from ai_hub_platform.api.notification_management import (
-    router as notification_management_router,
-)
 from ai_hub_platform.api.operations import internal_router as internal_operations_router
 from ai_hub_platform.api.operations import router as operations_router
 from ai_hub_platform.api.platform import router as platform_router
 from ai_hub_platform.api.portal_auth import auth_router, session_router
 from ai_hub_platform.config import Settings, get_settings
 from ai_hub_platform.modules.app_management.authentik import AuthentikAdminClient
-from ai_hub_platform.modules.app_management.bootstrap import (
-    disable_reference_application,
-    start_bootstrap_reconciliation,
-)
-from ai_hub_platform.modules.governance.version_sync import (
-    start_authorization_version_reconciler,
-)
 from ai_hub_platform.modules.ingest.generation_sql import start_push_lease_reaper
-from ai_hub_platform.modules.permission.service import PermissionService
 from ai_hub_platform.operations.targets import load_production_targets
 from ai_hub_platform.shared.database import Database
 from ai_hub_platform.shared.metrics import MetricsMiddleware, MetricsRegistry
@@ -56,9 +45,7 @@ __all__ = ["create_app"]
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
-    production_targets = load_production_targets(
-        resolved_settings.production_targets_path
-    )
+    production_targets = load_production_targets(resolved_settings.production_targets_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
@@ -97,47 +84,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.portal_oidc_client = portal_oidc_client
         app.state.portal_token_validator = portal_token_validator
         app.state.authentik_admin_client = authentik_admin_client
-        app.state.permission_service = PermissionService(
-            resolved_settings.authorization_cache_ttl_seconds
-        )
+
         app.state.settings = resolved_settings
-        raw_engine = create_async_engine(
-            resolved_settings.raw_database_url, pool_pre_ping=True
-        )
+        raw_engine = create_async_engine(resolved_settings.raw_database_url, pool_pre_ping=True)
         app.state.raw_sessions = async_sessionmaker(
             raw_engine, class_=AsyncSession, expire_on_commit=False
-        )
-        reconciliation_state = None
-        reconciliation_task = None
-        if resolved_settings.reference_application_enabled:
-            reconciliation_state, reconciliation_task = start_bootstrap_reconciliation(
-                database,
-                authentik_admin_client,
-                application_id=resolved_settings.sandbox_application_id,
-                environment=resolved_settings.environment,
-                external_url=resolved_settings.authentik_external_url,
-                standalone_portal_url=resolved_settings.standalone_portal_url,
-                standalone_api_base_url=resolved_settings.standalone_api_base_url,
-                standalone_health_url=resolved_settings.standalone_health_url,
-                standalone_oidc_redirect_uri=(
-                    resolved_settings.standalone_oidc_redirect_uri
-                ),
-            )
-        else:
-            await disable_reference_application(
-                database,
-                application_id=resolved_settings.sandbox_application_id,
-            )
-        app.state.bootstrap_reconciliation = reconciliation_state
-        version_sync_task = start_authorization_version_reconciler(
-            database, authentik_admin_client
         )
         push_lease_reaper = start_push_lease_reaper(app.state.raw_sessions)
         yield
         push_lease_reaper.cancel()
-        version_sync_task.cancel()
-        if reconciliation_task is not None:
-            reconciliation_task.cancel()
         await raw_engine.dispose()
         await authentik_admin_client.close()
         await portal_oidc_client.close()
@@ -170,7 +125,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(governance_router)
     application.include_router(data_governance_router)
     application.include_router(application_management_router)
-    application.include_router(notification_management_router)
     application.include_router(audit_management_router)
     application.include_router(developer_router)
     application.include_router(conformance_router)

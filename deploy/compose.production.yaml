@@ -21,7 +21,6 @@ name: ai-hub-production
 services:
   platform-api:
     environment:
-      AI_HUB_REFERENCE_APPLICATION_ENABLED: "false"
 
   platform-ingest-scheduler:
     environment:

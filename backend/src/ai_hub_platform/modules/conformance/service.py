@@ -29,8 +29,6 @@ ALL_PROFILES: tuple[ConformanceProfile, ...] = (
 OIDC_REQUIRED_SCOPES = frozenset(
     {
         "ai_hub.identity",
-        "platform.application.bootstrap",
-        "platform.directory.read",
         "platform.me.read",
     }
 )
@@ -39,7 +37,6 @@ API_REQUIRED_SCOPES = frozenset(
         "ai_hub.identity",
         "platform.application.read",
         "platform.me.read",
-        "platform.notification.request",
     }
 )
 DATA_INGEST_EVIDENCE_KEYS = frozenset(
@@ -73,9 +70,7 @@ def required_data_ingest_evidence_keys(transport_mode: str) -> frozenset[str]:
     return DATA_INGEST_EVIDENCE_KEYS
 
 
-CERTIFICATION_KINDS = frozenset(
-    {"full_regression", "incremental_regression", "rollback_drill"}
-)
+CERTIFICATION_KINDS = frozenset({"full_regression", "incremental_regression", "rollback_drill"})
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -107,11 +102,7 @@ def _validate_one_source_evidence(
         raise ConformanceValidationError(
             "DATA_INGEST evidence is missing required keys: " + ", ".join(missing)
         )
-    if any(
-        evidence.get(key) is not True
-        for key in required
-        if key != "transport_mode"
-    ):
+    if any(evidence.get(key) is not True for key in required if key != "transport_mode"):
         raise ConformanceValidationError(
             "DATA_INGEST evidence checks must all be true when status is PASSED"
         )
@@ -145,9 +136,7 @@ def _validate_passed_ingest_evidence(
     evidence: dict[str, Any], transports: list[tuple[str, str]]
 ) -> None:
     if not transports:
-        raise ConformanceValidationError(
-            "DATA_INGEST evidence requires registered ingest sources"
-        )
+        raise ConformanceValidationError("DATA_INGEST evidence requires registered ingest sources")
     if len(transports) > 1:
         raw_by_source = evidence.get("by_source")
         if not isinstance(raw_by_source, dict):
@@ -534,9 +523,7 @@ class ConformanceService:
             ),
             {"application_id": application_id},
         )
-        return [
-            (str(row.object_type), str(row.transport_mode)) for row in result.all()
-        ]
+        return [(str(row.object_type), str(row.transport_mode)) for row in result.all()]
 
     async def _application_context(
         self,
@@ -564,13 +551,7 @@ class ConformanceService:
                                array_agg(DISTINCT g.scope_code)
                                FILTER (WHERE g.scope_code IS NOT NULL),
                                ARRAY[]::varchar[]
-                           ) AS scopes,
-                           COUNT(DISTINCT p.permission_code)::integer
-                               AS permission_count,
-                           BOOL_OR(
-                               nc.channel = 'IN_APP' AND nc.enabled
-                           ) AS notification_enabled,
-                           MAX(b.status) AS bootstrap_status
+                           ) AS scopes
                     FROM platform_core.application AS a
                     JOIN platform_core.application_environment AS e
                       ON e.application_id = a.application_id
@@ -580,14 +561,6 @@ class ConformanceService:
                      AND c.environment = e.environment
                     LEFT JOIN platform_core.application_scope_grant AS g
                       ON g.application_id = a.application_id
-                    LEFT JOIN platform_core.permission_definition AS p
-                      ON p.application_id = a.application_id
-                     AND p.status = 'ACTIVE'
-                    LEFT JOIN platform_core.notification_configuration AS nc
-                      ON nc.application_id = a.application_id
-                    LEFT JOIN platform_core.application_admin_bootstrap AS b
-                      ON b.application_id = e.application_id
-                     AND b.environment = e.environment
                     WHERE a.application_id = :application_id
                     GROUP BY a.application_id, a.status, a.owner_id, a.capabilities,
                              e.environment, e.status, e.portal_url, e.api_base_url,
@@ -623,25 +596,18 @@ class ConformanceService:
             failures.append("OIDC redirect URI is not registered")
         if application["owner_id"] is None:
             failures.append("application owner is not registered")
-        if application["bootstrap_status"] not in {"PENDING", "CONSUMED"}:
-            failures.append("initial administrator bootstrap is not configured")
         if missing_scopes:
             failures.append("required identity scopes are missing")
         return ConformanceCheckResult(
             profile="OIDC_ONLY",
             status="FAILED" if failures else "PASSED",
-            message=(
-                "; ".join(failures)
-                if failures
-                else "OIDC identity and initial-administrator prerequisites pass"
-            ),
+            message=("; ".join(failures) if failures else "OIDC identity prerequisites pass"),
             evidence={
                 "application_status": application["application_status"],
                 "environment_status": application["environment_status"],
                 "credential_active": application["credential_active"] is True,
                 "redirect_uri_count": len(application["oidc_redirect_uris"]),
                 "owner_registered": application["owner_id"] is not None,
-                "bootstrap_status": application["bootstrap_status"],
                 "missing_scopes": missing_scopes,
             },
         )
@@ -664,17 +630,11 @@ class ConformanceService:
             failures.append("OIDC redirect URI is not registered")
         if missing_scopes:
             failures.append("required API scopes are missing")
-        if int(application["permission_count"] or 0) < 1:
-            failures.append("no active application permission is registered")
-        if application["notification_enabled"] is not True:
-            failures.append("IN_APP notification channel is not enabled")
         return ConformanceCheckResult(
             profile="API_ONLY",
             status="FAILED" if failures else "PASSED",
             message=(
-                "; ".join(failures)
-                if failures
-                else "API-only identity, authorization, notification, and entry prerequisites pass"
+                "; ".join(failures) if failures else "API identity and entry prerequisites pass"
             ),
             evidence={
                 "application_status": application["application_status"],
@@ -682,8 +642,6 @@ class ConformanceService:
                 "credential_active": application["credential_active"] is True,
                 "redirect_uri_count": len(application["oidc_redirect_uris"]),
                 "missing_scopes": missing_scopes,
-                "permission_count": int(application["permission_count"] or 0),
-                "notification_enabled": application["notification_enabled"] is True,
             },
         )
 
@@ -750,9 +708,7 @@ class ConformanceService:
                     raise ConformanceValidationError(
                         "Runtime evidence for DATA_INGEST is malformed"
                     )
-                _validate_passed_ingest_evidence(
-                    cast(dict[str, Any], raw_evidence), transports
-                )
+                _validate_passed_ingest_evidence(cast(dict[str, Any], raw_evidence), transports)
             except ConformanceValidationError:
                 return ConformanceCheckResult(
                     profile,

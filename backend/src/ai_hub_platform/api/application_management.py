@@ -193,8 +193,8 @@ class ApplicationUpdate(ApiModel):
 
 
 class EnvironmentWrite(ApiModel):
-    initial_admin_user_id: UUID = Field(
-        description="员工目录 user_id，仅用于本环境的一次性初始管理员领取"
+    initial_admin_user_id: UUID | None = Field(
+        default=None, description="员工目录 user_id，仅用于本环境的一次性初始管理员领取"
     )
     portal_url: str = Field(min_length=1, max_length=2000)
     api_base_url: str = Field(min_length=1, max_length=2000)
@@ -329,9 +329,7 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
                 admin_bootstrap_initial_admin_user_id=item.get(
                     "admin_bootstrap_initial_admin_user_id"
                 ),
-                admin_bootstrap_consumed_by_user_id=item.get(
-                    "admin_bootstrap_consumed_by_user_id"
-                ),
+                admin_bootstrap_consumed_by_user_id=item.get("admin_bootstrap_consumed_by_user_id"),
                 admin_bootstrap_consumed_at=item.get("admin_bootstrap_consumed_at"),
                 credential=credential,
                 credentials=[
@@ -348,9 +346,7 @@ def _detail_response(value: dict[str, Any]) -> ApplicationDetailResponse:
         owner_id=UUID(value["owner_id"]) if value.get("owner_id") else None,
         created_by=value.get("created_by"),
         created_by_user_id=(
-            UUID(value["created_by_user_id"])
-            if value.get("created_by_user_id")
-            else None
+            UUID(value["created_by_user_id"]) if value.get("created_by_user_id") else None
         ),
         status=value["status"],
         capabilities=list(value["capabilities"]),
@@ -590,6 +586,10 @@ async def upsert_environment(
             version=payload.version,
             status=payload.status,
             initial_admin_user_id=payload.initial_admin_user_id,
+            clear_pending_bootstrap=(
+                "initial_admin_user_id" in payload.model_fields_set
+                and payload.initial_admin_user_id is None
+            ),
         )
     except (
         ApplicationManagementNotFoundError,
@@ -617,10 +617,12 @@ async def upsert_environment(
             target_id=f"{application_id}:{environment}",
             authorization_version=principal.authorization_version,
             metadata={
-                "initial_admin_user_id": str(payload.initial_admin_user_id),
-                "admin_bootstrap_status": environment_record.get(
-                    "admin_bootstrap_status"
+                "initial_admin_user_id": (
+                    str(environment_record["admin_bootstrap_initial_admin_user_id"])
+                    if environment_record.get("admin_bootstrap_initial_admin_user_id")
+                    else None
                 ),
+                "admin_bootstrap_status": environment_record.get("admin_bootstrap_status"),
             },
         ),
     )

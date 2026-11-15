@@ -147,7 +147,6 @@ class Settings(_StandaloneSettings):
     oidc_jwks_cache_ttl_seconds: int = 300
     oidc_jwks_stale_ttl_seconds: int = 3600
     session_secret: str = "local-only-standalone-session-signing-secret"
-    authorization_cache_stale_ttl_seconds: int = 300
     integration_capabilities: str = "API_CLIENT"
 
     @property
@@ -181,8 +180,6 @@ class Settings(_StandaloneSettings):
             raise ValueError(
                 "oidc_jwks_stale_ttl_seconds must not be shorter than the fresh cache TTL"
             )
-        if self.authorization_cache_stale_ttl_seconds < 1:
-            raise ValueError("authorization_cache_stale_ttl_seconds must be positive")
         unknown_capabilities = self.capabilities - {
             "API_CLIENT",
             "DATA_INGEST",

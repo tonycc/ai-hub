@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import ApplicationResources from '../components/ApplicationResources.vue'
+import ApplicationChecks from '../components/ApplicationChecks.vue'
 import ApiState from '../components/ApiState.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -16,6 +18,7 @@ const applications = ref([])
 const keyword = ref('')
 const statusFilter = ref('')
 const detailVisible = ref(false)
+const resourcesVisible = ref(false)
 const detailLoading = ref(false)
 const selected = ref(null)
 const createVisible = ref(false)
@@ -26,7 +29,7 @@ const secretVisible = ref(false)
 const oneTimeSecret = ref(null)
 const saving = ref(false)
 const scopeOptions = ref([])
-const businessUsers = ref([])
+const activeUsers = ref([])
 
 const capabilityOptions = [
   ['API_CLIENT', 'API 客户端'],
@@ -35,8 +38,6 @@ const capabilityOptions = [
 const identityScopeCodes = [
   'ai_hub.identity',
   'platform.me.read',
-  'platform.application.bootstrap',
-  'platform.directory.read',
 ]
 
 const statusOptions = [
@@ -73,11 +74,11 @@ function formatTime(value) {
 
 function businessUserLabel(userId) {
   if (!userId) return '—'
-  const user = businessUsers.value.find((item) => item.user_id === userId)
+  const user = activeUsers.value.find((item) => item.user_id === userId)
   return user?.display_name || userId
 }
 
-function businessUserOptionLabel(user) {
+function userOptionLabel(user) {
   const identity = user.email ? `${user.display_name} <${user.email}>` : user.display_name
   return user.organization_name ? `${identity} · ${user.organization_name}` : identity
 }
@@ -137,11 +138,11 @@ function onIdInput() {
   createIdManual.value = true
 }
 
-async function loadBusinessUsers() {
+async function loadActiveUsers() {
   try {
-    businessUsers.value = (await apiRequest('application-user-candidates')).items
+    activeUsers.value = (await apiRequest('application-user-candidates')).items
   } catch {
-    businessUsers.value = []
+    activeUsers.value = []
   }
 }
 
@@ -260,7 +261,7 @@ function openEnvironment(environment = null) {
   } : {
     environment: 'local', portal_url: '', api_base_url: '', health_url: '',
     redirect_text: '', version: '0.1.0', status: 'ACTIVE',
-    initial_admin_user_id: selected.value?.owner_id || '',
+    initial_admin_user_id: '',
     initial_admin_locked: false,
   })
   environmentVisible.value = true
@@ -268,10 +269,6 @@ function openEnvironment(environment = null) {
 
 async function submitEnvironment() {
   const redirectUris = environmentForm.redirect_text.split('\n').map((item) => item.trim()).filter(Boolean)
-  if (!environmentForm.initial_admin_user_id) {
-    ElMessage.error('请选择本环境的初始管理员')
-    return
-  }
   saving.value = true
   try {
     selected.value = await apiRequest(
@@ -279,7 +276,7 @@ async function submitEnvironment() {
       {
         method: 'PUT',
         body: {
-          initial_admin_user_id: environmentForm.initial_admin_user_id,
+          initial_admin_user_id: environmentForm.initial_admin_user_id || null,
           portal_url: environmentForm.portal_url,
           api_base_url: environmentForm.api_base_url,
           health_url: environmentForm.health_url,
@@ -392,7 +389,7 @@ async function submitRelease() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadApplications(), loadScopeOptions(), loadBusinessUsers()])
+  await Promise.all([loadApplications(), loadScopeOptions(), loadActiveUsers()])
   // 如果 URL 带 app 参数，自动打开对应应用详情
   const appId = route.query.app
   if (appId && typeof appId === 'string') {
@@ -409,7 +406,7 @@ onMounted(async () => {
         <el-option v-for="item in statusOptions" :key="item[0]" :label="item[1]" :value="item[0]" />
       </el-select>
       <template #actions>
-        <el-button @click="$router.push('/platform/developer')"><el-icon><Document /></el-icon>接入规范</el-button>
+        <el-button v-if="session.hasPermission('platform.developer.read')" @click="resourcesVisible = true"><el-icon><Document /></el-icon>接入规范</el-button>
         <el-button v-if="canCreate" type="primary" @click="createVisible = true"><el-icon><Plus /></el-icon>注册应用</el-button>
       </template>
     </PageHeader>
@@ -433,7 +430,8 @@ onMounted(async () => {
       </ApiState>
     </section>
 
-    <el-drawer v-model="createVisible" title="注册独立应用" size="min(620px, 96vw)" @open="loadBusinessUsers">
+    <el-drawer v-model="resourcesVisible" title="接入文档" size="min(960px, 96vw)"><ApplicationResources /></el-drawer>
+    <el-drawer v-model="createVisible" title="注册独立应用" size="min(620px, 96vw)" @open="loadActiveUsers">
       <el-form label-position="top" :model="createForm">
         <div class="form-grid">
           <el-form-item label="应用名称" required>
@@ -447,8 +445,8 @@ onMounted(async () => {
         </div>
         <el-form-item label="说明" required><el-input v-model="createForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="应用负责人" required>
-          <el-select v-model="createForm.owner_id" filterable placeholder="选择业务员工" style="width: 100%">
-            <el-option v-for="item in businessUsers" :key="item.user_id" :label="businessUserOptionLabel(item)" :value="item.user_id" />
+          <el-select v-model="createForm.owner_id" filterable clearable placeholder="请选择应用负责人" style="width: 100%">
+            <el-option v-for="item in activeUsers" :key="item.user_id" :label="userOptionLabel(item)" :value="item.user_id" />
           </el-select>
           <small class="subline">负责人承担业务治理与联络责任，不会因此获得业务应用权限；每个环境的初始管理员在环境配置中独立指定。</small>
         </el-form-item>
@@ -485,6 +483,7 @@ onMounted(async () => {
             <el-select v-model="selected.scopes" :disabled="!canEditSelected" multiple value-key="scope_code" style="width: 100%" placeholder="选择权限范围"><el-option v-for="item in scopeOptions" :key="item.scope_code" :label="`${item.name} · ${item.scope_code}`" :value="item" /></el-select>
           </div>
 
+          <ApplicationChecks v-if="session.hasPermission('platform.application.read', selected.application_id)" :key="selected.application_id" :application="selected" />
           <div class="drawer-section"><div class="section-heading"><div><h3>发布记录</h3><p>版本属于公开接入配置，不代表业务版本。</p></div></div>
             <el-table :data="selected.releases" style="width: 100%"><el-table-column prop="environment" label="环境" width="100" /><el-table-column prop="version" label="版本" min-width="130" /><el-table-column prop="status" label="状态" width="110"><template #default="scope"><StatusTag :status="scope.row.status" /></template></el-table-column><el-table-column prop="created_at" label="创建时间" min-width="180"><template #default="scope">{{ formatTime(scope.row.created_at) }}</template></el-table-column></el-table>
           </div>
@@ -492,9 +491,9 @@ onMounted(async () => {
       </ApiState>
     </el-drawer>
 
-      <el-drawer v-model="appEditVisible" title="编辑应用元数据" size="min(620px, 96vw)" @open="loadBusinessUsers"><el-form label-position="top"><el-form-item label="名称"><el-input v-model="appForm.name" /></el-form-item><el-form-item label="说明"><el-input v-model="appForm.description" type="textarea" :rows="3" /></el-form-item><div class="form-grid"><el-form-item label="应用负责人"><el-select v-model="appForm.owner_id" filterable placeholder="选择业务员工" style="width: 100%"><el-option v-for="item in businessUsers" :key="item.user_id" :label="businessUserOptionLabel(item)" :value="item.user_id" /></el-select><small class="subline">负责人变更只更新治理与联络信息，不会改变任何环境的初始管理员或业务应用本地权限。</small></el-form-item><el-form-item label="状态"><el-select v-model="appForm.status" style="width: 100%"><el-option v-for="item in statusOptions" :key="item[0]" :label="item[1]" :value="item[0]" /></el-select></el-form-item></div><el-form-item label="能力"><el-checkbox-group v-model="appForm.capabilities"><el-checkbox v-for="item in capabilityOptions" :key="item[0]" :value="item[0]" :disabled="item[0] === 'API_CLIENT'">{{ item[1] }}</el-checkbox></el-checkbox-group></el-form-item></el-form><template #footer><el-button @click="appEditVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button></template></el-drawer>
+      <el-drawer v-model="appEditVisible" title="编辑应用元数据" size="min(620px, 96vw)" @open="loadActiveUsers"><el-form label-position="top"><el-form-item label="名称"><el-input v-model="appForm.name" /></el-form-item><el-form-item label="说明"><el-input v-model="appForm.description" type="textarea" :rows="3" /></el-form-item><div class="form-grid"><el-form-item label="应用负责人"><el-select v-model="appForm.owner_id" filterable placeholder="选择用户" style="width: 100%"><el-option v-for="item in activeUsers" :key="item.user_id" :label="userOptionLabel(item)" :value="item.user_id" /></el-select><small class="subline">负责人变更只更新治理与联络信息，不会改变任何环境的初始管理员或业务应用本地权限。</small></el-form-item><el-form-item label="状态"><el-select v-model="appForm.status" style="width: 100%"><el-option v-for="item in statusOptions" :key="item[0]" :label="item[1]" :value="item[0]" /></el-select></el-form-item></div><el-form-item label="能力"><el-checkbox-group v-model="appForm.capabilities"><el-checkbox v-for="item in capabilityOptions" :key="item[0]" :value="item[0]" :disabled="item[0] === 'API_CLIENT'">{{ item[1] }}</el-checkbox></el-checkbox-group></el-form-item></el-form><template #footer><el-button @click="appEditVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button></template></el-drawer>
 
-    <el-drawer v-model="environmentVisible" title="配置应用环境" size="min(680px, 96vw)" @open="loadBusinessUsers"><el-form label-position="top"><div class="form-grid"><el-form-item label="环境标识" required><el-input v-model="environmentForm.environment" :disabled="selected?.environments.some((item) => item.environment === environmentForm.environment)" /></el-form-item><el-form-item label="版本" required><el-input v-model="environmentForm.version" /></el-form-item></div><el-form-item label="门户入口" required><el-input v-model="environmentForm.portal_url" /></el-form-item><el-form-item label="API 地址" required><el-input v-model="environmentForm.api_base_url" /></el-form-item><el-form-item label="健康检查" required><el-input v-model="environmentForm.health_url" /></el-form-item><el-form-item label="OIDC 回调地址（每行一个）" required><el-input v-model="environmentForm.redirect_text" type="textarea" :rows="3" /></el-form-item><el-form-item label="初始管理员" required><el-select v-model="environmentForm.initial_admin_user_id" filterable placeholder="选择业务员工" :disabled="environmentForm.initial_admin_locked" style="width: 100%"><el-option v-for="item in businessUsers" :key="item.user_id" :label="businessUserOptionLabel(item)" :value="item.user_id" /></el-select><small class="subline">仅用于该环境首次领取业务应用超级管理员。待领取时可调整；领取后锁定，后续权限全部由业务应用管理。</small></el-form-item><el-form-item label="状态"><el-switch v-model="environmentForm.status" active-value="ACTIVE" inactive-value="DISABLED" /></el-form-item></el-form><template #footer><el-button @click="environmentVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitEnvironment">保存环境</el-button></template></el-drawer>
+    <el-drawer v-model="environmentVisible" title="配置应用环境" size="min(680px, 96vw)" @open="loadActiveUsers"><el-form label-position="top"><div class="form-grid"><el-form-item label="环境标识" required><el-input v-model="environmentForm.environment" :disabled="selected?.environments.some((item) => item.environment === environmentForm.environment)" /></el-form-item><el-form-item label="版本" required><el-input v-model="environmentForm.version" /></el-form-item></div><el-form-item label="门户入口" required><el-input v-model="environmentForm.portal_url" /></el-form-item><el-form-item label="API 地址" required><el-input v-model="environmentForm.api_base_url" /></el-form-item><el-form-item label="健康检查" required><el-input v-model="environmentForm.health_url" /></el-form-item><el-form-item label="OIDC 回调地址（每行一个）" required><el-input v-model="environmentForm.redirect_text" type="textarea" :rows="3" /></el-form-item><el-form-item label="初始管理员（可选）"><el-select v-model="environmentForm.initial_admin_user_id" filterable clearable placeholder="需要首次管理员领取时选择" :disabled="environmentForm.initial_admin_locked" style="width: 100%"><el-option v-for="item in activeUsers" :key="item.user_id" :label="userOptionLabel(item)" :value="item.user_id" /></el-select><small class="subline">可选；仅用于该环境首次领取业务应用超级管理员。待领取时可调整；领取后锁定，后续权限全部由业务应用管理。</small></el-form-item><el-form-item label="状态"><el-switch v-model="environmentForm.status" active-value="ACTIVE" inactive-value="DISABLED" /></el-form-item></el-form><template #footer><el-button @click="environmentVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitEnvironment">保存环境</el-button></template></el-drawer>
 
     <el-drawer v-model="releaseVisible" title="创建接入配置版本" size="min(460px, 96vw)"><el-form label-position="top"><el-form-item label="环境"><el-input v-model="releaseForm.environment" disabled /></el-form-item><el-form-item label="语义版本"><el-input v-model="releaseForm.version" /></el-form-item><el-form-item label="创建后激活"><el-switch v-model="releaseForm.activate" /></el-form-item></el-form><template #footer><el-button @click="releaseVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRelease">创建版本</el-button></template></el-drawer>
 

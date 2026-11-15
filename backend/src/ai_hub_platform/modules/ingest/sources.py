@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 TransportMode = Literal["PULL_EXPORT", "PUSH_AGENT"]
-ContractValidationMode = Literal["AUDIT_ONLY", "ENFORCE"]
+ContractValidationMode = Literal["ENFORCE"]
 PUSH_PROTOCOL_VERSION = "1"
 SUPPORTED_PUSH_PROTOCOL_VERSIONS = frozenset({PUSH_PROTOCOL_VERSION})
 # Contract revision 20260831_raw_0007 replaces the legacy four-column Pull
@@ -54,7 +54,7 @@ class IngestSourceConfig(BaseModel):
     page_limit: int = 200
     enabled: bool = True
     push_protocol_version: str | None = None
-    contract_validation_mode: ContractValidationMode = "AUDIT_ONLY"
+    contract_validation_mode: ContractValidationMode = "ENFORCE"
     allow_empty_full: bool = False
 
     @field_validator("source_application_id", "object_type")
@@ -193,9 +193,7 @@ async def load_sync_cursors(session: AsyncSession) -> dict[tuple[str, str], dict
         cursors[(str(row.source_application_id), str(row.object_type))] = {
             "last_cursor": int(row.last_version),
             "last_sync_at": row.last_synced_at,
-            "last_status": (
-                None if row.last_status is None else str(row.last_status)
-            ),
+            "last_status": (None if row.last_status is None else str(row.last_status)),
         }
     success_result = await session.execute(
         text(

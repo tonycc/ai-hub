@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
@@ -16,9 +15,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_hub_platform.modules.ingest.service import IngestRecord
-from ai_hub_platform.modules.ingest.sources import IngestSourceConfig, TransportMode
+from ai_hub_platform.modules.ingest.sources import IngestSourceConfig
 
-LOGGER = logging.getLogger(__name__)
 _REMOTE_REF_SCHEMES = ("http://", "https://", "file://", "ftp://")
 
 ContractIssueCode = Literal[
@@ -62,31 +60,13 @@ class ContractIssue:
 
 @dataclass(frozen=True, slots=True)
 class ContractValidationResult:
-    status: Literal["ok", "audit", "rejected"]
+    status: Literal["ok"]
     issues: tuple[ContractIssue, ...]
     contract_version: str
     schema_fingerprint: str | None = None
 
-    @property
-    def rejected(self) -> bool:
-        return self.status == "rejected"
 
 
-def audit_summary_payload(issues: Sequence[ContractIssue]) -> dict[str, Any]:
-    return {
-        "mode": "AUDIT_ONLY",
-        "issue_count": len(issues),
-        "codes": [issue.code for issue in issues],
-        "issues": [
-            {
-                "code": issue.code,
-                "object_id": issue.object_id,
-                "path": issue.path,
-                "message": issue.message,
-            }
-            for issue in issues[:50]
-        ],
-    }
 
 
 def canonical_json_digest(value: Any) -> str:
@@ -103,109 +83,11 @@ def schema_fingerprint(json_schema: Mapping[str, Any]) -> str:
     return canonical_json_digest(dict(json_schema))
 
 
-def infer_draft_schema(
-    payloads: Sequence[Mapping[str, Any]],
-) -> tuple[dict[str, Any], list[str]]:
-    """Build a conservative DRAFT schema: observed fields are optional.
-
-    Mixed types, nested conflicts, and empty samples become warnings. Never
-    infers business-required fields or additionalProperties=false.
-    """
-    if not payloads:
-        return (
-            {"type": "object", "properties": {}},
-            ["sample coverage is empty; schema cannot be inferred"],
-        )
-    schema, warnings = _infer_object_properties(
-        [dict(payload) for payload in payloads], path=""
-    )
-    return schema, warnings
-
-
-def _infer_object_properties(
-    objects: Sequence[Mapping[str, Any]], *, path: str
-) -> tuple[dict[str, Any], list[str]]:
-    by_key: dict[str, list[Any]] = {}
-    for payload in objects:
-        for key, value in payload.items():
-            by_key.setdefault(str(key), []).append(value)
-    properties: dict[str, dict[str, Any]] = {}
-    warnings: list[str] = []
-    for key, values in sorted(by_key.items()):
-        field_path = key if not path else f"{path}.{key}"
-        fragment, field_warnings = _infer_values(values, field_path)
-        properties[key] = fragment
-        warnings.extend(field_warnings)
-    return {"type": "object", "properties": properties}, warnings
-
-
-def _infer_values(values: Sequence[Any], path: str) -> tuple[dict[str, Any], list[str]]:
-    warnings: list[str] = []
-    types = {_json_type(value) for value in values}
-    null_seen = "null" in types
-    usable = {item for item in types if item != "null"}
-    fragment: dict[str, Any] = {}
-    if not usable:
-        fragment["type"] = "null"
-        warnings.append(f"field {path} was only observed as null")
-    elif len(usable) == 1:
-        declared: list[str] | str = next(iter(usable))
-        if null_seen:
-            declared = sorted({str(declared), "null"})
-            warnings.append(
-                f"field {path} observed as null in "
-                f"{sum(1 for value in values if value is None)}/{len(values)} samples"
-            )
-        fragment["type"] = declared
-    else:
-        fragment["type"] = sorted(usable | ({"null"} if null_seen else set()))
-        warnings.append(f"field {path} has mixed types {sorted(usable)}")
-        if null_seen:
-            warnings.append(
-                f"field {path} observed as null in "
-                f"{sum(1 for value in values if value is None)}/{len(values)} samples"
-            )
-    dicts = [
-        cast(Mapping[str, Any], value) for value in values if isinstance(value, dict)
-    ]
-    if dicts:
-        nested, nested_warnings = _infer_object_properties(dicts, path=path)
-        fragment["properties"] = nested["properties"]
-        warnings.extend(nested_warnings)
-    lists = [cast(list[Any], value) for value in values if isinstance(value, list)]
-    items = [item for value in lists for item in value]
-    if items:
-        item_schema, item_warnings = _infer_values(items, f"{path}[]")
-        fragment["items"] = item_schema
-        warnings.extend(item_warnings)
-    return fragment, warnings
-
-
-def _json_type(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, int) and not isinstance(value, bool):
-        return "integer"
-    if isinstance(value, float):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return "string"
-
-
 def _payload_size_bytes(payload: Mapping[str, Any] | None) -> int:
     if payload is None:
         return 0
     return len(
-        json.dumps(
-            payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True
-        ).encode()
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode()
     )
 
 
@@ -220,9 +102,7 @@ def _assert_closed_schema_node(node: Any) -> None:
         for key in ("$ref", "$dynamicRef", "$recursiveRef"):
             value = mapping.get(key)
             if isinstance(value, str) and not value.strip().startswith("#"):
-                raise ValueError(
-                    f"json_schema {key} must be an in-document fragment, not {value}"
-                )
+                raise ValueError(f"json_schema {key} must be an in-document fragment, not {value}")
         identity = mapping.get("$id")
         if isinstance(identity, str) and _is_remote_schema_uri(identity):
             raise ValueError(f"json_schema $id must not use a remote URI: {identity}")
@@ -253,12 +133,8 @@ def closed_draft202012_validator(
 class IngestContractValidator:
     """Validate normalized ingest records against a registered JSON Schema.
 
-    AUDIT_ONLY never rejects Pull batches. ENFORCE (always for Push, and for
-    Pull only when the source mode and the global gate are both on) rejects.
+    Every source rejects batches that violate its registered contract.
     """
-
-    def __init__(self) -> None:
-        self.audit_issue_counts: dict[tuple[str, str, str], int] = {}
 
     def validate_records(
         self,
@@ -268,15 +144,9 @@ class IngestContractValidator:
         payload_contract_version: str,
         contract: RegisteredContract | None,
         payload_max_bytes: int,
-        pull_enforcement_gate: bool = False,
         schema_fingerprint_header: str | None = None,
         accepted_statuses: Sequence[str] = ("ACTIVE",),
     ) -> ContractValidationResult:
-        enforce = _should_enforce(
-            source.transport_mode,
-            source.contract_validation_mode,
-            pull_enforcement_gate,
-        )
         issues: list[ContractIssue] = []
         fingerprint = contract.schema_fingerprint if contract is not None else None
         allowed_statuses = frozenset(accepted_statuses)
@@ -317,7 +187,7 @@ class IngestContractValidator:
         if contract is not None and contract.status in allowed_statuses:
             try:
                 validator = closed_draft202012_validator(contract.json_schema)
-            except (SchemaError, ValueError, Unresolvable):
+            except SchemaError, ValueError, Unresolvable:
                 issues.append(
                     ContractIssue(
                         "validator_unavailable",
@@ -367,42 +237,7 @@ class IngestContractValidator:
                 fingerprint,
             )
 
-        status: Literal["ok", "audit", "rejected"] = "rejected" if enforce else "audit"
-        if not enforce:
-            LOGGER.warning(
-                json.dumps(
-                    {
-                        "event": "ingest_contract_audit",
-                        "source_application_id": source.source_application_id,
-                        "object_type": source.object_type,
-                        "transport_mode": source.transport_mode,
-                        "payload_contract_version": payload_contract_version,
-                        "issue_count": len(issues),
-                        "codes": [issue.code for issue in issues],
-                    },
-                    separators=(",", ":"),
-                )
-            )
-            self._record_audit_metrics(source, issues)
-        result = ContractValidationResult(
-            status,
-            tuple(issues),
-            payload_contract_version,
-            fingerprint,
-        )
-        if result.rejected:
-            raise ContractEnforcedError(
-                "ingest contract validation failed under ENFORCE",
-                result.issues,
-            )
-        return result
-
-    def _record_audit_metrics(
-        self, source: IngestSourceConfig, issues: Sequence[ContractIssue]
-    ) -> None:
-        for issue in issues:
-            key = (source.source_application_id, source.object_type, issue.code)
-            self.audit_issue_counts[key] = self.audit_issue_counts.get(key, 0) + 1
+        raise ContractEnforcedError("ingest contract validation failed", issues)
 
 
 def _safe_schema_issue(error: Any, object_id: str) -> ContractIssue:
@@ -435,7 +270,7 @@ def replay_payloads_against_schema(
     """
     try:
         validator = closed_draft202012_validator(json_schema)
-    except (SchemaError, ValueError, Unresolvable):
+    except SchemaError, ValueError, Unresolvable:
         return (
             ContractIssue(
                 "validator_unavailable",
@@ -447,9 +282,7 @@ def replay_payloads_against_schema(
         if record.operation == "delete" or record.payload is None:
             continue
         try:
-            schema_errors = list(
-                cast(Any, validator).iter_errors(dict(record.payload))
-            )
+            schema_errors = list(cast(Any, validator).iter_errors(dict(record.payload)))
         except Exception:  # noqa: BLE001 - referencing/runtime validator faults
             issues.append(
                 ContractIssue(
@@ -464,16 +297,6 @@ def replay_payloads_against_schema(
     return tuple(issues)
 
 
-def _should_enforce(
-    transport_mode: TransportMode,
-    source_mode: str,
-    pull_enforcement_gate: bool,
-) -> bool:
-    if transport_mode == "PUSH_AGENT":
-        return True
-    return source_mode == "ENFORCE" and pull_enforcement_gate
-
-
 async def load_active_contract(
     session: AsyncSession,
     *,
@@ -484,9 +307,7 @@ async def load_active_contract(
 ) -> RegisteredContract | None:
     allowed = tuple(statuses) or ("ACTIVE",)
     unknown = [
-        status
-        for status in allowed
-        if status not in {"ACTIVE", "DEPRECATED", "DRAFT", "REJECTED"}
+        status for status in allowed if status not in {"ACTIVE", "DEPRECATED", "DRAFT", "REJECTED"}
     ]
     if unknown:
         raise ValueError(f"unsupported ingest contract status filter: {unknown}")

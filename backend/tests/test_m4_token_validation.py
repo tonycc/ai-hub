@@ -32,7 +32,6 @@ def _verified(*, issuer: str, audience: str, application_id: str | None) -> Veri
         scopes=frozenset({"ai_hub.identity", "platform.application.read"}),
         actor_type="service",
         application_id=application_id,
-        authorization_version=1,
         preferred_username=None,
         display_name=None,
         email=None,

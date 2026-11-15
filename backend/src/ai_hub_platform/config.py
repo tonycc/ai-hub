@@ -21,7 +21,6 @@ _PLACEHOLDER_MARKERS = (
     "replace-me",
 )
 _STRICT_ENVIRONMENTS = {"integration", "uat", "production"}
-_DEFAULT_PORTAL_LOGOUT_REDIRECT_URI = "http://platform.localhost:8088/"
 _PRIVATE_IPV4_NETWORKS = tuple(
     IPv4Network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
@@ -185,8 +184,7 @@ def _normalize_origin(value: str, *, field_name: str, strict: bool) -> str:
         if strict and len(labels) < 2:
             raise ValueError(f"{field_name} must use a complete DNS name") from None
         if len(hostname) > 253 or any(
-            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) is None
-            for label in labels
+            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) is None for label in labels
         ):
             raise ValueError(f"{field_name} contains an invalid DNS name") from None
     else:
@@ -277,14 +275,11 @@ class Settings(_PlatformSettings):
     oidc_audience: str = "ai-hub-platform"
     oidc_jwks_cache_ttl_seconds: int = 300
     oidc_jwks_stale_ttl_seconds: int = 3600
-    authorization_cache_ttl_seconds: int = 60
     portal_oidc_issuer: str = "http://localhost:9000/application/o/ai-hub-portal/"
     portal_oidc_audience: str = "ai-hub-portal"
     portal_oidc_client_id: str = "ai-hub-portal"
     portal_oidc_client_secret: SecretStr = SecretStr("local-only-portal-oidc-client-secret")
-    portal_oidc_redirect_uri: str = "http://platform.localhost:8088/auth/callback"
-    portal_oidc_logout_redirect_uri: str = _DEFAULT_PORTAL_LOGOUT_REDIRECT_URI
-    platform_origins: str = ""
+    platform_origins: str = "http://platform.localhost:8088"
     platform_default_origin: str = ""
     portal_oidc_redirect_uris: str = ""
     portal_oidc_logout_redirect_uris: str = ""
@@ -300,29 +295,15 @@ class Settings(_PlatformSettings):
     public_asset_root: str = "/workspace/public-assets"
     public_platform_base_url: str = "http://platform.localhost:8088"
     public_identity_base_url: str = "http://auth.localhost:8088"
-    # The neutral reference app is a local/CI conformance fixture. Production
-    # overlays disable it explicitly so it is not exposed as a business app.
-    reference_application_enabled: bool = True
-    sandbox_application_id: str = "standalone-example"
-    sandbox_user_subject: str = "ai-hub-demo-user"
-    # Public entry points of the reference standalone application. Used when
-    # the bootstrap reconciliation needs to create the production environment
-    # row, so the portal never points at the identity service.
-    standalone_portal_url: str = "http://app.localhost:8088/"
-    standalone_api_base_url: str = "http://app.localhost:8088"
-    standalone_health_url: str = "http://app.localhost:8088/health"
-    standalone_oidc_redirect_uri: str = "http://app.localhost:8088/auth/callback"
     monitor_token: SecretStr | None = None
     production_targets_path: str = "deploy/operations/production-targets.json"
     # Portal ingest ops actions read/write platform_raw and pull export APIs.
     raw_database_url: str = (
-        "postgresql+psycopg://ai_hub_raw:local-only-raw-password@"
-        "localhost:5433/platform_db"
+        "postgresql+psycopg://ai_hub_raw:local-only-raw-password@localhost:5433/platform_db"
     )
     oidc_client_id: str = "ai-hub-platform"
     oidc_client_secret: SecretStr = SecretStr("local-only-oidc-client-secret")
     data_ingest_push_enabled: bool = False
-    ingest_pull_contract_enforcement_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -337,11 +318,6 @@ class Settings(_PlatformSettings):
         _validate_oidc_issuer(
             self.portal_oidc_issuer,
             field_name="portal_oidc_issuer",
-            strict=strict,
-        )
-        _validate_redirect_uri(
-            self.portal_oidc_redirect_uri,
-            field_name="portal_oidc_redirect_uri",
             strict=strict,
         )
         self._portal_origin_configuration(strict=strict)
@@ -369,8 +345,6 @@ class Settings(_PlatformSettings):
             raise ValueError(
                 "oidc_jwks_stale_ttl_seconds must not be shorter than the fresh cache TTL"
             )
-        if not 1 <= self.authorization_cache_ttl_seconds <= 300:
-            raise ValueError("authorization_cache_ttl_seconds must be between 1 and 300")
         if not 60 <= self.portal_session_ttl_seconds <= 3600:
             raise ValueError("portal_session_ttl_seconds must be between 60 and 3600")
         if not 60 <= self.portal_login_ttl_seconds <= 600:
@@ -386,8 +360,7 @@ class Settings(_PlatformSettings):
         minimum_overlap = 300 if strict else 1
         if not minimum_overlap <= self.credential_rotation_overlap_seconds <= 3600:
             raise ValueError(
-                "credential_rotation_overlap_seconds must be between "
-                f"{minimum_overlap} and 3600"
+                f"credential_rotation_overlap_seconds must be between {minimum_overlap} and 3600"
             )
         _validate_redirect_uri(
             self.public_platform_base_url,
@@ -399,30 +372,6 @@ class Settings(_PlatformSettings):
             field_name="public_identity_base_url",
             strict=strict,
         )
-        if self.reference_application_enabled:
-            _validate_application_id(self.sandbox_application_id)
-            _validate_redirect_uri(
-                self.standalone_portal_url,
-                field_name="standalone_portal_url",
-                strict=strict,
-            )
-            _validate_redirect_uri(
-                self.standalone_api_base_url,
-                field_name="standalone_api_base_url",
-                strict=strict,
-            )
-            _validate_redirect_uri(
-                self.standalone_health_url,
-                field_name="standalone_health_url",
-                strict=strict,
-            )
-            _validate_redirect_uri(
-                self.standalone_oidc_redirect_uri,
-                field_name="standalone_oidc_redirect_uri",
-                strict=strict,
-            )
-            if not self.sandbox_user_subject.strip():
-                raise ValueError("sandbox_user_subject cannot be empty")
         if strict and self.monitor_token is not None:
             if _has_placeholder_secret(self.monitor_token.get_secret_value()):
                 raise ValueError("monitor_token cannot use a placeholder outside local/test")
@@ -440,14 +389,10 @@ class Settings(_PlatformSettings):
         return self
 
     def portal_allowed_origins(self) -> tuple[str, ...]:
-        return self._portal_origin_configuration(
-            strict=_is_strict_environment(self.environment)
-        )[0]
+        return self._portal_origin_configuration(strict=_is_strict_environment(self.environment))[0]
 
     def portal_default_origin_value(self) -> str:
-        return self._portal_origin_configuration(
-            strict=_is_strict_environment(self.environment)
-        )[1]
+        return self._portal_origin_configuration(strict=_is_strict_environment(self.environment))[1]
 
     def portal_redirect_uri_for_origin(self, origin: str) -> str:
         origins, _, redirects, _ = self._portal_origin_configuration(
@@ -472,25 +417,6 @@ class Settings(_PlatformSettings):
         *,
         strict: bool,
     ) -> tuple[tuple[str, ...], str, tuple[str, ...], tuple[str, ...]]:
-        if not self.platform_origins.strip():
-            origin = _url_origin(
-                self.portal_oidc_redirect_uri,
-                field_name="portal_oidc_redirect_uri",
-                strict=strict,
-            )
-            logout_uri = self._legacy_logout_uri(origin=origin, strict=strict)
-            logout_origin = _url_origin(
-                logout_uri, field_name="portal_oidc_logout_redirect_uri", strict=strict
-            )
-            if logout_origin != origin:
-                raise ValueError("portal OIDC redirect and logout URI Origins must match")
-            return (
-                (origin,),
-                origin,
-                (self.portal_oidc_redirect_uri,),
-                (logout_uri,),
-            )
-
         origins = _parse_origin_csv(
             self.platform_origins,
             field_name="platform_origins",
@@ -521,29 +447,7 @@ class Settings(_PlatformSettings):
             default_path="/",
             strict=strict,
         )
-        legacy_redirect_origin = _url_origin(
-            self.portal_oidc_redirect_uri,
-            field_name="portal_oidc_redirect_uri",
-            strict=strict,
-        )
-        legacy_logout_uri = self._legacy_logout_uri(origin=origins[0], strict=strict)
-        legacy_logout_origin = _url_origin(
-            legacy_logout_uri, field_name="portal_oidc_logout_redirect_uri", strict=strict
-        )
-        if (
-            legacy_redirect_origin not in origins
-            or redirects[origins.index(legacy_redirect_origin)] != self.portal_oidc_redirect_uri
-            or legacy_logout_origin not in origins
-            or logout_uris[origins.index(legacy_logout_origin)]
-            != legacy_logout_uri
-        ):
-            raise ValueError("multi-Origin portal settings conflict with legacy portal OIDC URIs")
         return origins, default_origin, redirects, logout_uris
-
-    def _legacy_logout_uri(self, *, origin: str, strict: bool) -> str:
-        if strict and self.portal_oidc_logout_redirect_uri == _DEFAULT_PORTAL_LOGOUT_REDIRECT_URI:
-            return f"{origin}/"
-        return self.portal_oidc_logout_redirect_uri
 
     @staticmethod
     def _portal_uri_list(
@@ -614,8 +518,7 @@ class RawMigrationSettings(_PlatformSettings):
 
 class RawWorkerSettings(_PlatformSettings):
     raw_database_url: str = (
-        "postgresql+psycopg://ai_hub_raw:local-only-raw-password@"
-        "localhost:5433/platform_db"
+        "postgresql+psycopg://ai_hub_raw:local-only-raw-password@localhost:5433/platform_db"
     )
     ingest_sources_path: str = "deploy/operations/ingest-sources.json"
     tick_interval_seconds: float = 1.0
@@ -629,7 +532,6 @@ class RawWorkerSettings(_PlatformSettings):
     # the platform migrator role. One-shot sync/reconcile CLIs use raw_database_url.
     seed_database_url: str | None = None
     data_ingest_push_enabled: bool = False
-    ingest_pull_contract_enforcement_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_configuration(self) -> Self:
@@ -648,20 +550,14 @@ class RawWorkerSettings(_PlatformSettings):
         if not 1 <= self.max_concurrent_sources <= 64:
             raise ValueError("max_concurrent_sources must be between 1 and 64")
         if not 1 <= self.max_concurrent_per_application <= 16:
-            raise ValueError(
-                "max_concurrent_per_application must be between 1 and 16"
-            )
+            raise ValueError("max_concurrent_per_application must be between 1 and 16")
         if self.max_concurrent_per_application > self.max_concurrent_sources:
-            raise ValueError(
-                "max_concurrent_per_application cannot exceed max_concurrent_sources"
-            )
+            raise ValueError("max_concurrent_per_application cannot exceed max_concurrent_sources")
         _validate_oidc_issuer(self.oidc_issuer, strict=strict)
         if not self.oidc_client_id.strip():
             raise ValueError("oidc_client_id cannot be empty")
         if strict and _has_placeholder_secret(self.oidc_client_secret.get_secret_value()):
-            raise ValueError(
-                "oidc_client_secret cannot use a placeholder outside local/test"
-            )
+            raise ValueError("oidc_client_secret cannot use a placeholder outside local/test")
         if self.seed_database_url is not None:
             _validate_database_url(
                 self.seed_database_url,

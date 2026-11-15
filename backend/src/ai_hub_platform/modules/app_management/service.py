@@ -24,22 +24,14 @@ class ApplicationManagementValidationError(ValueError):
     pass
 
 
-def _format_owner_display(display_name: str, email: str | None) -> str:
-    # Phone-number accounts have no email; appending the brackets
-    # unconditionally would persist a literal `<None>` snapshot.
-    if email:
-        return f"{display_name} <{email}>"
-    return display_name
-
-
 class ApplicationManagementService:
-    async def _active_business_user(
+    async def _active_user(
         self,
         session: AsyncSession,
         *,
         user_id: str | UUID,
     ) -> tuple[str, str | None] | None:
-        """Return an active user only when they hold no AI Hub platform role."""
+        """Return an active identity regardless of platform roles."""
         row = (
             (
                 await session.execute(
@@ -49,11 +41,6 @@ class ApplicationManagementService:
                         FROM platform_core.identity_user AS u
                         WHERE u.user_id = :user_id
                           AND u.status = 'ACTIVE'
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM platform_core.platform_role_assignment AS pra
-                              WHERE pra.user_id = u.user_id
-                          )
                         """
                     ),
                     {"user_id": user_id},
@@ -73,12 +60,7 @@ class ApplicationManagementService:
         *,
         query: str | None,
     ) -> list[dict[str, Any]]:
-        """Return active employees eligible for business application roles.
-
-        Business users must have an active directory identity and no AI Hub
-        platform-role assignment. Platform accounts remain available for
-        platform administration but cannot own or bootstrap business apps.
-        """
+        """Return active identities; platform roles do not confer business permissions."""
         rows = (
             (
                 await session.execute(
@@ -91,11 +73,6 @@ class ApplicationManagementService:
                     JOIN platform_core.organization AS o
                       ON o.organization_id = u.primary_organization_id
                     WHERE u.status = 'ACTIVE'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM platform_core.platform_role_assignment AS pra
-                          WHERE pra.user_id = u.user_id
-                      )
                       AND (
                           CAST(:query AS varchar) IS NULL
                           OR u.subject ILIKE '%' || :query || '%'
@@ -131,7 +108,7 @@ class ApplicationManagementService:
                            a.owner_id::text AS owner_id,
                            COALESCE(
                                u.display_name || COALESCE(' <' || u.email || '>', ''),
-                               a.owner
+                               ''
                            ) AS owner,
                            a.status,
                            a.capabilities, a.created_at, a.updated_at,
@@ -153,7 +130,6 @@ class ApplicationManagementService:
                       AND (CAST(:query AS varchar) IS NULL
                            OR a.application_id ILIKE '%' || :query || '%'
                            OR a.name ILIKE '%' || :query || '%'
-                           OR a.owner ILIKE '%' || :query || '%'
                            OR u.display_name ILIKE '%' || :query || '%'
                            OR u.email ILIKE '%' || :query || '%')
                       AND (CAST(:status AS varchar) IS NULL OR a.status = :status)
@@ -194,7 +170,7 @@ class ApplicationManagementService:
                            a.owner_id::text AS owner_id,
                            COALESCE(
                                u.display_name || COALESCE(' <' || u.email || '>', ''),
-                               a.owner
+                               ''
                            ) AS owner,
                            a.created_by_user_id::text AS created_by_user_id,
                            CASE
@@ -353,21 +329,18 @@ class ApplicationManagementService:
         ):
             raise ApplicationManagementConflictError("Application identifier already exists")
 
-        owner = await self._active_business_user(session, user_id=owner_id)
+        owner = await self._active_user(session, user_id=owner_id)
         if owner is None:
-            raise ApplicationManagementValidationError(
-                "Selected owner is not an active business user"
-            )
-        owner_display_name, owner_email = owner
+            raise ApplicationManagementValidationError("Selected owner is not an active user")
 
         await session.execute(
             sa.text(
                 """
                 INSERT INTO platform_core.application
-                    (application_id, name, description, owner, owner_id,
+                    (application_id, name, description, owner_id,
                      created_by_user_id, status, capabilities, service_subject)
                 VALUES
-                    (:application_id, :name, :description, :owner, :owner_id,
+                    (:application_id, :name, :description, :owner_id,
                      :created_by_user_id, 'DRAFT', :capabilities, NULL)
                 """
             ),
@@ -375,10 +348,6 @@ class ApplicationManagementService:
                 "application_id": application_id,
                 "name": name,
                 "description": description,
-                # The legacy display string is kept populated so old images
-                # keep working during the expand window; the service layer now
-                # renders the owner from the owner_id join.
-                "owner": _format_owner_display(owner_display_name, owner_email),
                 "owner_id": owner_id,
                 "created_by_user_id": created_by_user_id,
                 "capabilities": sorted(set(capabilities)),
@@ -398,22 +367,15 @@ class ApplicationManagementService:
         capabilities: list[str],
     ) -> dict[str, Any]:
         if owner_id is not None:
-            selected_owner = await self._active_business_user(session, user_id=owner_id)
+            selected_owner = await self._active_user(session, user_id=owner_id)
             if selected_owner is None:
-                raise ApplicationManagementValidationError(
-                    "Selected owner is not an active business user"
-                )
-            owner = _format_owner_display(*selected_owner)
-        else:
-            # 保留原负责人
-            owner = None
+                raise ApplicationManagementValidationError("Selected owner is not an active user")
 
         updated = await session.scalar(
             sa.text(
                 """
                 UPDATE platform_core.application
                 SET name = :name, description = :description,
-                    owner = COALESCE(:owner, owner),
                     owner_id = COALESCE(:owner_id, owner_id),
                     status = :status, capabilities = :capabilities,
                     updated_at = CURRENT_TIMESTAMP
@@ -425,7 +387,6 @@ class ApplicationManagementService:
                 "application_id": application_id,
                 "name": name,
                 "description": description,
-                "owner": owner,
                 "owner_id": owner_id,
                 "status": status,
                 "capabilities": sorted(set(capabilities)),
@@ -448,48 +409,59 @@ class ApplicationManagementService:
         redirect_uris: list[str],
         version: str,
         status: str,
-        initial_admin_user_id: str | UUID,
+        initial_admin_user_id: str | UUID | None = None,
+        clear_pending_bootstrap: bool = False,
     ) -> dict[str, Any]:
         await self._lock_application(session, application_id)
-        initial_admin_user_id = UUID(str(initial_admin_user_id))
-        existing_bootstrap = (
-            (
-                await session.execute(
-                    sa.text(
-                        """
-                        SELECT initial_admin_user_id, status
-                        FROM platform_core.application_admin_bootstrap
-                        WHERE application_id = :application_id
-                          AND environment = :environment
-                        FOR UPDATE
-                        """
-                    ),
-                    {
-                        "application_id": application_id,
-                        "environment": environment,
-                    },
+        if initial_admin_user_id is not None:
+            initial_admin_user_id = UUID(str(initial_admin_user_id))
+            existing_bootstrap = (
+                (
+                    await session.execute(
+                        sa.text(
+                            """
+                            SELECT initial_admin_user_id, status
+                            FROM platform_core.application_admin_bootstrap
+                            WHERE application_id = :application_id
+                              AND environment = :environment
+                            FOR UPDATE
+                            """
+                        ),
+                        {
+                            "application_id": application_id,
+                            "environment": environment,
+                        },
+                    )
                 )
+                .mappings()
+                .one_or_none()
             )
-            .mappings()
-            .one_or_none()
-        )
-        if (
-            existing_bootstrap is not None
-            and existing_bootstrap["status"] == "CONSUMED"
-        ):
-            if existing_bootstrap["initial_admin_user_id"] != initial_admin_user_id:
-                raise ApplicationManagementValidationError(
-                    "A consumed initial administrator assignment cannot be changed"
+            if existing_bootstrap is not None and existing_bootstrap["status"] == "CONSUMED":
+                if existing_bootstrap["initial_admin_user_id"] != initial_admin_user_id:
+                    raise ApplicationManagementValidationError(
+                        "A consumed initial administrator assignment cannot be changed"
+                    )
+            else:
+                initial_admin = await self._active_user(
+                    session,
+                    user_id=initial_admin_user_id,
                 )
-        else:
-            initial_admin = await self._active_business_user(
-                session,
-                user_id=initial_admin_user_id,
+                if initial_admin is None:
+                    raise ApplicationManagementValidationError(
+                        "Selected initial administrator is not an active user"
+                    )
+
+        if clear_pending_bootstrap:
+            # DELETE serializes with the claimant's bootstrap row lock.
+            # Its status predicate preserves consumed history.
+            await session.execute(
+                sa.text("""
+                DELETE FROM platform_core.application_admin_bootstrap
+                WHERE application_id = :application_id AND environment = :environment
+                  AND status = 'PENDING'
+            """),
+                {"application_id": application_id, "environment": environment},
             )
-            if initial_admin is None:
-                raise ApplicationManagementValidationError(
-                    "Selected initial administrator is not an active business user"
-                )
 
         credential_client_ids = (
             (
@@ -544,25 +516,26 @@ class ApplicationManagementService:
                 "status": status,
             },
         )
-        await session.execute(
-            sa.text(
-                """
-                INSERT INTO platform_core.application_admin_bootstrap
-                    (application_id, environment, initial_admin_user_id)
-                VALUES
-                    (:application_id, :environment, :initial_admin_user_id)
-                ON CONFLICT (application_id, environment) DO UPDATE
-                SET initial_admin_user_id = EXCLUDED.initial_admin_user_id,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE application_admin_bootstrap.status = 'PENDING'
-                """
-            ),
-            {
-                "application_id": application_id,
-                "environment": environment,
-                "initial_admin_user_id": initial_admin_user_id,
-            },
-        )
+        if initial_admin_user_id is not None:
+            await session.execute(
+                sa.text(
+                    """
+                    INSERT INTO platform_core.application_admin_bootstrap
+                        (application_id, environment, initial_admin_user_id)
+                    VALUES
+                        (:application_id, :environment, :initial_admin_user_id)
+                    ON CONFLICT (application_id, environment) DO UPDATE
+                    SET initial_admin_user_id = EXCLUDED.initial_admin_user_id,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE application_admin_bootstrap.status = 'PENDING'
+                    """
+                ),
+                {
+                    "application_id": application_id,
+                    "environment": environment,
+                    "initial_admin_user_id": initial_admin_user_id,
+                },
+            )
         return await self.get_application(session, application_id=application_id)
 
     async def replace_scopes(

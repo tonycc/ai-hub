@@ -25,8 +25,6 @@ export AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS=1
 export AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS=3600
 export STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS=1
 export STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS=3600
-export AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS=1
-export STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS=10
 export AI_HUB_EDGE_PORT="${M1_EDGE_PORT}"
 export AI_HUB_POSTGRES_PORT="${M1_POSTGRES_PORT}"
 export AI_HUB_INTERNAL_API_PORT="${M1_INTERNAL_API_PORT}"
@@ -37,7 +35,7 @@ m1_compose() {
     --project-name "${M1_PROJECT_NAME}" \
     --env-file "${M1_ENV_FILE}" \
     -f "${M1_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 
@@ -221,7 +219,7 @@ m1_login() {
     --output "${m1_session_json}" \
     "${m1_callback_url}"
   jq --exit-status \
-    '.authenticated == true and .subject == "ai-hub-demo-user" and .authorization_version == 1' \
+    '.authenticated == true and .subject == "ai-hub-demo-user"' \
     "${m1_session_json}" >/dev/null
 }
 
@@ -246,6 +244,7 @@ m1_wait_url "${M1_PLATFORM_BASE}/health/ready"
 m1_wait_url "${M1_APP_BASE}/health/live"
 m1_wait_url "${M1_AUTH_BASE}/-/health/ready/"
 m1_wait_url "${M1_AUTH_BASE}/application/o/ai-hub/.well-known/openid-configuration"
+m1_compose exec -T platform-api python - <"${M1_PROJECT_ROOT}/scripts/ci/reference-fixture.py"
 
 for m1_migration in platform-core-migrate platform-raw-migrate standalone-migrate; do
   m1_container_id="$(m1_compose ps -a -q "${m1_migration}")"
@@ -266,20 +265,20 @@ m1_compose exec -T postgres \
 m1_compose exec -T standalone-app python -c \
   "import importlib.util; assert importlib.util.find_spec('ai_hub_platform') is None; assert importlib.util.find_spec('ai_hub_sdk') is not None"
 
-m1_note "verifying service identity, scopes, registration, health, and notifications"
+m1_note "verifying service identity, scopes, registration, health"
 m1_full_service_token="$(m1_service_token \
-  'openid ai_hub.identity platform.application.read platform.application.health.write platform.notification.request')"
+  'openid ai_hub.identity platform.application.read platform.application.health.write')"
 m1_token_header="$(printf '%s' "${m1_full_service_token}" | cut -d. -f1 | tr '_-' '/+' | awk '{ padding = (4 - length($0) % 4) % 4; printf "%s", $0; for (i = 0; i < padding; i++) printf "=" }' | base64 --decode 2>/dev/null)"
 printf '%s' "${m1_token_header}" | jq --exit-status '.alg == "RS256" and (.kid | type == "string")' >/dev/null
 m1_full_service_claims="$(printf '%s' "${m1_full_service_token}" | cut -d. -f2 | tr '_-' '/+' | awk '{ padding = (4 - length($0) % 4) % 4; printf "%s", $0; for (i = 0; i < padding; i++) printf "=" }' | base64 --decode 2>/dev/null)"
 printf '%s' "${m1_full_service_claims}" | jq --exit-status \
   --arg issuer "${M1_ISSUER_AUTH_BASE}/application/o/standalone-example/" \
-  '.iss == $issuer and .aud == "standalone-example" and .actor_type == "service" and .application_id == "standalone-example" and .authorization_version == 1 and (.exp > .iat)' \
+  '.iss == $issuer and .aud == "standalone-example" and .actor_type == "service" and .application_id == "standalone-example" and (.exp > .iat)' \
   >/dev/null
 m1_bad_client_code="$(curl --silent --show-error --max-time 15 \
   --user 'standalone-example:revoked-or-invalid-secret' \
   --data-urlencode 'grant_type=client_credentials' \
-  --data-urlencode 'scope=platform.notification.request' \
+  --data-urlencode 'scope=platform.application.read' \
   --output "${M1_WORK_DIR}/invalid-client.json" \
   --write-out '%{http_code}' \
   "${M1_AUTH_BASE}/application/o/token/")"
@@ -302,43 +301,15 @@ m1_assert_audit m1-application-read \
 m1_assert_audit m1-application-health \
   "action = 'platform.application.health.write' AND result = 'SUCCESS'"
 
-m1_notification_body="${M1_WORK_DIR}/service-notification.json"
-curl --fail --silent --show-error --max-time 15 \
-  --header "Authorization: Bearer ${m1_full_service_token}" \
-  --header 'Content-Type: application/json' \
-  --header 'X-Request-ID: m1-service-notification' \
-  --data '{"recipient_user_id":"10000000-0000-4000-8000-000000000001","subject":"M1 service verification","body":"Observable delivery","idempotency_key":"m1-service-notification-0001","payload":{"gate":"M1"}}' \
-  --output "${m1_notification_body}" \
-  "${M1_PLATFORM_BASE}/platform-api/v1/notifications"
-jq --exit-status \
-  '.status == "DELIVERED" and (.delivery_reference | startswith("test-channel:"))' \
-  "${m1_notification_body}" >/dev/null
-m1_first_notification_id="$(jq --raw-output '.notification_id' "${m1_notification_body}")"
-curl --fail --silent --show-error --max-time 15 \
-  --header "Authorization: Bearer ${m1_full_service_token}" \
-  --header 'X-Request-ID: m1-service-notification-read' \
-  "${M1_PLATFORM_BASE}/platform-api/v1/notifications/${m1_first_notification_id}" \
-  | jq --exit-status --arg id "${m1_first_notification_id}" \
-      '.notification_id == $id and .status == "DELIVERED"' >/dev/null
-m1_assert_audit m1-service-notification-read \
-  "action = 'platform.notification.read' AND result = 'SUCCESS'"
-curl --fail --silent --show-error --max-time 15 \
-  --header "Authorization: Bearer ${m1_full_service_token}" \
-  --header 'Content-Type: application/json' \
-  --data '{"recipient_user_id":"10000000-0000-4000-8000-000000000001","subject":"M1 service verification","body":"Observable delivery","idempotency_key":"m1-service-notification-0001","payload":{"gate":"M1"}}' \
-  "${M1_PLATFORM_BASE}/platform-api/v1/notifications" \
-  | jq --exit-status --arg id "${m1_first_notification_id}" '.notification_id == $id' >/dev/null
-
 m1_limited_service_token="$(m1_service_token 'openid ai_hub.identity')"
 m1_missing_scope_code="$(curl --silent --show-error --max-time 15 \
   --header "Authorization: Bearer ${m1_limited_service_token}" \
   --header 'X-Application-ID: standalone-example' \
   --header 'X-Request-ID: m1-missing-scope' \
   --header 'Content-Type: application/json' \
-  --data '{"recipient_user_id":"10000000-0000-4000-8000-000000000001","subject":"Denied","body":"Denied","idempotency_key":"m1-missing-scope-0001"}' \
   --output "${M1_WORK_DIR}/missing-scope.json" \
   --write-out '%{http_code}' \
-  "${M1_PLATFORM_BASE}/platform-api/v1/notifications")"
+  "${M1_PLATFORM_BASE}/platform-api/v1/applications/standalone-example")"
 m1_expect_code 403 "${m1_missing_scope_code}" "missing service scope"
 jq --exit-status '.error_code == "insufficient_scope" and .request_id == "m1-missing-scope"' \
   "${M1_WORK_DIR}/missing-scope.json" >/dev/null
@@ -352,10 +323,9 @@ m1_revoked_code="$(curl --silent --show-error --max-time 15 \
   --header "Authorization: Bearer ${m1_full_service_token}" \
   --header 'X-Request-ID: m1-revoked-service' \
   --header 'Content-Type: application/json' \
-  --data '{"recipient_user_id":"10000000-0000-4000-8000-000000000001","subject":"Denied","body":"Denied","idempotency_key":"m1-revoked-service-0001"}' \
   --output "${M1_WORK_DIR}/revoked-service.json" \
   --write-out '%{http_code}' \
-  "${M1_PLATFORM_BASE}/platform-api/v1/notifications")"
+  "${M1_PLATFORM_BASE}/platform-api/v1/applications/standalone-example")"
 m1_psql -c \
   "UPDATE platform_core.application_credential SET status = 'ACTIVE', revoked_at = NULL WHERE application_id = 'standalone-example' AND environment = 'local';" \
   >/dev/null
@@ -382,6 +352,26 @@ m1_wait_url "${M1_AUTH_BASE}/application/o/ai-hub/.well-known/openid-configurati
 
 m1_note "verifying authorization-code login, user mapping, and object-level rules"
 m1_login
+# Exercise the public profile API explicitly. Business record operations no
+# longer depend on a hosted authorization/profile round-trip.
+M1_USER_TOKEN="$(python3 - "${M1_COOKIE_JAR}" <<'PYTOKEN'
+import base64, json, sys
+from pathlib import Path
+for line in Path(sys.argv[1]).read_text().splitlines():
+    fields = line.split("\t")
+    if len(fields) == 7 and fields[5] == "standalone_session":
+        print(json.loads(base64.b64decode(fields[6].split(".")[0]))["access_token"])
+        break
+else:
+    raise SystemExit("standalone session cookie missing")
+PYTOKEN
+)"
+curl --fail --silent --show-error --max-time 15 \
+  --header "Authorization: Bearer ${M1_USER_TOKEN}" \
+  --header 'X-Request-ID: m1-profile-read' \
+  "${M1_PLATFORM_BASE}/platform-api/v1/me" \
+  | jq --exit-status '.subject == "ai-hub-demo-user"' >/dev/null
+unset M1_USER_TOKEN
 curl --fail --silent --show-error --max-time 15 \
   --cookie "${M1_COOKIE_JAR}" \
   --header 'X-Request-ID: m1-record-read' \
@@ -390,8 +380,6 @@ curl --fail --silent --show-error --max-time 15 \
   | jq --exit-status \
       '.record_id == "30000000-0000-4000-8000-000000000001" and .owner_subject == "ai-hub-demo-user"' \
       >/dev/null
-m1_assert_audit m1-record-read \
-  "action = 'platform.permissions.read' AND result = 'SUCCESS'"
 
 m1_object_denial_code="$(curl --silent --show-error --max-time 15 \
   --cookie "${M1_COOKIE_JAR}" \
@@ -411,22 +399,8 @@ curl --fail --silent --show-error --max-time 15 \
   --data '{"name":"M1 verified record"}' \
   "${M1_APP_BASE}/api/v1/records/30000000-0000-4000-8000-000000000001" \
   | jq --exit-status '.name == "M1 verified record"' >/dev/null
-m1_assert_audit m1-record-write \
-  "action = 'platform.authorization.decide' AND result = 'SUCCESS'"
 
-curl --fail --silent --show-error --max-time 15 \
-  --cookie "${M1_COOKIE_JAR}" \
-  --header 'X-Request-ID: m1-user-notification' \
-  --header 'Idempotency-Key: m1-user-notification-0001' \
-  --request POST \
-  "${M1_APP_BASE}/api/v1/test-notifications" \
-  | jq --exit-status \
-      '.status == "DELIVERED" and (.delivery_reference | startswith("test-channel:"))' \
-      >/dev/null
-m1_assert_audit m1-user-notification \
-  "action = 'platform.notification.request' AND result = 'SUCCESS'"
-
-m1_note "verifying bounded stale reads and high-risk failure closure"
+m1_note "verifying application-owned authorization during platform outage"
 sleep 2
 m1_compose stop platform-api >/dev/null
 curl --fail --silent --show-error --max-time 15 \
@@ -439,13 +413,13 @@ m1_high_risk_code="$(curl --silent --show-error --max-time 15 \
   --header 'X-Request-ID: m1-high-risk-fail-closed' \
   --header 'Content-Type: application/json' \
   --request PUT \
-  --data '{"name":"must not be written"}' \
+  --data '{"name":"local authorization remains available"}' \
   --output "${M1_WORK_DIR}/high-risk.json" \
   --write-out '%{http_code}' \
   "${M1_APP_BASE}/api/v1/records/30000000-0000-4000-8000-000000000001")"
-m1_expect_code 503 "${m1_high_risk_code}" "high-risk authorization outage"
+m1_expect_code 200 "${m1_high_risk_code}" "local authorization during platform outage"
 jq --exit-status \
-  '.error_code == "authorization_unavailable" and .request_id == "m1-high-risk-fail-closed"' \
+  '.name == "local authorization remains available"' \
   "${M1_WORK_DIR}/high-risk.json" >/dev/null
 m1_compose start platform-api >/dev/null
 m1_wait_url "${M1_PLATFORM_BASE}/health/ready"
@@ -465,17 +439,10 @@ grep -F '"event":"security_decision"' <<<"${m1_standalone_logs}" >/dev/null || \
   m1_fail "standalone security decisions are not observable"
 grep -F '"request_id":"m1-object-denied"' <<<"${m1_standalone_logs}" >/dev/null || \
   m1_fail "object denial request_id is missing from standalone logs"
-m1_platform_logs="$(m1_compose logs --no-color platform-api)"
-grep -F '"request_id":"m1-user-notification"' <<<"${m1_platform_logs}" >/dev/null || \
-  m1_fail "request context was not propagated into platform logs"
 m1_psql -Atc \
   "SELECT action || ':' || result FROM platform_core.audit_event ORDER BY occurred_at;" \
   >"${M1_WORK_DIR}/audit-actions.txt"
 grep -F 'platform.me.read:SUCCESS' "${M1_WORK_DIR}/audit-actions.txt" >/dev/null || \
   m1_fail "current-user audit is missing"
-grep -F 'platform.permissions.read:SUCCESS' "${M1_WORK_DIR}/audit-actions.txt" >/dev/null || \
-  m1_fail "permission audit is missing"
-grep -F 'platform.notification.request:SUCCESS' "${M1_WORK_DIR}/audit-actions.txt" >/dev/null || \
-  m1_fail "notification audit is missing"
 
 m1_note "all M1 runtime scenarios passed"

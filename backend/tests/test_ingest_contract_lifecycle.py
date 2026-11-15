@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -74,7 +73,6 @@ async def test_activate_rejects_non_draft_contract(
         json_schema={"type": "object"},
         schema_fingerprint="a" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="ACTIVE",
         reviewed_by="owner",
@@ -141,7 +139,6 @@ async def test_create_certification_rejects_empty_evidence() -> None:
         json_schema={"type": "object"},
         schema_fingerprint="a" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="ACTIVE",
         reviewed_by="owner",
@@ -200,7 +197,6 @@ async def test_activate_rejects_in_flight_push_generation(
         json_schema={"type": "object"},
         schema_fingerprint="b" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -250,9 +246,7 @@ def test_approval_update_keeps_distinct_actor_in_sql() -> None:
     assert "lock_ingest_source" in source
     assert "for_update=True" in source
     assert "schema_fingerprint(contract.json_schema)" in source
-    assert source.index("lock_ingest_source") < source.index(
-        "bind_certification_evidence"
-    )
+    assert source.index("lock_ingest_source") < source.index("bind_certification_evidence")
     assert "FOR UPDATE" in inspect.getsource(IngestContractStore.get_certification)
 
 
@@ -264,10 +258,7 @@ def test_portal_exposes_contract_lifecycle_routes() -> None:
     assert "/portal-api/v1/ingest/contracts/activate" in paths
     assert "/portal-api/v1/ingest/contracts/reject" in paths
     assert "/portal-api/v1/ingest/contracts/certifications" in paths
-    assert (
-        "/portal-api/v1/ingest/contracts/certifications/{certification_id}/approve"
-        in paths
-    )
+    assert "/portal-api/v1/ingest/contracts/certifications/{certification_id}/approve" in paths
 
 
 @pytest.mark.asyncio
@@ -280,7 +271,6 @@ async def test_create_certification_rejects_self_reported_passed_without_window(
         json_schema={"type": "object"},
         schema_fingerprint="a" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="ACTIVE",
         reviewed_by="owner",
@@ -316,7 +306,6 @@ async def test_create_certification_rejects_unexempted_violations() -> None:
         json_schema={"type": "object"},
         schema_fingerprint="a" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -361,7 +350,6 @@ async def test_activate_rejects_stale_fingerprint(
         json_schema={"type": "object"},
         schema_fingerprint="b" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -404,7 +392,6 @@ async def test_activate_requires_cert_when_source_is_enforced(
         json_schema={"type": "object"},
         schema_fingerprint="b" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -565,7 +552,6 @@ async def test_create_certification_rejects_unbound_observation_window(
         json_schema={"type": "object"},
         schema_fingerprint=schema_fingerprint({"type": "object"}),
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -643,45 +629,18 @@ async def test_create_certification_rejects_unbound_observation_window(
     assert "expires_at" in inspect.getsource(store_mod)
 
 
-def test_infer_draft_writes_inference_evidence_and_origin() -> None:
-    from ai_hub_platform.api import ingest_contracts as api
-
-    save = inspect.getsource(IngestContractStore.save_draft)
-    infer = inspect.getsource(IngestContractStore.infer_draft_from_raw)
-    route = inspect.getsource(api.infer_ingest_contract_draft)
-    assert "inference_evidence_ref" in save
-    assert "infer_draft_schema" in infer
-    assert "INFERRED_FROM_RAW" in infer
-    assert "raw_current_state" in infer
-    assert "payload_contract_version" in infer
-    assert "object_ids_sha256" in infer
-    assert "content_sha256" in infer
-    assert "samples" in infer
-    assert "cutoff" in infer
-    assert "sample_batch_ids" in infer
-    assert "IN :object_ids" in infer
-    assert "DISTINCT ON (record.object_id)" in infer
-    assert "COALESCE(batch.purpose, 'production') = 'production'" in infer
-    assert "if object_id in samples_by_object" in infer
-    from ai_hub_platform.modules.ingest import contract_store as store_mod
-
-    assert "assert_closed_json_schema" in inspect.getsource(store_mod)
-    assert "unpack_data_ingest_check_evidence" in inspect.getsource(store_mod)
-    assert "infer_draft_from_raw" in route
-
-
 def test_ingest_view_shows_and_confirms_certification_evidence() -> None:
     from pathlib import Path
 
-    source = (
-        Path(__file__).resolve().parents[2] / "src/views/IngestView.vue"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "src/views/IngestView.vue").read_text(
+        encoding="utf-8"
+    )
     assert "ElMessageBox.confirm" in source
     assert "observation_batch_from" in source
     assert "full_regression_evidence_ref" in source
     assert "schema_fingerprint" in source
-    assert "从 Raw 推导草稿" in source
-    assert "ingestInferContract" in source
+    assert "从 Raw 推导草稿" not in source
+    assert "ingestInferContract" not in source
     assert "canCertify" in source
     assert "确认激活契约" in source
     assert "将替换当前 ACTIVE 版本" in source
@@ -952,105 +911,6 @@ async def test_bind_certification_requires_data_ingest_profile_and_kind() -> Non
         )
 
 
-@pytest.mark.asyncio
-async def test_infer_draft_from_raw_freezes_versioned_samples(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = IngestContractStore()
-    captured: dict[str, object] = {}
-    batch_id = uuid4()
-    current_batch_id = uuid4()
-
-    class _Sample:
-        def __init__(
-            self,
-            object_id: str,
-            payload: dict[str, object],
-            *,
-            batch_id: UUID | None = None,
-            version: int = 1,
-        ) -> None:
-            self.object_id = object_id
-            self.payload = payload
-            self.batch_id = batch_id
-            self.version = version
-            self.updated_at = datetime.now(UTC)
-
-    class _Result:
-        def __init__(self, rows: list[object]) -> None:
-            self._rows = rows
-
-        def all(self) -> list[object]:
-            return self._rows
-
-    class _Session:
-        async def execute(self, statement: object, params: object = None) -> _Result:
-            sql = str(statement)
-            assert isinstance(params, dict)
-            assert params["payload_contract_version"] == "item.v1"
-            if "raw_current_state" in sql:
-                assert "payload_contract_version" in sql
-                return _Result([_Sample("I-1", {"name": "a"})])
-            if "object_ids" in params:
-                assert "I-1" in params["object_ids"]
-                return _Result(
-                    [_Sample("I-1", {"name": "a"}, batch_id=current_batch_id)]
-                )
-            if "raw_change_record" in sql:
-                assert "payload_contract_version" in sql
-                assert "loaded" in sql
-                return _Result([_Sample("I-2", {"name": None}, batch_id=batch_id)])
-            raise AssertionError(sql)
-
-    async def fake_save(*args: object, **kwargs: object) -> IngestContractRow:
-        del args
-        captured.update(kwargs)
-        return IngestContractRow(
-            source_application_id="e10-adapter",
-            object_type="erp.item",
-            contract_version="item.v1",
-            json_schema={"type": "object"},
-            schema_fingerprint="a" * 64,
-            field_classifications={},
-            compatibility_mode="BACKWARD",
-            origin="INFERRED_FROM_RAW",
-            status="DRAFT",
-            reviewed_by=None,
-            reviewed_at=None,
-            updated_at=datetime.now(UTC),
-        )
-
-    monkeypatch.setattr(store, "save_draft", fake_save)
-    await store.infer_draft_from_raw(
-        _Session(),  # type: ignore[arg-type]
-        source_application_id="e10-adapter",
-        object_type="erp.item",
-        contract_version="item.v1",
-    )
-    evidence = json.loads(str(captured["inference_evidence_ref"]))
-    assert evidence["payload_contract_version"] == "item.v1"
-    assert evidence["coverage"]["sample_count"] == 2
-    assert evidence["samples"] == [
-        {
-            "object_id": "I-1",
-            "version": 1,
-            "batch_id": str(current_batch_id),
-            "origin": "current_state",
-        },
-        {
-            "object_id": "I-2",
-            "version": 1,
-            "batch_id": str(batch_id),
-            "origin": "change_record",
-        },
-    ]
-    assert evidence["cutoff"]["sample_limit"] == 200
-    assert evidence["cutoff"]["change_record_max_version"] == 1
-    assert str(current_batch_id) in evidence["cutoff"]["sample_batch_ids"]
-    assert len(evidence["object_ids_sha256"]) == 64
-    assert len(evidence["content_sha256"]) == 64
-
-
 def _runtime_check_evidence(
     *,
     object_type: str,
@@ -1235,12 +1095,8 @@ async def test_bind_certification_rejects_verified_at_before_window_end() -> Non
             if "raw_ingest_batch" in sql and "raw_change_record" not in sql:
                 return _Rows(
                     [
-                        _BatchRow(
-                            batch_from, fingerprint=fingerprint, started_at=window_start
-                        ),
-                        _BatchRow(
-                            batch_to, fingerprint=fingerprint, started_at=window_end
-                        ),
+                        _BatchRow(batch_from, fingerprint=fingerprint, started_at=window_start),
+                        _BatchRow(batch_to, fingerprint=fingerprint, started_at=window_end),
                     ]
                 )
             if "record.object_id" in sql:
@@ -1281,9 +1137,7 @@ def test_path_exemption_does_not_cover_sibling_fields() -> None:
         ]
     }
     wildcard = {"items": [{"code": "schema_mismatch", "object_id": "C-1"}]}
-    name_issue = ContractIssue(
-        "schema_mismatch", "bad name", object_id="C-1", path="customer.name"
-    )
+    name_issue = ContractIssue("schema_mismatch", "bad name", object_id="C-1", path="customer.name")
     email_issue = ContractIssue(
         "schema_mismatch", "bad email", object_id="C-1", path="customer.email"
     )
@@ -1333,7 +1187,6 @@ async def test_final_approval_rebinds_and_rejects_expired_evidence(
             json_schema=schema,
             schema_fingerprint=fingerprint,
             field_classifications={},
-            compatibility_mode="BACKWARD",
             origin="MANUAL",
             status="ACTIVE",
             reviewed_by="owner",
@@ -1423,7 +1276,6 @@ async def test_final_approval_rejects_overwritten_contract_schema(
             json_schema=overwritten,
             schema_fingerprint=schema_fingerprint(overwritten),
             field_classifications={},
-            compatibility_mode="BACKWARD",
             origin="MANUAL",
             status="DRAFT",
             reviewed_by=None,
@@ -1513,7 +1365,6 @@ async def test_final_approval_rejects_rejected_contract_status(
             json_schema=schema,
             schema_fingerprint=fingerprint,
             field_classifications={},
-            compatibility_mode="BACKWARD",
             origin="MANUAL",
             status="REJECTED",
             reviewed_by="owner",
@@ -1572,12 +1423,8 @@ def test_create_certification_stamps_source_transport_mode() -> None:
     assert "schema_fingerprint(contract.json_schema)" in create
     assert create.index("lock_ingest_source") < create.index("get_contract")
     assert create.index("get_contract") < create.index("bind_certification_evidence")
-    assert create.index("lock_ingest_source") < create.index(
-        "bind_certification_evidence"
-    )
-    assert create.index("_registered_transport_mode") < create.index(
-        "bind_certification_evidence"
-    )
+    assert create.index("lock_ingest_source") < create.index("bind_certification_evidence")
+    assert create.index("_registered_transport_mode") < create.index("bind_certification_evidence")
 
 
 @pytest.mark.asyncio
@@ -1592,7 +1439,6 @@ async def test_create_certification_rereads_contract_under_source_lock(
         json_schema={"type": "object"},
         schema_fingerprint=schema_fingerprint({"type": "object"}),
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -1666,7 +1512,6 @@ async def test_create_certification_rejects_draft_fingerprint_drift_under_lock(
         json_schema={"type": "object", "properties": {"sku": {"type": "string"}}},
         schema_fingerprint="a" * 64,
         field_classifications={},
-        compatibility_mode="BACKWARD",
         origin="MANUAL",
         status="DRAFT",
         reviewed_by=None,
@@ -1820,90 +1665,3 @@ async def test_bind_certification_rejects_verified_at_before_finished_at() -> No
             rollback_drill_evidence_ref=str(run_ids[2]),
             transport_mode="PULL_EXPORT",
         )
-
-
-@pytest.mark.asyncio
-async def test_infer_draft_keeps_newest_change_record_version(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = IngestContractStore()
-    captured: dict[str, object] = {}
-    batch_id = uuid4()
-
-    class _Sample:
-        def __init__(
-            self,
-            object_id: str,
-            payload: dict[str, object],
-            *,
-            version: int,
-            batch_id: UUID | None = None,
-        ) -> None:
-            self.object_id = object_id
-            self.payload = payload
-            self.batch_id = batch_id
-            self.version = version
-            self.updated_at = datetime.now(UTC)
-
-    class _Result:
-        def __init__(self, rows: list[object]) -> None:
-            self._rows = rows
-
-        def all(self) -> list[object]:
-            return self._rows
-
-    class _Session:
-        async def execute(self, statement: object, params: object = None) -> _Result:
-            sql = str(statement)
-            assert isinstance(params, dict)
-            if "raw_current_state" in sql:
-                return _Result([])
-            if "object_ids" in params:
-                return _Result(
-                    [_Sample("I-old", {"name": "new"}, version=5, batch_id=batch_id)]
-                )
-            if "raw_change_record" in sql:
-                assert "DISTINCT ON (record.object_id)" in sql
-                assert "COALESCE(batch.purpose, 'production') = 'production'" in sql
-                return _Result(
-                    [
-                        _Sample("I-old", {"name": "new"}, version=5, batch_id=batch_id),
-                        _Sample("I-old", {"name": "old"}, version=1, batch_id=batch_id),
-                    ]
-                )
-            raise AssertionError(sql)
-
-    async def fake_save(*args: object, **kwargs: object) -> IngestContractRow:
-        del args
-        captured.update(kwargs)
-        return IngestContractRow(
-            source_application_id="e10-adapter",
-            object_type="erp.item",
-            contract_version="item.v1",
-            json_schema={"type": "object"},
-            schema_fingerprint="a" * 64,
-            field_classifications={},
-            compatibility_mode="BACKWARD",
-            origin="INFERRED_FROM_RAW",
-            status="DRAFT",
-            reviewed_by=None,
-            reviewed_at=None,
-            updated_at=datetime.now(UTC),
-        )
-
-    monkeypatch.setattr(store, "save_draft", fake_save)
-    await store.infer_draft_from_raw(
-        _Session(),  # type: ignore[arg-type]
-        source_application_id="e10-adapter",
-        object_type="erp.item",
-        contract_version="item.v1",
-    )
-    evidence = json.loads(str(captured["inference_evidence_ref"]))
-    assert evidence["samples"] == [
-        {
-            "object_id": "I-old",
-            "version": 5,
-            "batch_id": str(batch_id),
-            "origin": "change_record",
-        }
-    ]

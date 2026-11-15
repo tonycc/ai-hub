@@ -47,7 +47,9 @@ def test_platform_core_migration_establishes_m1_core_and_protected_audit() -> No
     assert "INSERT INTO platform_core.platform_role_permission" in sql
     assert "UPDATE platform_core.platform_role_definition" in sql
     assert "DELETE FROM platform_core.platform_role_definition" not in sql
-    assert "DELETE FROM platform_core.platform_role_permission" not in sql
+    assert "DELETE FROM platform_core.platform_role_permission" in sql
+    assert "DROP TABLE platform_core.notification" not in sql
+    assert "REVOKE ALL ON TABLE platform_core.notification FROM ai_hub_platform" in sql
     assert "platform_projection" not in sql
     assert "platform_raw" not in sql
     assert "integration_outbox" not in sql

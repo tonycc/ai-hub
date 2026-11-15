@@ -151,8 +151,7 @@ class ExportClient:
             )
             if page.object_type != object_type:
                 raise ExportClientError(
-                    f"export object_type mismatch: expected {object_type}, "
-                    f"got {page.object_type}"
+                    f"export object_type mismatch: expected {object_type}, got {page.object_type}"
                 )
             if not contract_version:
                 contract_version = page.payload_contract_version
@@ -170,14 +169,10 @@ class ExportClient:
             if not page.has_more:
                 break
             if not page.records:
-                raise ExportClientError(
-                    "export page claimed has_more without returning records"
-                )
+                raise ExportClientError("export page claimed has_more without returning records")
             next_since = max(record.version for record in page.records)
-            if next_since <= cursor and mode == "incremental":
-                raise ExportClientError(
-                    "export pagination did not advance since_version"
-                )
+            if next_since <= cursor:
+                raise ExportClientError("export pagination did not advance since_version")
             cursor = next_since
         if not contract_version:
             contract_version = "unknown"

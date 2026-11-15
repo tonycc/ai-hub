@@ -86,8 +86,6 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
         "platform.application.read",
         "platform.application.bootstrap",
         "platform.directory.read",
-        "platform.authorization.decide",
-        "platform.notification.request",
         "platform.application.health.write",
         "ai_hub.ingest.export",
         "ai_hub.ingest.push",
@@ -97,22 +95,19 @@ def test_authentik_blueprint_has_strict_oidc_and_minimal_scopes() -> None:
 
 
 def test_ingest_operator_uses_independent_password_secret() -> None:
-    blueprint = (
-        PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
-    ).read_text(encoding="utf-8")
+    blueprint = (PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml").read_text(
+        encoding="utf-8"
+    )
     compose = (PROJECT_ROOT / "deploy/compose.yaml").read_text(encoding="utf-8")
     example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    generator = (
-        PROJECT_ROOT / "scripts/deploy/generate-runtime-env.sh"
-    ).read_text(encoding="utf-8")
+    generator = (PROJECT_ROOT / "scripts/deploy/generate-runtime-env.sh").read_text(
+        encoding="utf-8"
+    )
     start = blueprint.index("username: ai-hub-platform-ingest-operator")
     snippet = blueprint[start : start + 400]
     assert "password: !Env AI_HUB_INGEST_OPERATOR_PASSWORD" in snippet
     assert "AI_HUB_UAT_USER_PASSWORD" not in snippet
-    assert (
-        "AI_HUB_INGEST_OPERATOR_PASSWORD: ${AI_HUB_INGEST_OPERATOR_PASSWORD:?"
-        in compose
-    )
+    assert "AI_HUB_INGEST_OPERATOR_PASSWORD: ${AI_HUB_INGEST_OPERATOR_PASSWORD:?" in compose
     assert "AI_HUB_INGEST_OPERATOR_PASSWORD=$(gen_secret 32)" in generator
     uat = next(
         line.split("=", 1)[1]
@@ -128,9 +123,9 @@ def test_ingest_operator_uses_independent_password_secret() -> None:
 
 
 def test_reference_blueprint_applies_core_blueprint_before_shared_lookups() -> None:
-    blueprint = (
-        PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml"
-    ).read_text(encoding="utf-8")
+    blueprint = (PROJECT_ROOT / "deploy/authentik/ai-hub-reference-blueprint.yaml").read_text(
+        encoding="utf-8"
+    )
 
     dependency = "model: authentik_blueprints.metaapplyblueprint"
     first_shared_lookup = "model: authentik_providers_oauth2.oauth2provider"
@@ -147,19 +142,16 @@ def test_standalone_image_build_does_not_copy_platform_source() -> None:
     assert "COPY sdk/python/src" in dockerfile
 
 
-def test_platform_api_readiness_probe_allows_bootstrap_reconciliation_window() -> None:
+def test_platform_api_readiness_has_no_reference_bootstrap_dependency() -> None:
     compose = load_yaml("deploy/compose.yaml")
     platform_api = compose["services"]["platform-api"]
     healthcheck = platform_api["healthcheck"]
     test_command = " ".join(healthcheck["test"])
 
     assert "/health/ready" in test_command
-    assert platform_api["environment"]["AI_HUB_REFERENCE_APPLICATION_ENABLED"] == (
-        "${AI_HUB_REFERENCE_APPLICATION_ENABLED:-true}"
-    )
+    assert "AI_HUB_REFERENCE_APPLICATION_ENABLED" not in platform_api["environment"]
     assert "/health/live" not in test_command
-    # Bootstrap retries sleep 5/10/20/30s before the dedicated provider may
-    # appear; a short start_period fails compose --wait in M1 before reconcile.
+    # Retain startup tolerance for cold database connections.
     assert healthcheck["start_period"] == "90s"
     assert int(str(healthcheck["retries"])) >= 24
 
@@ -169,7 +161,7 @@ def test_standalone_app_uses_api_client_and_data_ingest_only() -> None:
     services = compose["services"]
     application = services["standalone-app"]
 
-    assert application["profiles"] == ["base-access"]
+    assert application["profiles"] == ["reference-app"]
     assert application["environment"]["STANDALONE_INTEGRATION_CAPABILITIES"] == (
         "API_CLIENT,DATA_INGEST"
     )

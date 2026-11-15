@@ -1,5 +1,7 @@
 # Standalone App Example
 
+> 2026-10-16 简化基线：平台保留统一身份、应用登记与凭据、数据接入、审计和运维。平台托管业务授权及测试通知已退役，相关旧接口、SDK 方法和菜单不再提供；业务授权全部由应用执行。初始管理员领取与员工目录同步为可选能力。数据接入仅支持 ENFORCE，已移除推断草稿与 AUDIT_ONLY。本文后续涉及旧功能或阶段性兼容的内容仅作历史记录，当前接入以 开发者指南 `docs/developer-integration-guide.md` 和 API 契约为准。
+
 这是一个可从平台仓库中独立提取的业务中性接入参考应用。它拥有自己的 Python 项目、数据库迁移、运行配置和健康检查，只通过公开 SDK/API 使用平台能力。它仅用于验证平台契约和故障边界，不是正式业务应用，也不进入平台产品范围。
 
 目标基线默认只启用 `API_CLIENT`。可选能力 `DATA_INGEST` 与基础迁移共用 `alembic.ini`，会创建导出变更日志与版本计数器，并暴露服务身份保护的 `/ai-hub/export`：
@@ -9,11 +11,11 @@
 | `API_CLIENT`（默认） | `alembic.ini` | `app.example_record` |
 | `DATA_INGEST`（可选） | 同上（`base_0004`） | `app.ingest_change_log`、`app.ingest_version_counter` |
 
-M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、用户和权限查询、版本化授权缓存、对象级最终校验、服务身份测试通知与故障边界认证。增量数据接入通过应用侧导出契约与平台拉取实现。
+M1 已完成 API-only 的 OIDC 授权码 + PKCE 登录、本地 JWT 验证、基本用户资料查询、应用本地对象归属与状态校验及故障边界认证。增量数据接入通过应用侧导出契约与平台拉取实现。
 
 ~~~bash
 cp .env.example .env
-docker compose -f deploy/compose.yaml --profile base-access up -d --build
+docker compose -f deploy/compose.yaml --profile base-access --profile reference-app up -d --build
 cp examples/standalone-app/.env.example examples/standalone-app/.env
 uv sync --all-packages --all-groups
 uv run --env-file examples/standalone-app/.env --package ai-hub-standalone-example alembic \
@@ -29,7 +31,7 @@ uv run --env-file examples/standalone-app/.env \
 完整容器化验证可直接运行基础档位：
 
 ~~~bash
-docker compose -f deploy/compose.yaml --profile base-access up -d --build
+docker compose -f deploy/compose.yaml --profile base-access --profile reference-app up -d --build
 ~~~
 
 `base-access` 只执行基础迁移，默认能力为 `API_CLIENT`。需要导出认证时，将 `STANDALONE_INTEGRATION_CAPABILITIES` 设为 `API_CLIENT,DATA_INGEST` 并登记对应应用能力。
@@ -38,8 +40,8 @@ docker compose -f deploy/compose.yaml --profile base-access up -d --build
 - 登录入口：`GET http://app.localhost:8088/auth/login`
 - 当前会话：`GET http://app.localhost:8088/api/v1/session`
 - 平台连通性：`GET http://app.localhost:8088/api/v1/platform-status`
-- 可靠更新：`PUT http://app.localhost:8088/api/v1/records/{record_id}`（登录且通过高风险在线授权）
-- 软删除：`DELETE http://app.localhost:8088/api/v1/records/{record_id}`（登录且通过高风险在线授权）
+- 可靠更新：`PUT http://app.localhost:8088/api/v1/records/{record_id}`（登录且通过应用本地对象归属与业务状态校验）
+- 软删除：`DELETE http://app.localhost:8088/api/v1/records/{record_id}`（登录且通过应用本地对象归属与业务状态校验）
 - 增量导出：`GET http://app.localhost:8088/ai-hub/export`（服务身份 + `DATA_INGEST`）
 
 完整 API 接入认证由仓库根目录执行 `bash scripts/ci/m1-runtime.sh`。该脚本证明参考应用镜像没有安装平台代码包，且平台与应用分别停止、启动时不会形成进程级反向依赖。

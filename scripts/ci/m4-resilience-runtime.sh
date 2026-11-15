@@ -42,7 +42,7 @@ m4_resilience_compose() {
     --project-name "${M4_RESILIENCE_PROJECT_NAME}" \
     --env-file "${M4_RESILIENCE_ENV_FILE}" \
     -f "${M4_RESILIENCE_COMPOSE_FILE}" \
-    --profile base-access \
+    --profile base-access --profile reference-app \
     "$@"
 }
 
@@ -139,7 +139,7 @@ m4_resilience_wait_auth
 
 m4_resilience_note "verifying public security boundaries and fail-closed authorization"
 M4_RESILIENCE_FULL_TOKEN="$(m4_resilience_service_token \
-  'openid ai_hub.identity platform.application.read platform.application.health.write platform.notification.request')"
+  'openid ai_hub.identity platform.application.read platform.application.health.write')"
 M4_RESILIENCE_LIMITED_TOKEN="$(m4_resilience_service_token \
   'openid ai_hub.identity')"
 curl --silent --show-error --dump-header "${M4_RESILIENCE_WORK_DIR}/headers.txt" \
@@ -164,10 +164,9 @@ M4_RESILIENCE_INVALID_CODE="$(curl --silent --show-error --max-time 10 \
 M4_RESILIENCE_SCOPE_CODE="$(curl --silent --show-error --max-time 10 \
   --header "Authorization: Bearer ${M4_RESILIENCE_LIMITED_TOKEN}" \
   --header 'Content-Type: application/json' \
-  --data '{"recipient_user_id":"10000000-0000-4000-8000-000000000001","subject":"Denied","body":"Denied","idempotency_key":"m4-scope-denied"}' \
   --output "${M4_RESILIENCE_WORK_DIR}/scope-denied.json" \
   --write-out '%{http_code}' \
-  "${M4_RESILIENCE_PLATFORM_BASE}/platform-api/v1/notifications")"
+  "${M4_RESILIENCE_PLATFORM_BASE}/platform-api/v1/applications/standalone-example")"
 [[ "${M4_RESILIENCE_SCOPE_CODE}" == "403" ]] \
   || m4_resilience_fail "missing scope was not rejected"
 dd if=/dev/zero of="${M4_RESILIENCE_WORK_DIR}/oversized.bin" \
@@ -178,7 +177,7 @@ M4_RESILIENCE_OVERSIZED_CODE="$(curl --silent --show-error --max-time 20 \
   --data-binary "@${M4_RESILIENCE_WORK_DIR}/oversized.bin" \
   --output "${M4_RESILIENCE_WORK_DIR}/oversized-response.txt" \
   --write-out '%{http_code}' \
-  "${M4_RESILIENCE_PLATFORM_BASE}/platform-api/v1/notifications")"
+  "${M4_RESILIENCE_PLATFORM_BASE}/platform-api/v1/applications/standalone-example")"
 [[ "${M4_RESILIENCE_OVERSIZED_CODE}" == "413" ]] \
   || m4_resilience_fail "oversized request was not rejected at the edge"
 m4_resilience_compose exec -T postgres \

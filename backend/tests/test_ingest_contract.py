@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from ai_hub_platform.modules.ingest.contract import (
     ContractEnforcedError,
     IngestContractValidator,
     RegisteredContract,
-    infer_draft_schema,
     schema_fingerprint,
 )
 from ai_hub_platform.modules.ingest.service import IngestRecord
@@ -54,57 +51,6 @@ def _contract(schema: dict[str, object] | None = None) -> RegisteredContract:
     )
 
 
-def test_audit_only_pull_never_rejects_missing_or_invalid_contract() -> None:
-    validator = IngestContractValidator()
-    result = validator.validate_records(
-        [IngestRecord("E-1", "upsert", 1, {"name": 1, "extra": True})],
-        source=_pull(),
-        payload_contract_version="device.v1",
-        contract=None,
-        payload_max_bytes=1024,
-        pull_enforcement_gate=True,
-    )
-    assert result.status == "audit"
-    assert any(issue.code == "contract_missing" for issue in result.issues)
-
-
-def test_pull_enforce_requires_global_gate() -> None:
-    validator = IngestContractValidator()
-    source = _pull(contract_validation_mode="ENFORCE")
-    records = [IngestRecord("E-1", "upsert", 1, {"name": "ok"})]
-    audited = validator.validate_records(
-        records,
-        source=source,
-        payload_contract_version="device.v1",
-        contract=None,
-        payload_max_bytes=1024,
-        pull_enforcement_gate=False,
-    )
-    assert audited.status == "audit"
-    with pytest.raises(ContractEnforcedError):
-        validator.validate_records(
-            records,
-            source=source,
-            payload_contract_version="device.v1",
-            contract=None,
-            payload_max_bytes=1024,
-            pull_enforcement_gate=True,
-        )
-
-
-def test_push_always_enforces_even_without_pull_gate() -> None:
-    validator = IngestContractValidator()
-    with pytest.raises(ContractEnforcedError):
-        validator.validate_records(
-            [IngestRecord("I-1", "upsert", 1, {"name": "ok"})],
-            source=_push(),
-            payload_contract_version="item.v1",
-            contract=None,
-            payload_max_bytes=1024,
-            pull_enforcement_gate=False,
-        )
-
-
 def test_enforce_rejects_unknown_fields_and_accepts_valid_payload() -> None:
     validator = IngestContractValidator()
     contract = _contract()
@@ -115,75 +61,18 @@ def test_enforce_rejects_unknown_fields_and_accepts_valid_payload() -> None:
         payload_contract_version="device.v1",
         contract=contract,
         payload_max_bytes=1024,
-        pull_enforcement_gate=True,
     )
     assert ok.status == "ok"
-    with pytest.raises(ContractEnforcedError, match="ENFORCE") as caught:
+    with pytest.raises(ContractEnforcedError, match="contract validation") as caught:
         validator.validate_records(
             [IngestRecord("E-1", "upsert", 1, {"name": "lathe", "secret": "x"})],
             source=source,
             payload_contract_version="device.v1",
             contract=contract,
             payload_max_bytes=1024,
-            pull_enforcement_gate=True,
         )
     assert any(issue.code == "unknown_field" for issue in caught.value.issues)
     assert all("secret" not in issue.message for issue in caught.value.issues)
-
-
-def test_audit_only_still_hard_rejects_oversized_payload() -> None:
-    validator = IngestContractValidator()
-    with pytest.raises(ContractEnforcedError) as caught:
-        validator.validate_records(
-            [IngestRecord("E-1", "upsert", 1, {"name": "x" * 80})],
-            source=_pull(),
-            payload_contract_version="device.v1",
-            contract=_contract(),
-            payload_max_bytes=16,
-            pull_enforcement_gate=False,
-        )
-    assert any(issue.code == "payload_too_large" for issue in caught.value.issues)
-
-
-def test_runtime_validator_fault_audits_for_pull_and_rejects_for_push(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ai_hub_platform.modules.ingest import contract as contract_mod
-
-    class _Broken:
-        @staticmethod
-        def check_schema(schema: object) -> None:
-            del schema
-
-        def __init__(self, schema: object, **kwargs: object) -> None:
-            del schema, kwargs
-
-        def iter_errors(self, instance: object, _schema: object = None) -> Any:
-            del instance, _schema
-            raise RuntimeError("unresolvable ref")
-
-    monkeypatch.setattr(contract_mod, "Draft202012Validator", _Broken)
-    validator = IngestContractValidator()
-    records = [IngestRecord("E-1", "upsert", 1, {"name": "lathe"})]
-    audited = validator.validate_records(
-        records,
-        source=_pull(),
-        payload_contract_version="device.v1",
-        contract=_contract(),
-        payload_max_bytes=1024,
-    )
-    assert audited.status == "audit"
-    assert any(issue.code == "validator_unavailable" for issue in audited.issues)
-    assert all("unresolvable" not in issue.message for issue in audited.issues)
-    with pytest.raises(ContractEnforcedError) as caught:
-        validator.validate_records(
-            records,
-            source=_push(),
-            payload_contract_version="device.v1",
-            contract=_contract(),
-            payload_max_bytes=1024,
-        )
-    assert any(issue.code == "validator_unavailable" for issue in caught.value.issues)
 
 
 def test_delete_records_skip_schema_validation() -> None:
@@ -194,45 +83,8 @@ def test_delete_records_skip_schema_validation() -> None:
         payload_contract_version="device.v1",
         contract=_contract(),
         payload_max_bytes=1024,
-        pull_enforcement_gate=True,
     )
     assert result.status == "ok"
-
-
-def test_infer_draft_schema_keeps_fields_optional_and_warns_on_mixed_types() -> None:
-    schema, warnings = infer_draft_schema(
-        [
-            {"name": "a", "qty": 1},
-            {"name": "b", "qty": "2"},
-        ]
-    )
-    assert schema["type"] == "object"
-    assert "required" not in schema
-    assert schema["properties"]["name"] == {"type": "string"}
-    assert any("qty" in warning for warning in warnings)
-
-    nested, nested_warnings = infer_draft_schema(
-        [
-            {"a": {"x": 1}},
-            {"a": {"x": "two"}},
-        ]
-    )
-    assert nested["properties"]["a"]["type"] == "object"
-    assert nested["properties"]["a"]["properties"]["x"]["type"] == [
-        "integer",
-        "string",
-    ]
-    assert any("a.x" in warning for warning in nested_warnings)
-
-    nullable, null_warnings = infer_draft_schema(
-        [
-            {"name": None},
-            {"name": "a"},
-        ]
-    )
-    assert nullable["properties"]["name"] == {"type": ["null", "string"]}
-    assert any("null" in warning for warning in null_warnings)
-    assert "required" not in nullable
 
 
 def test_closed_schema_rejects_remote_refs_and_does_not_retrieve() -> None:
@@ -270,26 +122,6 @@ def test_closed_schema_rejects_remote_refs_and_does_not_retrieve() -> None:
         payload_max_bytes=1024,
     )
     assert result.status == "ok"
-
-
-def test_audit_only_records_metrics_and_summary_payload() -> None:
-    from ai_hub_platform.modules.ingest.contract import audit_summary_payload
-
-    validator = IngestContractValidator()
-    result = validator.validate_records(
-        [IngestRecord("E-1", "upsert", 1, {"secret": True})],
-        source=_pull(),
-        payload_contract_version="device.v1",
-        contract=_contract(),
-        payload_max_bytes=1024,
-    )
-    assert result.status == "audit"
-    key = ("standalone-example", "device", "unknown_field")
-    assert validator.audit_issue_counts[key] >= 1
-    summary = audit_summary_payload(result.issues)
-    assert summary["mode"] == "AUDIT_ONLY"
-    assert summary["issue_count"] == len(result.issues)
-    assert summary["issues"][0]["code"] == "unknown_field"
 
 
 def test_deprecated_contract_still_enforces_schema_when_accepted() -> None:

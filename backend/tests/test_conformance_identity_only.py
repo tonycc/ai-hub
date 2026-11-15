@@ -33,10 +33,10 @@ def test_oidc_only_profile_has_no_platform_business_authorization_dependency() -
 
     assert ALL_PROFILES[0] == "OIDC_ONLY"
     assert result.status == "PASSED"
-    assert result.evidence["bootstrap_status"] == "PENDING"
+    assert result.evidence["missing_scopes"] == []
 
 
-def test_oidc_only_profile_requires_owner_and_environment_bootstrap_scopes() -> None:
+def test_oidc_only_profile_does_not_require_bootstrap_or_directory() -> None:
     application = identity_application()
     application["bootstrap_status"] = None
     application["scopes"] = frozenset({"ai_hub.identity", "platform.me.read"})
@@ -45,9 +45,5 @@ def test_oidc_only_profile_requires_owner_and_environment_bootstrap_scopes() -> 
         application
     )
 
-    assert result.status == "FAILED"
-    assert "initial administrator bootstrap is not configured" in result.message
-    assert result.evidence["missing_scopes"] == [
-        "platform.application.bootstrap",
-        "platform.directory.read",
-    ]
+    assert result.status == "PASSED"
+    assert result.evidence["missing_scopes"] == []

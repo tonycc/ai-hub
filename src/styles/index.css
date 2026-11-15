@@ -242,3 +242,10 @@ a {
     margin-left: auto;
   }
 }
+
+/* Shared management tabs used by identity, ingest, and operations. */
+.management-tabs { display: flex; gap: 24px; max-width: 100%; overflow-x: auto; }
+.management-tabs button { position: relative; flex-shrink: 0; height: 46px; padding: 0 1px; border: 0; color: var(--ink-500); background: transparent; font-size: 15px; cursor: pointer; }
+.management-tabs button.active { color: var(--ink-900); font-weight: 650; }
+.management-tabs button.active::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-500); content: ''; }
+@media (max-width: 650px) { .management-tabs { gap: 16px; } }

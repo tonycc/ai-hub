@@ -53,7 +53,6 @@ class CapturingValidator:
             scopes=frozenset(required_scopes),
             actor_type="user",
             application_id=None,
-            authorization_version=1,
             preferred_username="ai-hub-demo-user",
             display_name="AI Hub Demo User",
             email=None,
@@ -78,9 +77,7 @@ async def test_token_rejections_are_audited_independently(
 ) -> None:
     audits: list[AuditRecord] = []
 
-    async def append_committed(
-        self: AuditService, database: object, record: AuditRecord
-    ) -> None:
+    async def append_committed(self: AuditService, database: object, record: AuditRecord) -> None:
         _ = self, database
         audits.append(record)
 

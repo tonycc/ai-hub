@@ -33,7 +33,7 @@ def _push(**overrides: object) -> IngestSourceConfig:
 def test_existing_source_defaults_to_pull_export() -> None:
     source = _pull()
     assert source.transport_mode == "PULL_EXPORT"
-    assert source.contract_validation_mode == "AUDIT_ONLY"
+    assert source.contract_validation_mode == "ENFORCE"
     assert source.push_protocol_version is None
     assert source.allow_empty_full is False
     assert source.export_base_url == "http://app.test"
@@ -132,31 +132,28 @@ def test_put_ingest_source_rejects_active_generation_before_transport_switch() -
 
     source = inspect.getsource(ingest_api.put_ingest_source)
     assert "lock_ingest_source" in source
-    assert source.index("lock_ingest_source") < source.index(
-        "_reject_if_active_push_generation"
-    )
-    assert source.index("_reject_if_active_push_generation") < source.index(
-        "upsert_source"
-    )
+    assert source.index("lock_ingest_source") < source.index("_reject_if_active_push_generation")
+    assert source.index("_reject_if_active_push_generation") < source.index("upsert_source")
     assert "raw_sessions" not in source
     assert IngestTransportBusyError.error_code == "ingest_transport_mode_busy"
 
 
-def test_ingest_scheduler_receives_pull_contract_enforcement_flag() -> None:
+def test_ingest_scheduler_has_no_permissive_rollout_flag() -> None:
     from pathlib import Path
 
     compose = (Path(__file__).resolve().parents[2] / "deploy/compose.yaml").read_text()
     scheduler_block = compose.split("platform-ingest-scheduler:", 1)[1]
-    assert "AI_HUB_INGEST_PULL_CONTRACT_ENFORCEMENT_ENABLED" in scheduler_block.split(
-        "volumes:", 1
-    )[0]
+    assert (
+        "AI_HUB_INGEST_PULL_CONTRACT_ENFORCEMENT_ENABLED"
+        not in scheduler_block.split("volumes:", 1)[0]
+    )
 
 
 @pytest.mark.asyncio
-async def test_pull_enforce_upsert_requires_approved_certification() -> None:
+async def test_pull_enforce_upsert_requires_active_contract() -> None:
     from ai_hub_platform.modules.ingest.config_store import (
+        IngestConfigError,
         IngestConfigStore,
-        IngestEnforceNotCertifiedError,
     )
 
     class _EmptyResult:
@@ -170,7 +167,7 @@ async def test_pull_enforce_upsert_requires_approved_certification() -> None:
         async def execute(self, *args: object, **kwargs: object) -> _EmptyResult:
             return _EmptyResult()
 
-    with pytest.raises(IngestEnforceNotCertifiedError):
+    with pytest.raises(IngestConfigError):
         await IngestConfigStore().upsert_source(
             _Session(),  # type: ignore[arg-type]
             _pull(contract_validation_mode="ENFORCE"),
@@ -229,9 +226,7 @@ async def test_disabled_source_can_change_transport_mode(
     )
 
     store = IngestConfigStore()
-    existing = IngestSourceRow(
-        config=_push(enabled=False), updated_at=datetime.now(UTC)
-    )
+    existing = IngestSourceRow(config=_push(enabled=False), updated_at=datetime.now(UTC))
 
     async def fake_get_source(session: object, **kwargs: object) -> IngestSourceRow:
         del session, kwargs
@@ -297,49 +292,6 @@ async def test_disable_and_switch_transport_in_one_request_is_rejected(
         )
 
 
-@pytest.mark.asyncio
-async def test_disabled_push_to_pull_enforce_still_requires_certification(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from datetime import UTC, datetime
-
-    from ai_hub_platform.modules.ingest.config_store import (
-        IngestConfigStore,
-        IngestEnforceNotCertifiedError,
-        IngestSourceRow,
-    )
-
-    store = IngestConfigStore()
-    existing = IngestSourceRow(
-        config=_push(enabled=False), updated_at=datetime.now(UTC)
-    )
-
-    async def fake_get_source(session: object, **kwargs: object) -> IngestSourceRow:
-        del session, kwargs
-        return existing
-
-    monkeypatch.setattr(store, "get_source", fake_get_source)
-
-    class _EmptyResult:
-        def one_or_none(self) -> None:
-            return None
-
-    class _Session:
-        async def execute(self, *args: object, **kwargs: object) -> _EmptyResult:
-            return _EmptyResult()
-
-    with pytest.raises(IngestEnforceNotCertifiedError):
-        await store.upsert_source(
-            _Session(),  # type: ignore[arg-type]
-            _pull(
-                source_application_id="e10-adapter",
-                object_type="erp.item",
-                enabled=False,
-                contract_validation_mode="ENFORCE",
-            ),
-        )
-
-
 def test_change_log_purpose_unique_contract_is_active() -> None:
     from ai_hub_platform.modules.ingest.sources import CHANGE_RECORD_PURPOSE_UNIQUE
 
@@ -391,9 +343,7 @@ async def test_re_enabling_push_source_requires_approved_certification(
 
     monkeypatch.setattr(config_store_mod, "CHANGE_RECORD_PURPOSE_UNIQUE", True)
     store = IngestConfigStore()
-    existing = IngestSourceRow(
-        config=_push(enabled=False), updated_at=datetime.now(UTC)
-    )
+    existing = IngestSourceRow(config=_push(enabled=False), updated_at=datetime.now(UTC))
 
     async def fake_get_source(session: object, **kwargs: object) -> IngestSourceRow:
         del session, kwargs
@@ -417,14 +367,14 @@ async def test_re_enabling_push_source_requires_approved_certification(
 
 
 @pytest.mark.asyncio
-async def test_re_enabling_pull_enforce_source_requires_approved_certification(
+async def test_re_enabling_pull_enforce_source_requires_active_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from datetime import UTC, datetime
 
     from ai_hub_platform.modules.ingest.config_store import (
+        IngestConfigError,
         IngestConfigStore,
-        IngestEnforceNotCertifiedError,
         IngestSourceRow,
     )
 
@@ -448,7 +398,7 @@ async def test_re_enabling_pull_enforce_source_requires_approved_certification(
         async def execute(self, *args: object, **kwargs: object) -> _EmptyResult:
             return _EmptyResult()
 
-    with pytest.raises(IngestEnforceNotCertifiedError, match="ENFORCE"):
+    with pytest.raises(IngestConfigError, match="ACTIVE"):
         await store.upsert_source(
             _Session(),  # type: ignore[arg-type]
             _pull(enabled=True, contract_validation_mode="ENFORCE"),
@@ -484,13 +434,13 @@ def test_push_sources_use_generation_progress_not_pull_cursor() -> None:
     assert "purpose = 'production'" in progress
     assert "COALESCE(purpose, 'production') = 'production'" in progress
     mapped = inspect.getsource(ingest_api)
-    assert "last_success_at=cursor.get(\"last_success_at\")" in mapped
+    assert 'last_success_at=cursor.get("last_success_at")' in mapped
     assert "last_success_at" in ingest_api.IngestSourceResponse.model_fields
     config = inspect.getsource(ingest_api.get_ingest_config)
     assert "load_push_progress" in config
-    view = (
-        Path(__file__).resolve().parents[2] / "src/views/IngestView.vue"
-    ).read_text(encoding="utf-8")
+    view = (Path(__file__).resolve().parents[2] / "src/views/IngestView.vue").read_text(
+        encoding="utf-8"
+    )
     assert "isPushSource" in view
     assert "从未推送" in view
     assert "lastStatusOk" in view
@@ -498,9 +448,9 @@ def test_push_sources_use_generation_progress_not_pull_cursor() -> None:
     assert "last_success_at" in view
     assert "padding: var(--space-card-lg)" in view
     assert "padding: 18px 22px 8px" not in view
-    layout = (
-        Path(__file__).resolve().parents[2] / "src/layouts/PlatformLayout.vue"
-    ).read_text(encoding="utf-8")
+    layout = (Path(__file__).resolve().parents[2] / "src/layouts/PlatformLayout.vue").read_text(
+        encoding="utf-8"
+    )
     assert "'/platform/ingest': 'platform.ingest.read'" in layout
 
 
@@ -520,9 +470,7 @@ def test_production_replay_and_history_exclude_certification_purpose() -> None:
     assert "COALESCE(batch.purpose, 'production') = 'production'" in history
     assert "COALESCE(record.purpose, 'production') = 'production'" in history
     assert "begin_nested" in service_src
-    insert = service_src.split("async def _insert_change_record", 1)[1].split(
-        "async def ", 1
-    )[0]
+    insert = service_src.split("async def _insert_change_record", 1)[1].split("async def ", 1)[0]
     conflict = insert.split("ON CONFLICT", 1)[1].split("DO NOTHING", 1)[0]
     assert "purpose" in conflict
     assert "AND purpose = :purpose" in insert
@@ -562,9 +510,7 @@ async def test_push_enable_requires_matching_transport_certification(
             return None
 
     class _Session:
-        async def execute(
-            self, statement: object, params: object = None
-        ) -> _EmptyResult:
+        async def execute(self, statement: object, params: object = None) -> _EmptyResult:
             captured["sql"] = str(statement)
             captured["params"] = params
             return _EmptyResult()
@@ -634,3 +580,37 @@ def test_enable_gate_matches_certification_transport_mode() -> None:
     source = inspect.getsource(IngestConfigStore)
     assert "c.transport_mode" in source
     assert ":transport_mode" in source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_disabled", [False, True])
+async def test_pull_can_start_without_synthetic_certification(
+    monkeypatch: pytest.MonkeyPatch,
+    existing_disabled: bool,
+) -> None:
+    from datetime import UTC, datetime
+
+    from ai_hub_platform.modules.ingest.config_store import IngestConfigStore, IngestSourceRow
+
+    store = IngestConfigStore()
+    enabled = IngestSourceRow(config=_pull(enabled=True), updated_at=datetime.now(UTC))
+    disabled = IngestSourceRow(config=_pull(enabled=False), updated_at=datetime.now(UTC))
+    reads = 0
+
+    async def get_source(*args: object, **kwargs: object) -> IngestSourceRow | None:
+        nonlocal reads
+        reads += 1
+        return enabled if reads > 1 else disabled if existing_disabled else None
+
+    class Result:
+        def one_or_none(self) -> tuple[str]:
+            return ("1",)
+
+    class Session:
+        async def execute(self, query: object, *args: object) -> Result:
+            assert "ingest_contract_certification" not in str(query)
+            return Result()
+
+    monkeypatch.setattr(store, "get_source", get_source)
+    result = await store.upsert_source(Session(), enabled.config)  # type: ignore[arg-type]
+    assert result.config.enabled

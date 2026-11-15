@@ -196,7 +196,7 @@ jq -e \
     and (.services["platform-ingest-scheduler"].image == $platform_ref)
     and (.services.portal.image == $portal_ref)
     and (.services["platform-api"].environment.AI_HUB_OIDC_ISSUER == $issuer)
-    and (.services["platform-api"].environment.AI_HUB_PORTAL_OIDC_REDIRECT_URI == $redirect)
+    and (.services["platform-api"].environment.AI_HUB_PORTAL_OIDC_REDIRECT_URIS == $redirect)
     and (.services["platform-api"].environment.SSL_CERT_FILE == "/etc/ai-hub/ca/ca-bundle.crt")
     and (any(.services.postgres.ports[]?;
       .host_ip == "127.0.0.1" and (.published | tonumber) == 5433 and .target == 5432))
@@ -243,7 +243,7 @@ assert_equal 192.168.50.21 \
 jq -e '
   .services["platform-api"].environment.AI_HUB_OIDC_ISSUER
     == "https://192.168.50.21:8443/application/o/ai-hub/"
-  and .services["platform-api"].environment.AI_HUB_PORTAL_OIDC_REDIRECT_URI
+  and .services["platform-api"].environment.AI_HUB_PORTAL_OIDC_REDIRECT_URIS
     == "https://192.168.50.21:443/auth/callback"
   and (all(.services.traefik.ports[]?; .host_ip == "192.168.50.21"))
 ' "${DEPLOY_TMP}/compose-new-ip.json" >/dev/null

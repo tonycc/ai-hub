@@ -2,28 +2,26 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import ApiState from '../components/ApiState.vue'
-import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import { apiRequest, queryString } from '../services/platformApi'
 import { usePortalSession } from '../stores/session'
 
+const props = defineProps({ application: { type: Object, required: true } })
 const session = usePortalSession()
 const loading = ref(false)
 const error = ref(null)
-const applications = ref([])
 const runs = ref([])
-const applicationId = ref('')
+const applicationId = computed(() => props.application.application_id)
 const detailVisible = ref(false)
 const selected = ref(null)
 const runVisible = ref(false)
 const saving = ref(false)
 const runForm = reactive({ environment: 'local', profiles: ['OIDC_ONLY'] })
 const profileOptions = [
-  ['OIDC_ONLY', 'OIDC 身份接入', '登录、基本资料、回调地址与初始管理员前置条件'],
-  ['API_ONLY', 'API-only', 'OIDC、权限快照、通知和入口前置条件'],
+  ['OIDC_ONLY', 'OIDC 身份接入', '登录、基本资料与回调地址'],
+  ['API_ONLY', 'API-only', '服务身份、API 范围和入口前置条件'],
   ['DATA_INGEST', '增量数据接入', '导出契约、版本单调、删除捕获与幂等回放证据'],
 ]
-const selectedApplication = computed(() => applications.value.find((item) => item.application_id === applicationId.value))
 const canRun = computed(() => applicationId.value && session.hasPermission('platform.conformance.run', applicationId.value))
 
 function formatTime(value) {
@@ -33,11 +31,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [appResponse, runResponse] = await Promise.all([
-      apiRequest('applications'),
-      apiRequest(`conformance-runs${queryString({ application_id: applicationId.value, limit: 100 })}`),
-    ])
-    applications.value = appResponse.items
+    const runResponse = await apiRequest(`conformance-runs${queryString({ application_id: applicationId.value, limit: 100 })}`)
     runs.value = runResponse.items
   } catch (caught) {
     error.value = caught
@@ -45,7 +39,6 @@ async function load() {
     loading.value = false
   }
 }
-async function changeApplication() { await load() }
 async function showDetail(row) {
   try {
     selected.value = await apiRequest(`conformance-runs/${row.run_id}`)
@@ -55,8 +48,9 @@ async function showDetail(row) {
   }
 }
 function openRun() {
-  const capabilities = selectedApplication.value?.capabilities || []
-  runForm.environment = 'local'
+  if (!props.application.environments?.length) { ElMessage.warning('请先登记应用环境'); return }
+  const capabilities = props.application?.capabilities || []
+  runForm.environment = props.application?.environments?.[0]?.environment || ''
   runForm.profiles = ['OIDC_ONLY']
   if (capabilities.includes('DATA_INGEST')) runForm.profiles.push('DATA_INGEST')
   runVisible.value = true
@@ -83,54 +77,19 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page-shell">
-    <PageHeader title="接入治理" description="按 OIDC 身份、API-only 与 DATA_INGEST 独立配置运行一致性认证。">
-      <el-select
-        v-model="applicationId"
-        clearable
-        filterable
-        placeholder="全部应用"
-        style="width: 280px"
-        @change="changeApplication"
-      >
-        <el-option
-          v-for="item in applications"
-          :key="item.application_id"
-          :label="item.name"
-          :value="item.application_id"
-        />
-      </el-select>
-      <template #actions>
-        <el-button @click="$router.push('/platform/developer')">
-          <el-icon><Document /></el-icon>契约与文档
-        </el-button>
+  <div class="drawer-section">
+    <div class="section-heading"><h3>接入检查</h3><div>
         <el-button @click="load">
           <el-icon><Refresh /></el-icon>刷新
         </el-button>
         <el-button v-if="canRun" type="primary" @click="openRun">
           <el-icon><VideoPlay /></el-icon>运行认证
         </el-button>
-      </template>
-    </PageHeader>
-    <section class="profile-grid page-section">
-      <article v-for="item in profileOptions" :key="item[0]" class="surface-panel">
-        <el-icon><CircleCheck /></el-icon>
-        <div>
-          <strong>{{ item[1] }}</strong>
-          <code>{{ item[0] }}</code>
-          <p>{{ item[2] }}</p>
-        </div>
-      </article>
-    </section>
+      </div>
+    </div>
     <section class="surface-panel page-section list-panel">
       <ApiState :loading="loading" :error="error" :empty="!runs.length" empty-text="尚未运行接入认证" @retry="load">
         <el-table :data="runs" style="width: 100%" @row-click="showDetail">
-          <el-table-column prop="application_name" label="应用" min-width="190">
-            <template #default="scope">
-              <strong>{{ scope.row.application_name }}</strong>
-              <small class="subline mono">{{ scope.row.application_id }}</small>
-            </template>
-          </el-table-column>
           <el-table-column prop="environment" label="环境" width="100" />
           <el-table-column label="认证配置" min-width="330">
             <template #default="scope">
@@ -172,7 +131,7 @@ onMounted(load)
         title="DATA_INGEST 认证只接受应用提交的运行门禁证据，不会跨库读取应用导出表。"
       />
       <el-form label-position="top" class="run-form">
-        <el-form-item label="环境"><el-input v-model="runForm.environment" /></el-form-item>
+        <el-form-item label="环境" required><el-select v-model="runForm.environment" style="width: 100%"><el-option v-for="item in props.application.environments" :key="item.environment" :value="item.environment" :label="item.environment" /></el-select></el-form-item>
         <el-form-item label="认证配置">
           <el-checkbox-group v-model="runForm.profiles" class="profile-options">
             <el-checkbox v-for="item in profileOptions" :key="item[0]" :value="item[0]">

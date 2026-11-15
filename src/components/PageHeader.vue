@@ -87,6 +87,10 @@ defineProps({
     flex-wrap: wrap;
   }
 
+  .page-header__filters {
+    flex: 0 1 auto;
+  }
+
   .page-header__actions {
     justify-content: flex-start;
   }

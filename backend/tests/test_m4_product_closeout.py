@@ -4,8 +4,6 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -16,11 +14,11 @@ def _source(relative_path: str) -> str:
 def test_platform_settings_use_the_authoritative_read_only_api() -> None:
     router = _source("src/router/index.js")
     layout = _source("src/layouts/PlatformLayout.vue")
-    settings = _source("src/views/PlatformSettingsView.vue")
+    settings = _source("src/components/OperationsSettings.vue")
 
-    assert "path: 'platform/settings'" in router
-    assert "PlatformSettingsView.vue" in router
-    assert "'/platform/settings': 'platform.operations.read'" in layout
+    assert "path: 'platform/settings'" not in router
+    assert "PlatformSettingsView.vue" not in router
+    assert "'/platform/operations': 'platform.operations.read'" in layout
     assert "'/platform/ingest': 'platform.ingest.read'" in layout
     portal = _source("src/views/PortalView.vue")
     assert "permission: 'platform.ingest.read'" in portal
@@ -53,39 +51,3 @@ def test_frontend_contains_no_legacy_prototype_data_or_fake_actions() -> None:
     assert "平台实施 · M3" not in frontend_source
     package = cast(dict[str, Any], json.loads(_source("package.json")))
     assert package["name"] == "ai-hub-platform-portal"
-
-
-def test_notifications_are_described_as_local_test_delivery() -> None:
-    message_center = _source("src/views/MessageCenterView.vue")
-    capabilities = _source("src/data/platformCapabilities.js")
-    contract = cast(
-        dict[str, Any],
-        yaml.safe_load(_source("contracts/api/platform-api.openapi.yaml")),
-    )
-    create_description = cast(
-        str,
-        contract["paths"]["/platform-api/v1/notifications"]["post"]["responses"]["201"][
-            "description"
-        ],
-    )
-
-    assert "当前仅提供站内测试通道" in message_center
-    assert "LOCAL_REFERENCE" in message_center
-    assert "不代表外部收件人已收到消息" in message_center
-    assert "测试已记录" in message_center
-    assert "站内测试通知" in capabilities
-    assert "external" in create_description.lower()
-
-
-def test_m4_portal_and_future_capability_states_are_explicit() -> None:
-    portal = _source("src/views/PortalView.vue")
-    capabilities = _source("src/data/platformCapabilities.js")
-    planned = _source("src/views/PlannedCapabilityView.vue")
-
-    assert "AI HUB PLATFORM" in portal
-    assert "平台控制台" in portal
-    assert "M3 实施门禁" not in portal
-    assert "BACKUP-RECOVERY" in capabilities
-    assert "PLATFORM-CONFIG" in capabilities
-    assert "status: '已具备'" in capabilities
-    assert "当前版本不提供该能力的 API、存储结构、后台任务、配置写入或正式数据" in planned

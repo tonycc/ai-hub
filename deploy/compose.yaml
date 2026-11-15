@@ -27,7 +27,6 @@ x-standalone-app-environment: &standalone-app-environment
   STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_CACHE_TTL_SECONDS:-300}
   STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS: ${STANDALONE_OIDC_JWKS_STALE_TTL_SECONDS:-3600}
   STANDALONE_SESSION_SECRET: ${STANDALONE_SESSION_SECRET:?Set STANDALONE_SESSION_SECRET in .env}
-  STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS: ${STANDALONE_AUTHORIZATION_CACHE_STALE_TTL_SECONDS:-300}
 
 x-standalone-app-common: &standalone-app-common
   image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
@@ -126,18 +125,15 @@ services:
       AI_HUB_DATABASE_URL: postgresql+psycopg://ai_hub_platform:${AI_HUB_PLATFORM_DB_PASSWORD:?Set AI_HUB_PLATFORM_DB_PASSWORD in .env}@postgres:5432/platform_db
       AI_HUB_OIDC_ISSUER: ${AI_HUB_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub/}
       AI_HUB_OIDC_AUDIENCE: ${AI_HUB_OIDC_AUDIENCE:-ai-hub-platform}
-      AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS: ${AI_HUB_AUTHORIZATION_CACHE_TTL_SECONDS:-60}
       AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS: ${AI_HUB_OIDC_JWKS_CACHE_TTL_SECONDS:-300}
       AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS: ${AI_HUB_OIDC_JWKS_STALE_TTL_SECONDS:-3600}
       AI_HUB_PORTAL_OIDC_ISSUER: ${AI_HUB_PORTAL_OIDC_ISSUER:-http://auth.localhost:8088/application/o/ai-hub-portal/}
       AI_HUB_PORTAL_OIDC_AUDIENCE: ${AI_HUB_PORTAL_OIDC_AUDIENCE:-ai-hub-portal}
       AI_HUB_PORTAL_OIDC_CLIENT_ID: ${AI_HUB_PORTAL_OIDC_CLIENT_ID:-ai-hub-portal}
       AI_HUB_PORTAL_OIDC_CLIENT_SECRET: ${AI_HUB_PORTAL_OIDC_CLIENT_SECRET:?Set AI_HUB_PORTAL_OIDC_CLIENT_SECRET in .env}
-      AI_HUB_PORTAL_OIDC_REDIRECT_URI: ${AI_HUB_PORTAL_OIDC_REDIRECT_URI:-http://platform.localhost:8088/auth/callback}
-      AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI: ${AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI:-http://platform.localhost:8088/}
       AI_HUB_PORTAL_OIDC_REDIRECT_URIS: ${AI_HUB_PORTAL_OIDC_REDIRECT_URIS:-}
       AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS: ${AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS:-}
-      AI_HUB_PLATFORM_ORIGINS: ${AI_HUB_PLATFORM_ORIGINS:-}
+      AI_HUB_PLATFORM_ORIGINS: ${AI_HUB_PLATFORM_ORIGINS:-http://platform.localhost:8088}
       AI_HUB_PLATFORM_DEFAULT_ORIGIN: ${AI_HUB_PLATFORM_DEFAULT_ORIGIN:-}
       AI_HUB_PORTAL_SESSION_TTL_SECONDS: ${AI_HUB_PORTAL_SESSION_TTL_SECONDS:-900}
       AI_HUB_AUTHENTIK_API_URL: ${AI_HUB_AUTHENTIK_API_URL:-http://authentik-server:9000/api/v3}
@@ -148,23 +144,15 @@ services:
       AI_HUB_PUBLIC_ASSET_ROOT: ${AI_HUB_PUBLIC_ASSET_ROOT:-/workspace/public-assets}
       AI_HUB_PUBLIC_PLATFORM_BASE_URL: ${AI_HUB_PUBLIC_PLATFORM_BASE_URL:-http://platform.localhost:8088}
       AI_HUB_PUBLIC_IDENTITY_BASE_URL: ${AI_HUB_PUBLIC_IDENTITY_BASE_URL:-http://auth.localhost:8088}
-      AI_HUB_REFERENCE_APPLICATION_ENABLED: ${AI_HUB_REFERENCE_APPLICATION_ENABLED:-true}
-      AI_HUB_SANDBOX_APPLICATION_ID: ${AI_HUB_SANDBOX_APPLICATION_ID:-standalone-example}
-      AI_HUB_SANDBOX_USER_SUBJECT: ${AI_HUB_SANDBOX_USER_SUBJECT:-ai-hub-demo-user}
-      AI_HUB_STANDALONE_PORTAL_URL: ${AI_HUB_STANDALONE_PORTAL_URL:-http://app.localhost:8088/}
-      AI_HUB_STANDALONE_API_BASE_URL: ${AI_HUB_STANDALONE_API_BASE_URL:-http://app.localhost:8088/api/v1}
-      AI_HUB_STANDALONE_HEALTH_URL: ${AI_HUB_STANDALONE_HEALTH_URL:-http://app.localhost:8088/health/live}
-      AI_HUB_STANDALONE_OIDC_REDIRECT_URI: ${AI_HUB_STANDALONE_OIDC_REDIRECT_URI:-http://app.localhost:8088/auth/callback}
       AI_HUB_MONITOR_TOKEN: ${AI_HUB_MONITOR_TOKEN:?Set AI_HUB_MONITOR_TOKEN in .env}
       AI_HUB_PRODUCTION_TARGETS_PATH: ${AI_HUB_PRODUCTION_TARGETS_PATH:-deploy/operations/production-targets.json}
       AI_HUB_RAW_DATABASE_URL: postgresql+psycopg://ai_hub_raw:${AI_HUB_RAW_DB_PASSWORD:?Set AI_HUB_RAW_DB_PASSWORD in .env}@postgres:5432/platform_db
       AI_HUB_OIDC_CLIENT_ID: ${AI_HUB_OIDC_CLIENT_ID:-ai-hub-platform}
       AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
       AI_HUB_DATA_INGEST_PUSH_ENABLED: ${AI_HUB_DATA_INGEST_PUSH_ENABLED:-false}
-      AI_HUB_INGEST_PULL_CONTRACT_ENFORCEMENT_ENABLED: ${AI_HUB_INGEST_PULL_CONTRACT_ENFORCEMENT_ENABLED:-false}
     healthcheck:
       # Gate dependents on readiness, not liveness: /health/ready only reports
-      # OK once the bootstrap credential reconciliation has produced a usable
+      # OK once the core database is available.
       # provider binding, so dependent services never start against a platform
       # that would reject their tokens with invalid_issuer.
       # The start window must cover Authentik blueprint lag after authentik-server
@@ -209,7 +197,7 @@ services:
     restart: unless-stopped
 
   standalone-migrate:
-    profiles: *core-profiles
+    profiles: [reference-app]
     image: "${STANDALONE_APP_IMAGE_REF:-ai-hub-standalone-example:local}"
     build:
       context: ..
@@ -228,7 +216,7 @@ services:
 
   standalone-app:
     <<: *standalone-app-common
-    profiles: *core-profiles
+    profiles: [reference-app]
     environment:
       <<: *standalone-app-environment
       STANDALONE_INTEGRATION_CAPABILITIES: API_CLIENT,DATA_INGEST
@@ -305,6 +293,7 @@ services:
     command: worker
     environment:
       <<: *authentik-environment
+      AI_HUB_PLATFORM_DEFAULT_ORIGIN: ${AI_HUB_PLATFORM_DEFAULT_ORIGIN:-http://platform.localhost:8088}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@ai-hub.local}
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?Set AUTHENTIK_BOOTSTRAP_PASSWORD in .env}
       AI_HUB_OIDC_CLIENT_SECRET: ${AI_HUB_OIDC_CLIENT_SECRET:?Set AI_HUB_OIDC_CLIENT_SECRET in .env}
@@ -312,8 +301,6 @@ services:
       AI_HUB_UAT_USER_PASSWORD: ${AI_HUB_UAT_USER_PASSWORD:?Set AI_HUB_UAT_USER_PASSWORD in .env}
       AI_HUB_INGEST_OPERATOR_PASSWORD: ${AI_HUB_INGEST_OPERATOR_PASSWORD:?Set AI_HUB_INGEST_OPERATOR_PASSWORD in .env}
       AI_HUB_PORTAL_OIDC_CLIENT_SECRET: ${AI_HUB_PORTAL_OIDC_CLIENT_SECRET:?Set AI_HUB_PORTAL_OIDC_CLIENT_SECRET in .env}
-      AI_HUB_PORTAL_OIDC_REDIRECT_URI: ${AI_HUB_PORTAL_OIDC_REDIRECT_URI:-http://platform.localhost:8088/auth/callback}
-      AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI: ${AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI:-http://platform.localhost:8088/}
       AI_HUB_PORTAL_OIDC_REDIRECT_URIS: ${AI_HUB_PORTAL_OIDC_REDIRECT_URIS:-}
       AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS: ${AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS:-}
       AI_HUB_AUTHENTIK_API_TOKEN: ${AI_HUB_AUTHENTIK_API_TOKEN:?Set AI_HUB_AUTHENTIK_API_TOKEN in .env}
@@ -364,8 +351,6 @@ services:
         condition: service_healthy
       portal:
         condition: service_healthy
-      standalone-app:
-        condition: service_healthy
     volumes:
       - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
       - ./traefik/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
@@ -400,7 +385,6 @@ services:
       AI_HUB_HTTP_TIMEOUT_SECONDS: ${AI_HUB_INGEST_HTTP_TIMEOUT_SECONDS:-30}
       AI_HUB_MAX_CONCURRENT_SOURCES: ${AI_HUB_INGEST_MAX_CONCURRENT_SOURCES:-4}
       AI_HUB_MAX_CONCURRENT_PER_APPLICATION: ${AI_HUB_INGEST_MAX_CONCURRENT_PER_APPLICATION:-2}
-      AI_HUB_INGEST_PULL_CONTRACT_ENFORCEMENT_ENABLED: ${AI_HUB_INGEST_PULL_CONTRACT_ENFORCEMENT_ENABLED:-false}
     depends_on:
       platform-raw-migrate:
         condition: service_completed_successfully

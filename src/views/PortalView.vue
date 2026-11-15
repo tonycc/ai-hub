@@ -21,10 +21,10 @@ const operationsSummary = ref(null)
 const operationsError = ref(null)
 const operationsLoading = ref(false)
 const canReadOperations = computed(() => session.hasPermission('platform.operations.read'))
-const isPlatformUser = computed(() => session.hasPermission('platform.application.read'))
+const canReadApplications = computed(() => session.hasPermission('platform.application.read'))
 
 async function loadApplications() {
-  if (!isPlatformUser.value) return
+  if (!canReadApplications.value) return
   applicationsLoading.value = true
   applicationsError.value = null
   try {
@@ -40,7 +40,7 @@ async function loadMyApplications() {
   myAppsLoading.value = true
   myAppsError.value = null
   try {
-    myApps.value = (await apiRequest('my-applications')).items
+    myApps.value = (await apiRequest('application-entries')).items
   } catch (error) {
     myAppsError.value = error
   } finally {
@@ -70,13 +70,16 @@ const operationsState = computed(() => {
   if (operationsLoading.value) return 'loading'
   if (operationsError.value) return 'error'
   if (!operationsSummary.value) return 'unavailable'
-  return operationsSummary.value.overall_status === 'HEALTHY' ? 'healthy' : 'degraded'
+  if (operationsSummary.value.overall_status === 'DEGRADED') return 'degraded'
+  const entries = [...operationsSummary.value.application_entries, ...operationsSummary.value.data_source_entries, ...operationsSummary.value.sync_freshness_entries]
+  return entries.some((entry) => entry.status === 'UNKNOWN') ? 'unknown' : 'healthy'
 })
 const operationsLabel = computed(() => ({
   loading: '加载中',
   error: '不可用',
   unavailable: '暂无数据',
   healthy: '正常',
+  unknown: '待确认',
   degraded: '降级',
 }[operationsState.value]))
 const operationsHint = computed(() => {
@@ -90,17 +93,15 @@ const operationsTone = computed(() => ({
   error: 'orange',
   unavailable: 'blue',
   healthy: 'blue',
+  unknown: 'orange',
   degraded: 'orange',
 }[operationsState.value]))
 
 const platformEntries = [
   { name: '应用中心', description: '登记环境、入口、回调、能力和版本', path: '/applications', icon: 'Grid', color: '#416f86', permission: 'platform.application.read' },
   { name: '用户与组织', description: '管理身份映射、组织和账号状态', path: '/platform/identity', icon: 'UserFilled', color: '#527a64', permission: 'platform.identity.read' },
-  { name: '权限与安全', description: '管理角色、权限点、权限范围和数据范围', path: '/platform/permissions', icon: 'Lock', color: '#735f84', permission: 'platform.authorization.read' },
-  { name: '开发者中心', description: '接入文档、契约、示例与沙箱参数', path: '/platform/developer', icon: 'Tools', color: '#826846', permission: 'platform.developer.read' },
   { name: '运维中心', description: '应用入口、数据来源和同步新鲜度诊断', path: '/platform/operations', icon: 'Monitor', color: '#4a7a8c', permission: 'platform.operations.read' },
   { name: '数据接入', description: '来源、契约、认证与推送接入', path: '/platform/ingest', icon: 'Coin', color: '#416f86', permission: 'platform.ingest.read' },
-  { name: '平台配置', description: '只读生产目标、保留策略与责任路由', path: '/platform/settings', icon: 'Setting', color: '#6b7a8c', permission: 'platform.operations.read' },
 ]
 const visiblePlatformEntries = computed(() => platformEntries.filter((entry) => session.hasPermission(entry.permission)))
 
@@ -121,16 +122,16 @@ onMounted(() => {
     <PageHeader
       eyebrow="AI HUB PLATFORM"
       title="平台控制台"
-      description="管理应用接入、身份权限、通知审计和平台运行状态。"
+      description="管理应用接入、统一身份、数据接入、审计和运行状态。"
     />
 
     <div class="metric-grid page-section">
-      <template v-if="isPlatformUser">
+      <template v-if="canReadApplications">
         <MetricCard label="已登记应用" :value="registeredApps.length" unit="个" hint="当前权限范围内" icon="Grid" tone="blue" />
         <MetricCard label="运行中应用" :value="activeApps.length" unit="个" hint="状态为 ACTIVE" icon="CircleCheck" tone="green" />
       </template>
       <template v-else>
-        <MetricCard label="我的应用" :value="myApps.length" unit="个" hint="有权限访问的应用" icon="Grid" tone="green" />
+        <MetricCard label="应用入口" :value="myApps.length" unit="个" hint="已登记的活动应用入口" icon="Grid" tone="green" />
       </template>
       <MetricCard v-if="canReadOperations" label="健康应用入口" :value="operationsSummary ? `${healthyEntries}/${totalEntries}` : '—'" hint="最近一次健康检查" icon="Monitor" :tone="operationsState === 'healthy' ? 'green' : 'orange'" />
       <MetricCard v-if="canReadOperations" label="整体状态" :value="operationsLabel" :hint="operationsHint" icon="Flag" :tone="operationsTone" />
@@ -154,12 +155,12 @@ onMounted(() => {
       <el-button text type="primary" @click="router.push('/platform/operations')">查看运维中心<el-icon><ArrowRight /></el-icon></el-button>
     </section>
 
-    <section v-if="!isPlatformUser" class="page-section">
+    <section class="page-section">
       <div class="section-heading">
-        <div><h2>我的应用</h2><p>您有权限访问的业务系统</p></div>
+        <div><h2>应用入口</h2><p>业务权限由各应用在登录后判定</p></div>
       </div>
       <div class="application-grid">
-        <ApiState :loading="myAppsLoading" :error="myAppsError" :empty="!myApps.length" empty-text="您暂无应用访问权限" @retry="loadMyApplications">
+        <ApiState :loading="myAppsLoading" :error="myAppsError" :empty="!myApps.length" empty-text="暂无已登记的活动应用入口" @retry="loadMyApplications">
         <a v-for="app in myApps" :key="app.application_id" class="surface-panel application-card" :class="{ 'application-card--disabled': !app.portal_url }" :href="app.portal_url || undefined" :target="app.portal_url ? '_blank' : undefined" :rel="app.portal_url ? 'noopener noreferrer' : undefined" :aria-disabled="!app.portal_url">
           <span style="--app-color: #527a64"><el-icon><Connection /></el-icon></span>
           <div><strong>{{ app.name }}</strong><small>{{ app.description }}</small></div>
@@ -172,7 +173,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="page-section">
+    <section v-if="visiblePlatformEntries.length" class="page-section">
       <div class="section-heading">
         <div><h2>管理入口</h2><p>按当前角色权限显示</p></div>
       </div>
@@ -185,7 +186,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section v-if="isPlatformUser" class="page-section">
+    <section v-if="canReadApplications" class="page-section">
       <div class="section-heading">
         <div><h2>已登记应用</h2><p>点击应用查看详情、环境和密钥</p></div>
         <el-button text @click="router.push('/applications')">应用中心<el-icon><ArrowRight /></el-icon></el-button>

@@ -9,6 +9,7 @@ import { apiRequest, downloadAsset } from '../services/platformApi'
 const ASSET_LABELS = {
   'agent-integration': 'Agent 接入索引',
   'integration-guide': '独立应用接入指南',
+  'identity-authorization-boundary': '身份与业务授权边界',
   'platform-openapi': 'Platform API OpenAPI',
   'api-only-python': 'API-only 快速入门',
   'data-read-python': '汇聚数据读取',
@@ -17,7 +18,7 @@ const ASSET_LABELS = {
 
 const ASSET_SCENARIOS = {
   'agent-integration': 'Coding agent 固定阅读顺序与检查清单',
-  'api-only-python': '首次接入：登录、权限、通知',
+  'api-only-python': '服务端接入：身份与应用信息',
   'data-read-python': '读取平台汇聚的业务数据',
   'data-ingest-evidence': '启用 DATA_INGEST 后提交认证证据',
 }
@@ -25,7 +26,6 @@ const ASSET_SCENARIOS = {
 const loading = ref(false)
 const error = ref(null)
 const catalog = ref(null)
-const sandbox = ref(null)
 const viewerVisible = ref(false)
 const viewerAsset = ref(null)
 
@@ -49,26 +49,12 @@ const resources = computed(() => {
     }))
 })
 
-const envSnippet = computed(() => {
-  if (!sandbox.value?.available) return ''
-  const s = sandbox.value
-  return [
-    `PLATFORM_BASE_URL=${s.platform_base_url}`,
-    `OIDC_ISSUER=${s.oidc_issuer}`,
-    `OIDC_AUDIENCE=${s.oidc_audience}`,
-    `APPLICATION_ID=${s.application_id}`,
-    `CLIENT_SECRET=在应用中心一次性领取`,
-  ].join('\n')
-})
 
 async function load() {
   loading.value = true
   error.value = null
   try {
-    ;[catalog.value, sandbox.value] = await Promise.all([
-      apiRequest('developer/catalog'),
-      apiRequest('developer/sandbox'),
-    ])
+    catalog.value = await apiRequest('developer/catalog')
   } catch (caught) {
     error.value = caught
   } finally {
@@ -105,8 +91,8 @@ onMounted(load)
 <template>
   <div class="page-shell">
     <PageHeader
-      title="开发者中心"
-      description="接入文档、契约与本地沙箱参数。默认从 API-only 开始；需要平台拉取业务数据时再启用 DATA_INGEST。"
+      title="接入规范"
+      description="接入文档、API 契约和示例代码。按需启用身份登录、员工同步或数据接入。"
     />
 
     <ApiState :loading="loading" :error="error" :empty="!catalog" @retry="load">
@@ -135,30 +121,6 @@ onMounted(load)
             </el-table-column>
           </el-table>
         </section>
-
-        <section v-if="sandbox?.available" class="surface-panel page-section sandbox-panel">
-          <div class="section-heading">
-            <h2>本地沙箱</h2>
-            <p>非敏感参数可直接写入 <code>.env</code>；客户端密钥请到应用中心创建环境凭据后一次性保存。</p>
-          </div>
-          <div class="sandbox-toolbar">
-            <el-button size="small" plain @click="copy(envSnippet, '环境变量已复制')">复制环境变量</el-button>
-            <span v-if="sandbox.default_capabilities?.length" class="sandbox-caps">
-              默认能力
-              <el-tag v-for="c in sandbox.default_capabilities" :key="c" size="small">{{ c }}</el-tag>
-            </span>
-          </div>
-          <pre class="env-snippet">{{ envSnippet }}</pre>
-        </section>
-        <el-alert
-          v-else-if="sandbox"
-          class="page-section"
-          type="info"
-          :closable="false"
-          show-icon
-          title="当前部署未启用参考沙箱"
-          :description="sandbox.message"
-        />
 
         <section class="page-section">
           <el-collapse class="meta-collapse">

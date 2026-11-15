@@ -27,14 +27,12 @@ from ai_hub_platform.modules.ingest.config_store import IngestConfigStore
 from ai_hub_platform.modules.ingest.contract import (
     IngestContractValidator,
     RegisteredContract,
-    audit_summary_payload,
     load_active_contract,
 )
 from ai_hub_platform.modules.ingest.export_client import (
     EXPORT_TOKEN_SCOPES,
     ExportClient,
     ExportClientError,
-    ExportPage,
     records_to_ingest,
 )
 from ai_hub_platform.modules.ingest.reconcile import IngestReconcileService
@@ -59,7 +57,6 @@ class SchedulerMetrics:
     records_loaded: int = 0
     full_syncs: int = 0
     incremental_syncs: int = 0
-    contract_audit_issues: int = 0
     reconcile_started: int = 0
     reconcile_succeeded: int = 0
     reconcile_failed: int = 0
@@ -74,7 +71,6 @@ class SchedulerMetrics:
             "records_loaded": self.records_loaded,
             "full_syncs": self.full_syncs,
             "incremental_syncs": self.incremental_syncs,
-            "contract_audit_issues": self.contract_audit_issues,
             "reconcile_started": self.reconcile_started,
             "reconcile_succeeded": self.reconcile_succeeded,
             "reconcile_failed": self.reconcile_failed,
@@ -208,9 +204,7 @@ class IngestScheduler:
         async with self._global_sem:
             async with self._app_semaphore(source.source_application_id):
                 try:
-                    result = await self._sync_source_unlocked(
-                        source, force_full=force_full
-                    )
+                    result = await self._sync_source_unlocked(source, force_full=force_full)
                 except Exception as error:
                     self.metrics.sync_failed += 1
                     await self._mark_failure(source, error)
@@ -258,9 +252,7 @@ class IngestScheduler:
 
         use_full = force_full if force_full is not None else last_version == 0
         since_version = (
-            0
-            if use_full
-            else compute_since_version(last_version, source.lookback_versions)
+            0 if use_full else compute_since_version(last_version, source.lookback_versions)
         )
 
         if use_full:
@@ -314,31 +306,6 @@ class IngestScheduler:
             except AttributeError:
                 return None
 
-    async def _validate_pull_page(
-        self, source: IngestSourceConfig, page: ExportPage
-    ) -> None:
-        if self.contract_validator is None:
-            return
-        contract = await self._lookup_contract(source, page.payload_contract_version)
-        self.contract_validator.validate_records(
-            records_to_ingest(page.records),
-            source=source,
-            payload_contract_version=page.payload_contract_version,
-            contract=contract,
-            payload_max_bytes=self.payload_max_bytes,
-            pull_enforcement_gate=self.settings.ingest_pull_contract_enforcement_enabled,
-        )
-
-    async def _audit_pull_page(
-        self, source: IngestSourceConfig, page: ExportPage
-    ) -> None:
-        # Pre-lock: collect audit issues only. Cached ENFORCE must not reject a
-        # page after operators have already reverted the source to AUDIT_ONLY.
-        await self._validate_pull_page(
-            source.model_copy(update={"contract_validation_mode": "AUDIT_ONLY"}),
-            page,
-        )
-
     async def _require_locked_pull_source(
         self, session: AsyncSession, source: IngestSourceConfig
     ) -> IngestSourceConfig:
@@ -347,11 +314,7 @@ class IngestScheduler:
             source_application_id=source.source_application_id,
             object_type=source.object_type,
         )
-        if (
-            row is None
-            or not row.config.enabled
-            or row.config.transport_mode != "PULL_EXPORT"
-        ):
+        if row is None or not row.config.enabled or row.config.transport_mode != "PULL_EXPORT":
             raise ExportClientError(
                 f"ingest source {source.source_application_id}/{source.object_type} "
                 "is no longer an enabled PULL_EXPORT source"
@@ -364,26 +327,19 @@ class IngestScheduler:
         records: list[IngestRecord],
         payload_contract_version: str,
         session: AsyncSession,
-    ) -> tuple[str | None, dict[str, Any] | None]:
-        contract = await self._lookup_contract(
-            source, payload_contract_version, session=session
-        )
+    ) -> str | None:
+        contract = await self._lookup_contract(source, payload_contract_version, session=session)
         fingerprint = contract.schema_fingerprint if contract is not None else None
-        audit_summary: dict[str, Any] | None = None
         if self.contract_validator is None:
-            return fingerprint, audit_summary
-        result = self.contract_validator.validate_records(
+            return fingerprint
+        self.contract_validator.validate_records(
             records,
             source=source,
             payload_contract_version=payload_contract_version,
             contract=contract,
             payload_max_bytes=self.payload_max_bytes,
-            pull_enforcement_gate=self.settings.ingest_pull_contract_enforcement_enabled,
         )
-        if result.status == "audit" and result.issues:
-            audit_summary = audit_summary_payload(result.issues)
-            self.metrics.contract_audit_issues += len(result.issues)
-        return fingerprint, audit_summary
+        return fingerprint
 
     async def _run_full_sync(
         self,
@@ -398,7 +354,6 @@ class IngestScheduler:
             since_version=since_version,
             limit=source.page_limit,
             mode="full",
-            on_page=lambda page: self._audit_pull_page(source, page),
         )
         self.metrics.pages_fetched += 1
         ingest_records = records_to_ingest(records)
@@ -410,7 +365,7 @@ class IngestScheduler:
                     source.object_type,
                 )
                 locked = await self._require_locked_pull_source(session, source)
-                fingerprint, audit_summary = await self._validate_locked_records(
+                fingerprint = await self._validate_locked_records(
                     locked, ingest_records, contract, session
                 )
                 loaded = await self.service.load_batch(
@@ -423,7 +378,6 @@ class IngestScheduler:
                     payload_contract_version=contract,
                     from_version=since_version,
                     schema_fingerprint=fingerprint,
-                    audit_summary=audit_summary,
                 )
                 await self.service.advance_cursor(
                     session,
@@ -471,7 +425,6 @@ class IngestScheduler:
                     f"got {page.object_type}"
                 )
             ingest_records = records_to_ingest(page.records)
-            await self._audit_pull_page(source, page)
             async with self.sessions() as session:
                 async with session.begin():
                     await lock_ingest_source(
@@ -480,7 +433,7 @@ class IngestScheduler:
                         source.object_type,
                     )
                     locked = await self._require_locked_pull_source(session, source)
-                    fingerprint, audit_summary = await self._validate_locked_records(
+                    fingerprint = await self._validate_locked_records(
                         locked, ingest_records, page.payload_contract_version, session
                     )
                     loaded = await self.service.load_batch(
@@ -493,7 +446,6 @@ class IngestScheduler:
                         payload_contract_version=page.payload_contract_version,
                         from_version=cursor,
                         schema_fingerprint=fingerprint,
-                        audit_summary=audit_summary,
                     )
                     await self.service.advance_cursor(
                         session,
@@ -509,14 +461,10 @@ class IngestScheduler:
             if not page.has_more:
                 break
             if not page.records:
-                raise ExportClientError(
-                    "export page claimed has_more without returning records"
-                )
+                raise ExportClientError("export page claimed has_more without returning records")
             next_since = max(record.version for record in page.records)
             if next_since <= cursor:
-                raise ExportClientError(
-                    "export pagination did not advance since_version"
-                )
+                raise ExportClientError("export pagination did not advance since_version")
             cursor = next_since
         return {
             "source_application_id": source.source_application_id,
@@ -599,15 +547,10 @@ class IngestScheduler:
             tasks = [asyncio.create_task(self._run_due(runtime)) for runtime in due]
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-            if (
-                self._scheduled_reconcile_enabled
-                and self._next_reconcile_at <= self._clock()
-            ):
+            if self._scheduled_reconcile_enabled and self._next_reconcile_at <= self._clock():
                 await self._run_scheduled_reconcile()
             try:
-                await asyncio.wait_for(
-                    stop.wait(), timeout=self.settings.tick_interval_seconds
-                )
+                await asyncio.wait_for(stop.wait(), timeout=self.settings.tick_interval_seconds)
             except TimeoutError:
                 pass
 
@@ -687,9 +630,7 @@ class IngestScheduler:
                 )
             )
         finally:
-            self._next_reconcile_at = (
-                self._clock() + self._reconcile_interval_hours * 60 * 60
-            )
+            self._next_reconcile_at = self._clock() + self._reconcile_interval_hours * 60 * 60
 
 
 async def create_runtime_scheduler(

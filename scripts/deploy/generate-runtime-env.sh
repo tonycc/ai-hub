@@ -30,7 +30,6 @@ while (($# > 0)); do
   case "$1" in
     --platform-host) PLATFORM_HOST="${2:?}"; shift 2 ;;
     --auth-host) AUTH_HOST="${2:?}"; shift 2 ;;
-    --app-host) : "${2:?}"; shift 2 ;; # Deprecated; accepted for old automation.
     --output) OUTPUT="${2:?}"; shift 2 ;;
     --force) FORCE=1; shift ;;
     -h | --help) usage; exit 0 ;;
@@ -65,18 +64,19 @@ cat >"${OUTPUT}" <<EOF
 # Encrypt with SOPS+age before committing; do NOT commit this plaintext file.
 AI_HUB_ENVIRONMENT=production
 AI_HUB_APPLICATION_ID=ai-hub-platform
-AI_HUB_REFERENCE_APPLICATION_ENABLED=false
 AI_HUB_PLATFORM_HOST=${PLATFORM_HOST}
 AI_HUB_AUTH_HOST=${AUTH_HOST}
 
 # Public endpoints (HTTPS via Traefik ACME)
+AI_HUB_PLATFORM_ORIGINS=https://${PLATFORM_HOST}
+AI_HUB_PLATFORM_DEFAULT_ORIGIN=https://${PLATFORM_HOST}
+AI_HUB_PORTAL_OIDC_REDIRECT_URIS=https://${PLATFORM_HOST}/auth/callback
+AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URIS=https://${PLATFORM_HOST}/
 AI_HUB_OIDC_ISSUER=https://${AUTH_HOST}/application/o/ai-hub/
 AI_HUB_OIDC_AUDIENCE=ai-hub-platform
 AI_HUB_PORTAL_OIDC_ISSUER=https://${AUTH_HOST}/application/o/ai-hub-portal/
 AI_HUB_PORTAL_OIDC_AUDIENCE=ai-hub-portal
 AI_HUB_PORTAL_OIDC_CLIENT_ID=ai-hub-portal
-AI_HUB_PORTAL_OIDC_REDIRECT_URI=https://${PLATFORM_HOST}/auth/callback
-AI_HUB_PORTAL_OIDC_LOGOUT_REDIRECT_URI=https://${PLATFORM_HOST}/
 # Admin API is reached cluster-internally: routing it through the public
 # Traefik address would create a startup cycle (Traefik waits for platform-api
 # to become ready, while readiness waits for bootstrap reconciliation against
@@ -99,10 +99,6 @@ STANDALONE_OIDC_AUDIENCE=standalone-example
 STANDALONE_OIDC_CLIENT_ID=standalone-example
 STANDALONE_OIDC_REDIRECT_URI=https://reference.invalid/auth/callback
 STANDALONE_PORTAL_URL=https://reference.invalid/
-AI_HUB_STANDALONE_PORTAL_URL=https://reference.invalid/
-AI_HUB_STANDALONE_API_BASE_URL=https://reference.invalid/api/v1
-AI_HUB_STANDALONE_HEALTH_URL=https://reference.invalid/health/live
-AI_HUB_STANDALONE_OIDC_REDIRECT_URI=https://reference.invalid/auth/callback
 
 # Generated secrets (URI-unreserved; embedded in connection URLs)
 POSTGRES_SUPERUSER_PASSWORD=$(gen_secret 48)

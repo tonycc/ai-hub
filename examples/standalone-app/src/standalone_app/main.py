@@ -5,20 +5,14 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-import httpx
 import sqlalchemy as sa
 from ai_hub_sdk import (
     EXPORT_SCOPE,
     AiHubClient,
-    AuthorizationCache,
-    AuthorizationDecisionRequest,
-    AuthorizationUnavailableError,
     ExportPage,
-    NotificationRequest,
     OAuthProtocolError,
     OidcClient,
     OidcTokenValidator,
-    PermissionSnapshot,
     TokenValidationError,
     VerifiedToken,
     require_export_scope,
@@ -61,7 +55,6 @@ class SessionResponse(BaseModel):
     authenticated: bool
     subject: str | None = None
     display_name: str | None = None
-    authorization_version: int | None = None
 
 
 class RecordResponse(BaseModel):
@@ -74,12 +67,6 @@ class RecordResponse(BaseModel):
 
 class RecordUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-
-
-class TestNotificationResponse(BaseModel):
-    notification_id: UUID
-    status: str
-    delivery_reference: str | None
 
 
 router = APIRouter()
@@ -95,10 +82,6 @@ def oidc_client(request: Request) -> OidcClient:
 
 def token_validator(request: Request) -> OidcTokenValidator:
     return cast(OidcTokenValidator, request.app.state.token_validator)
-
-
-def authorization_cache(request: Request) -> AuthorizationCache:
-    return cast(AuthorizationCache, request.app.state.authorization_cache)
 
 
 def session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
@@ -128,34 +111,6 @@ async def current_token(
         )
     except (PermissionError, TokenValidationError) as error:
         raise PermissionError("User session is invalid or expired") from error
-
-
-async def permission_snapshot(
-    request: Request,
-    token: Annotated[VerifiedToken, Depends(current_token)],
-    client: Annotated[AiHubClient, Depends(platform_client)],
-    cache: Annotated[AuthorizationCache, Depends(authorization_cache)],
-    *,
-    risk: Literal["low", "high"],
-) -> PermissionSnapshot:
-    settings: Settings = request.app.state.settings
-    access_token = session_access_token(request)
-
-    async def loader() -> PermissionSnapshot:
-        return await client.permissions(
-            settings.application_id,
-            access_token=access_token,
-            request_id=request_id_from(request),
-            trace_id=trace_id_from(request),
-        )
-
-    return await cache.get(
-        subject=token.subject,
-        application_id=settings.application_id,
-        expected_version=token.authorization_version,
-        risk=risk,
-        loader=loader,
-    )
 
 
 @router.get("/health/live", response_model=HealthResponse, tags=["health"])
@@ -193,7 +148,6 @@ async def login(
             "email",
             "ai_hub.identity",
             "platform.me.read",
-            "platform.authorization.decide",
             "platform.application.read",
         ),
     )
@@ -222,7 +176,7 @@ async def callback(
             required_scopes=("platform.me.read",),
             allowed_actor_types=("user",),
         )
-    except (OAuthProtocolError, TokenValidationError):
+    except OAuthProtocolError, TokenValidationError:
         return RedirectResponse("/auth/error?code=token_exchange_failed", status_code=302)
     request.session.clear()
     request.session["access_token"] = token.access_token
@@ -245,7 +199,6 @@ async def session_info(
         authenticated=True,
         subject=token.subject,
         display_name=token.display_name,
-        authorization_version=token.authorization_version,
     )
 
 
@@ -255,37 +208,23 @@ async def get_record(
     request: Request,
     token: Annotated[VerifiedToken, Depends(current_token)],
 ) -> RecordResponse:
-    snapshot = await permission_snapshot(
-        request,
-        token,
-        platform_client(request),
-        authorization_cache(request),
-        risk="low",
-    )
-    if "example.record.read" not in snapshot.permissions:
-        log_security_event(
-            request,
-            action="example.record.read",
-            result="DENIED",
-            actor_id=token.subject,
-            target_type="record",
-            target_id=str(record_id),
-            reason="permission_missing",
-        )
-        raise PermissionError("Record read permission is required")
     async with session_factory(request)() as session:
         row = (
-            await session.execute(
-                sa.text(
-                    """
+            (
+                await session.execute(
+                    sa.text(
+                        """
                     SELECT id, name, state, owner_subject, aggregate_version
                     FROM app.example_record
                     WHERE id = :record_id AND state <> 'DELETED'
                     """
-                ),
-                {"record_id": record_id},
+                    ),
+                    {"record_id": record_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
     if row is None:
         raise LookupError("Record was not found")
     if row["owner_subject"] != token.subject:
@@ -323,51 +262,7 @@ async def update_record(
     request: Request,
     token: Annotated[VerifiedToken, Depends(current_token)],
 ) -> RecordResponse:
-    snapshot = await permission_snapshot(
-        request,
-        token,
-        platform_client(request),
-        authorization_cache(request),
-        risk="high",
-    )
-    if "example.record.write" not in snapshot.permissions:
-        log_security_event(
-            request,
-            action="example.record.write",
-            result="DENIED",
-            actor_id=token.subject,
-            target_type="record",
-            target_id=str(record_id),
-            reason="permission_missing",
-        )
-        raise PermissionError("Record write permission is required")
     settings: Settings = request.app.state.settings
-    try:
-        decision = await platform_client(request).authorization_decision(
-            AuthorizationDecisionRequest(
-                application_id=settings.application_id,
-                permission="example.record.write",
-                risk="high",
-            ),
-            access_token=session_access_token(request),
-            request_id=request_id_from(request),
-            trace_id=trace_id_from(request),
-        )
-    except httpx.HTTPError as error:
-        raise AuthorizationUnavailableError(
-            "Online authorization decision is unavailable"
-        ) from error
-    if not decision.allowed or decision.authorization_version != token.authorization_version:
-        log_security_event(
-            request,
-            action="example.record.write",
-            result="DENIED",
-            actor_id=token.subject,
-            target_type="record",
-            target_id=str(record_id),
-            reason="online_authorization_denied",
-        )
-        raise PermissionError("Online authorization decision denied the write")
     async with session_factory(request)() as session:
         mutation = await change_record(
             session,
@@ -411,33 +306,7 @@ async def remove_record(
     request: Request,
     token: Annotated[VerifiedToken, Depends(current_token)],
 ) -> RecordResponse:
-    snapshot = await permission_snapshot(
-        request,
-        token,
-        platform_client(request),
-        authorization_cache(request),
-        risk="high",
-    )
-    if "example.record.write" not in snapshot.permissions:
-        raise PermissionError("Record write permission is required")
     settings: Settings = request.app.state.settings
-    try:
-        decision = await platform_client(request).authorization_decision(
-            AuthorizationDecisionRequest(
-                application_id=settings.application_id,
-                permission="example.record.write",
-                risk="high",
-            ),
-            access_token=session_access_token(request),
-            request_id=request_id_from(request),
-            trace_id=trace_id_from(request),
-        )
-    except httpx.HTTPError as error:
-        raise AuthorizationUnavailableError(
-            "Online authorization decision is unavailable"
-        ) from error
-    if not decision.allowed or decision.authorization_version != token.authorization_version:
-        raise PermissionError("Online authorization decision denied the delete")
     async with session_factory(request)() as session:
         mutation = await delete_record(
             session,
@@ -523,58 +392,6 @@ async def ai_hub_export(
     return page
 
 
-@router.post(
-    "/api/v1/test-notifications",
-    response_model=TestNotificationResponse,
-    tags=["notifications"],
-)
-async def test_notification(
-    request: Request,
-    token: Annotated[VerifiedToken, Depends(current_token)],
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
-) -> TestNotificationResponse:
-    settings: Settings = request.app.state.settings
-    user = await platform_client(request).me(
-        settings.application_id,
-        access_token=session_access_token(request),
-        request_id=request_id_from(request),
-        trace_id=trace_id_from(request),
-    )
-    service_token = await oidc_client(request).client_credentials_token(
-        (
-            "openid",
-            "ai_hub.identity",
-            "platform.notification.request",
-        )
-    )
-    service_client = AiHubClient(
-        settings.platform_api_base_url,
-        token_provider=lambda: _constant_token(service_token),
-    )
-    try:
-        result = await service_client.create_notification(
-            NotificationRequest(
-                recipient_user_id=user.user_id,
-                subject="AI Hub M1 test notification",
-                body=f"OIDC service identity verified for {token.subject}",
-                idempotency_key=idempotency_key,
-            ),
-            request_id=request_id_from(request),
-            trace_id=trace_id_from(request),
-        )
-    finally:
-        await service_client.close()
-    return TestNotificationResponse(
-        notification_id=result.notification_id,
-        status=result.status,
-        delivery_reference=result.delivery_reference,
-    )
-
-
-async def _constant_token(token: str) -> str:
-    return token
-
-
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
 
@@ -596,9 +413,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.platform_client = platform
         application.state.oidc_client = oidc
         application.state.token_validator = validator
-        application.state.authorization_cache = AuthorizationCache(
-            stale_ttl_seconds=resolved_settings.authorization_cache_stale_ttl_seconds
-        )
+
         application.state.session_factory = async_sessionmaker(
             engine, class_=AsyncSession, expire_on_commit=False
         )
@@ -642,22 +457,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def permission_error_handler(request: Request, error: PermissionError) -> JSONResponse:
         return JSONResponse(
             status_code=403,
-            content=error_content(
-                request, error_code="access_denied", message=str(error)
-            ),
-        )
-
-    @application.exception_handler(AuthorizationUnavailableError)
-    async def authorization_unavailable_handler(
-        request: Request, error: AuthorizationUnavailableError
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=503,
-            content=error_content(
-                request,
-                error_code="authorization_unavailable",
-                message=str(error),
-            ),
+            content=error_content(request, error_code="access_denied", message=str(error)),
         )
 
     @application.exception_handler(LookupError)
@@ -683,7 +483,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     _ = (
         permission_error_handler,
-        authorization_unavailable_handler,
         lookup_error_handler,
         validation_error_handler,
     )
