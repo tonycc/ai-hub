@@ -1,0 +1,29 @@
+semantic_id: manufacturing.customer
+display_name: 客户
+description: 下单主体(渔具 OEM/ODM 场景多为海外品牌商 / 贸易商)
+domain: 销售
+authoritative_source_system: 鼎捷 ERP 客户主档
+keys:
+- customer_code
+properties:
+- name: customer_code
+  type: string
+  description: 客户编号
+  required: true
+- name: name
+  type: string
+  description: 客户名称
+- name: region
+  type: string
+  description: 区域 / 国家
+- name: currency
+  type: string
+  description: 结算币别
+- name: payment_days
+  type: int
+  description: 账期(天)
+- name: contact
+  type: string
+  description: 联系方式
+  sensitive: true
+  classification: confidential

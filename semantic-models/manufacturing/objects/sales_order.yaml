@@ -1,0 +1,53 @@
+semantic_id: manufacturing.sales_order
+display_name: 销售订单
+description: 外销订单;接单评审链的历史弹药(成交价与实际结果)
+domain: 销售
+authoritative_source_system: 鼎捷 ERP 订单单头 / 单身
+keys:
+- order_no
+properties:
+- name: order_no
+  type: string
+  description: 订单号
+  required: true
+- name: customer
+  type: ref
+  description: 客户
+  ref: manufacturing.customer
+- name: order_date
+  type: date
+  description: 订单日期
+- name: currency
+  type: string
+  description: 币别
+- name: total_amount
+  type: money
+  description: 订单总额
+- name: fx_rate
+  type: decimal
+  description: 订单汇率(交易币别→CNY;CNY 口径指标的折算依据)
+- name: trade_term
+  type: string
+  description: 贸易条款(FOB / EXW 等)
+- name: promised_ship_date
+  type: date
+  description: 承诺船期 / 交期
+- name: state
+  type: enum
+  description: 业务状态(源系统无现成状态列,由 binding derived 决策表派生)
+  enum_values:
+  - 草稿
+  - 已接单
+  - 生产中
+  - 部分出货
+  - 完全出货
+  - 已结案
+  - 已作废
+states:
+- 草稿
+- 已接单
+- 生产中
+- 部分出货
+- 完全出货
+- 已结案
+- 已作废

@@ -1,0 +1,27 @@
+semantic_id: manufacturing.sales_order_line
+display_name: 销售订单明细
+description: 订单行(品号 / 数量 / 单价)
+domain: 销售
+authoritative_source_system: 鼎捷 ERP 订单单身
+keys:
+- order_no
+- line_no
+properties:
+- name: order_no
+  type: string
+  description: 订单号
+  required: true
+- name: line_no
+  type: string
+  description: 行号
+  required: true
+- name: material
+  type: ref
+  description: 品号
+  ref: manufacturing.material
+- name: quantity
+  type: decimal
+  description: 数量
+- name: unit_price
+  type: money
+  description: 单价

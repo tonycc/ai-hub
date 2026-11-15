@@ -10,3 +10,4 @@ modules =
     ai_hub_platform.modules.identity
     ai_hub_platform.modules.ingest
     ai_hub_platform.modules.audit
+    ai_hub_platform.modules.semantic

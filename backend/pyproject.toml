@@ -14,6 +14,7 @@ dependencies = [
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.10,<3",
   "pyjwt[crypto]>=2.10,<3",
+  "pyyaml>=6,<7",
   "sqlalchemy[asyncio]>=2.0,<3",
   "uvicorn[standard]>=0.35,<1",
 ]
@@ -27,7 +28,6 @@ dev = [
   "pyright>=1.1.403",
   "pytest>=8.4",
   "pytest-asyncio>=1.0",
-  "pyyaml>=6,<7",
   "ruff>=0.12",
 ]
 
@@ -38,6 +38,7 @@ ai-hub-ingest-reconcile = "ai_hub_platform.cli:run_ingest_reconcile_cli"
 ai-hub-ingest-rebuild = "ai_hub_platform.cli:run_ingest_rebuild_cli"
 ai-hub-ingest-sync = "ai_hub_platform.cli:run_ingest_sync_cli"
 ai-hub-ingest-seed = "ai_hub_platform.cli:run_ingest_seed_cli"
+ai-hub-semantic-seed = "ai_hub_platform.cli:run_semantic_seed_cli"
 ai-hub-conformance-evidence-import = "ai_hub_platform.cli:run_conformance_evidence_import_cli"
 ai-hub-backup = "ai_hub_platform.operations.backup:main"
 ai-hub-monitor = "ai_hub_platform.operations.monitor:main"

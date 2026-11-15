@@ -1,0 +1,28 @@
+relations:
+- semantic_id: manufacturing.quotation_customer
+  display_name: 报价单 → 客户
+  source_object: manufacturing.quotation
+  target_object: manufacturing.customer
+  source_cardinality: 0..n
+  target_cardinality: '1'
+  source_property: customer
+- semantic_id: manufacturing.sales_order_customer
+  display_name: 销售订单 → 客户
+  source_object: manufacturing.sales_order
+  target_object: manufacturing.customer
+  source_cardinality: 0..n
+  target_cardinality: '1'
+  source_property: customer
+- semantic_id: manufacturing.sales_order_line_material
+  display_name: 销售订单明细 → 品号
+  source_object: manufacturing.sales_order_line
+  target_object: manufacturing.material
+  source_cardinality: 0..n
+  target_cardinality: '1'
+  source_property: material
+- semantic_id: manufacturing.sales_order_lines
+  display_name: 销售订单 → 订单明细
+  source_object: manufacturing.sales_order
+  target_object: manufacturing.sales_order_line
+  source_cardinality: '1'
+  target_cardinality: 1..n
