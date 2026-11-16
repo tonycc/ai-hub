@@ -58,7 +58,11 @@ m7_compose() {
     "$@"
 }
 
+m7_phase="initialising"
+m7_error_location=""
+
 m7_note() {
+  m7_phase=$1
   printf 'M7 runtime gate: %s\n' "$1"
 }
 
@@ -67,9 +71,46 @@ m7_fail() {
   exit 1
 }
 
+# Remember where a command failed under `set -e`; several assertions (a
+# `jq --exit-status` that evaluates to false, a `[[ ]]` test) exit silently.
+m7_record_error() {
+  m7_error_location="line $1 in ${FUNCNAME[1]:-main}: $2"
+}
+set -o errtrace
+trap 'm7_record_error "${LINENO}" "${BASH_COMMAND}"' ERR
+
+m7_dump_file() {
+  [[ -s "$1" ]] || return 0
+  printf -- '--- %s (last 100 lines, 20000 bytes max)\n' "${1#"${M7_WORK_DIR}"/}" >&2
+  tail -n 100 "$1" | head -c 20000 >&2 || true
+  printf '\n' >&2
+}
+
+m7_dump_failure_diagnostics() {
+  printf '::group::M7 failure diagnostics\n' >&2
+  printf 'Failed during phase: %s\n' "${m7_phase}" >&2
+  if [[ -n "${m7_error_location}" ]]; then
+    printf 'Last failing command: %s\n' "${m7_error_location}" >&2
+  fi
+  m7_diag_file=""
+  while IFS= read -r m7_diag_file; do
+    m7_dump_file "${m7_diag_file}"
+  done < <(find "${M7_WORK_DIR}" -type f \
+    \( -name '*.json' -o -name '*.stderr' -o -name '*.headers' \) \
+    ! -name 'ingest-sources.json' 2>/dev/null | sort | head -n 40)
+  m7_compose ps -a >&2 || true
+  m7_compose logs --no-color --timestamps --tail 200 \
+    platform-api standalone-app authentik-server authentik-worker traefik >&2 || true
+  printf '::endgroup::\n' >&2
+}
+
 m7_cleanup() {
   m7_exit_code=$?
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM ERR
+  set +o errtrace
+  if [[ "${m7_exit_code}" != "0" ]]; then
+    m7_dump_failure_diagnostics || true
+  fi
   if [[ "${M7_KEEP_ENV:-0}" == "1" ]]; then
     printf 'M7 runtime environment retained as project %s\n' "${M7_PROJECT_NAME}"
   else
